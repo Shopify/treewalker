@@ -1,0 +1,14 @@
+git_ref: rebuttal-neurips2026
+timestamp: 2026-07-24T19:40:59+00:00
+machine_type: c4a-highmem-16
+zone: us-central1-a
+cpu: Neoverse-V2
+Axion  CPU @ 3.0GHz
+rust: rustc 1.97.1 (8bab26f4f 2026-07-14)
+llvm: Ubuntu LLVM version 20.1.8
+lightgbm: v4.6.0 (source, cmake Release -march=native)
+xgboost: v3.2.0 (source, cmake Release -march=native)
+arch_label: arm
+bench_suite: rebuttal
+protocol: sweep_bench --grid scen + prepare_chunked.py --stage timing (E1+E2 rebuttal)
+seed: 42

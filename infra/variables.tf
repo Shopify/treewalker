@@ -1,0 +1,61 @@
+variable "project" {
+  description = "GCP project ID"
+  type        = string
+}
+
+variable "zone" {
+  description = "GCE zone for benchmark instances"
+  type        = string
+  default     = "us-central1-a"
+}
+
+variable "git_ref" {
+  description = "Git branch, tag, or SHA to benchmark"
+  type        = string
+  default     = "neurips2026"
+}
+
+variable "bench_suite" {
+  description = "Benchmark suite: 'paper' (factorial grid, --grid all) or 'rebuttal' (scenario-analysis + chunked-G runs only)"
+  type        = string
+  default     = "paper"
+}
+
+variable "expedia_parquet" {
+  description = "Path to expedia.parquet built by paper/experiments/scripts/fetch_expedia.py; required for bench_suite = \"paper\" (default: ../paper/experiments/data/expedia.parquet)"
+  type        = string
+  default     = ""
+}
+
+variable "network" {
+  description = "VPC network name"
+  type        = string
+  default     = "default"
+}
+
+variable "subnet" {
+  description = "Subnetwork for instances (must belong to var.network)"
+  type        = string
+  default     = "default"
+}
+
+variable "machines" {
+  description = "Map of machine configs to benchmark"
+  type = map(object({
+    machine_type = string
+    image        = string
+    role         = string # "trainer" (trains + uploads artifacts) or "benchmarker" (downloads + benchmarks)
+  }))
+  default = {
+    intel = {
+      machine_type = "c4-standard-32"
+      image        = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
+      role         = "trainer"
+    }
+    arm = {
+      machine_type = "c4a-highmem-16"
+      image        = "ubuntu-os-cloud/ubuntu-2404-lts-arm64"
+      role         = "benchmarker"
+    }
+  }
+}
