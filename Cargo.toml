@@ -1,0 +1,71 @@
+[package]
+name = "treewalker"
+version = "1.0.0"
+edition = "2024"
+description = "Grouped tree-ensemble inference via recursive partial evaluation"
+license = "MIT"
+
+[features]
+test-helpers = []  # expose internal precompute functions for integration tests
+quickscorer-bench = ["dep:quickscorer"]  # enable QuickScorer baseline in legacy sweep_bench CLI
+external-bench = ["dep:libloading", "dep:quickscorer"]  # all external baselines via C FFI + QuickScorer
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+simd-json = { version = "0.14", features = ["serde_impl"] }
+quickscorer = { git = "https://github.com/leomanne/quickscorer-rs.git", rev = "8314d03b5ef2d15385f8d0cd86d8f281d11b2d49", package = "quickscorer", optional = true }
+libloading = { version = "0.8", optional = true }
+rustc-hash = "2.1.2"
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+libc = "0.2"
+ndarray = "0.17"
+ndarray-npy = "0.10"
+
+[lints.rust]
+unsafe_code = "allow"              # required for prefetch intrinsics + unchecked hot path
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+# Intentional relaxations
+cast_possible_truncation = "allow"  # u64 → u32, usize → u16 are checked at parse time
+cast_precision_loss = "allow"       # f64 ↔ u32/usize for bitset offsets (by design)
+cast_sign_loss = "allow"            # i16 → usize for skip indices (always positive)
+cast_possible_wrap = "allow"        # usize → i16 checked by assertions
+missing_docs_in_private_items = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+cognitive_complexity = "allow"      # partial_eval is inherently complex
+too_many_lines = "allow"            # parser and predict are long but cohesive
+similar_names = "allow"             # left/right, start/end are natural
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+struct_excessive_bools = "allow"    # AblationMode/ParseConfig are flag structs by design
+doc_markdown = "allow"              # LightGBM, XGBoost, etc. don't need backticks everywhere
+if_not_else = "allow"               # sometimes clearer to check the negative case first
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[profile.profiling]
+inherits = "release"
+debug = true           # required for line numbers and source view
+debug-assertions = false  # keep off for realistic performance
+overflow-checks = false
+
+[[bin]]
+name = "sweep_bench"
+path = "src/bin/sweep_bench.rs"
+
+[[test]]
+name = "correctness"
+path = "tests/correctness.rs"
+required-features = ["test-helpers"]
+
+# Canonical test command: cargo test --release --features test-helpers
