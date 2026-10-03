@@ -202,6 +202,7 @@ pub fn parse(
     path: &Path,
     config: &WalkerConfig,
     parse_config: &ParseConfig,
+    hoist_stats: &mut super::HoistStats,
 ) -> (Vec<Tree>, Vec<Node>, Vec<u8>, ThresholdType) {
     let file = std::fs::File::open(path)
         .unwrap_or_else(|e| panic!("failed to open binary model {}: {e}", path.display()));
@@ -258,6 +259,8 @@ pub fn parse(
 
     {
         let mut ctx = ParseContext {
+            hoist_constants: parse_config.hoist_constants,
+            hoist_stats,
             nodes: &mut nodes,
             bitsets: &mut bitsets,
             bitset_intern: if parse_config.disable_bitset_intern {
@@ -411,5 +414,5 @@ fn read_tree(
         });
     }
 
-    reorder_and_emit(&b.temp_nodes, 0, bitset_start, ctx, scratch)
+    reorder_and_emit(&mut b.temp_nodes, 0, bitset_start, ctx, scratch)
 }

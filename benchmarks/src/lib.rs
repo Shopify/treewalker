@@ -404,6 +404,7 @@ fn run_grid3_ablation(config: &RunConfig) {
                 prefix_depth: if pkey.1 { 0 } else { 2 },
                 disable_bitset_intern: pkey.2,
                 disable_predicate_dedup: false,
+                hoist_constants: false,
             };
             let Some(cd) = CellData::load(&cell.param_dir, &cell.fw_dir, &pc) else {
                 continue;
@@ -503,6 +504,7 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
                 prefix_depth: if pkey.1 { 0 } else { 2 },
                 disable_bitset_intern: pkey.2,
                 disable_predicate_dedup: false,
+                hoist_constants: false,
             };
             let Some(cd) = CellData::load(&cell.param_dir, &cell.fw_dir, &pc) else { continue };
             let mut results = vec![0.0f64; cd.n_rows];
@@ -675,7 +677,7 @@ fn scen_cell_order(cells: &[ScenCell]) -> Vec<&ScenCell> {
 /// timed here, regardless of `external-bench` flags or artifacts on disk.
 /// `collect_methods` is intentionally not used so flags/artifacts cannot leak
 /// other methods into the scenario timing CSV.
-fn scen_collect_methods<'a>(cell_data: &'a CellData) -> Vec<BenchMethod<'a>> {
+fn scen_collect_methods(cell_data: &CellData) -> Vec<BenchMethod<'_>> {
     let data_ref = cell_data.data_ref();
     let n_rows = cell_data.n_rows;
     let forest = &cell_data.forest;
@@ -840,6 +842,7 @@ fn run_grid_scen(config: &RunConfig) {
 /// TreeWalker's per-row sigmoid output at `TOL_F64 = 1e-14`. Returns false (and
 /// logs) on mismatch or missing reference.
 fn validate_scen_cell(cd: &CellData, cell_dir: &Path) -> bool {
+    const TOL: f64 = 1e-14;
     let ref_path = cell_dir.join("reference.bin");
     if !ref_path.exists() {
         // FAIL-CLOSED gate: a missing GTIL reference is a correctness hazard,
@@ -866,7 +869,6 @@ fn validate_scen_cell(cd: &CellData, cell_dir: &Path) -> bool {
         let d = (results[r] - ref_data[r]).abs();
         if d > max_delta { max_delta = d; }
     }
-    const TOL: f64 = 1e-14;
     if max_delta <= TOL {
         eprintln!("  CORRECTNESS PASS max_delta={max_delta:.2e} (tol={TOL:.0e})");
         true
@@ -908,6 +910,7 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(AblationMode, ParseConfig, Strin
             prefix_depth: if dpg { 0 } else { 2 },
             disable_bitset_intern: db,
             disable_predicate_dedup: false,
+            hoist_constants: false,
         };
         let label = format!("dp={},du={},dm={},dt={},dpg={},db={}",
             u8::from(dp), u8::from(du), u8::from(dm),
@@ -925,6 +928,7 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(AblationMode, ParseConfig, Strin
                 prefix_depth: if dpg { 0 } else { 2 },
                 disable_bitset_intern: db,
                 disable_predicate_dedup: false,
+                hoist_constants: false,
             };
             let label = format!("dp=0,du=0,dm=0,dt={},dpg={},db={}",
                 u8::from(dt), u8::from(dpg), u8::from(db));

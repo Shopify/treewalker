@@ -338,6 +338,7 @@ pub(crate) struct PrefixGroup {
 }
 
 pub struct Forest {
+    pub(crate) hoist_stats: parser::HoistStats,
     pub(crate) trees: Vec<Tree>,
     pub config: WalkerConfig,
     pub(crate) nodes: Vec<Node>,
@@ -385,8 +386,9 @@ impl Forest {
             "Model file must be .json or .bin (treelite format). Got: {}",
             model_path.display(),
         );
+        let mut hoist_stats = parser::HoistStats::default();
         let (trees, mut nodes, bitsets, threshold_type) =
-            parser::parse_model(model_path, &config, parse_config);
+            parser::parse_model_with_stats(model_path, &config, parse_config, &mut hoist_stats);
         let mut varying_predicates = if parse_config.disable_predicate_dedup {
             parser::build_varying_predicates_no_dedup(&mut nodes)
         } else {
@@ -409,6 +411,7 @@ impl Forest {
         }
 
         Self {
+            hoist_stats,
             trees,
             config,
             nodes,
@@ -420,6 +423,11 @@ impl Forest {
             prefix_depth,
             workspace: None,
         }
+    }
+
+    /// Load-time transformation counters. All zero when hoisting is disabled.
+    pub const fn hoist_stats(&self) -> &parser::HoistStats {
+        &self.hoist_stats
     }
 
     #[inline]

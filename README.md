@@ -10,10 +10,9 @@ the engine, the benchmark harness, the scripts that turn public datasets into
 models and benchmark runs, the result CSVs behind every number in the paper,
 and the cloud setup used for the measurements.
 
-The engine sources (`src/predict.rs`, `src/forest.rs`, `src/parser/`,
-`src/mask.rs`, `src/config.rs`) are identical to the revision that produced
-the factorial-grid results; later changes only extend the benchmark harness
-(scenario grid, `--validate`).
+The released results use the engine preserved under the `neurips2026` tag.
+The current library also includes an experimental constant-predicate hoisting
+pass, disabled by default; see below for an independent A/B benchmark.
 
 This repository serves two purposes: as a source for the library and as a
 permanent archive of the code at time of submission. The latter can always be
@@ -55,6 +54,36 @@ cargo build --manifest-path benchmarks/Cargo.toml --target-dir target \
 
 The `external-bench` feature enables the C FFI baselines and QuickScorer.
 `quickscorer-bench` enables the legacy CLI's QuickScorer baseline.
+
+## Experimental constant-predicate hoisting
+
+Enable this at load time with
+`ParseConfig { hoist_constants: true, ..Default::default() }` and
+`Forest::load_with_config`. The pass hoists matching constant predicates from
+both children of a varying split, then collapses identical subtrees. It never
+increases node count and stops after at most 16 passes per tree. JSON and v4
+binary imports share the pass. `forest.hoist_stats()` reports rewrites, removed
+nodes, varying roots before/after, and pass-limit hits.
+
+Compare the original and transformed model on an existing benchmark cell:
+
+```bash
+cargo run --release --manifest-path benchmarks/Cargo.toml --bin hoist_bench -- \
+  MODEL/model_treelite.bin CELL/walker_config.json CELL/test_data.bin
+```
+
+For variable groups, add `--group-offsets CELL/group_offsets.bin`. The command
+checks both grouped evaluators against the original full walk, then runs the
+existing blocked timing protocol with rotating method order. JSON on stdout
+includes latency, load time, node/pool sizes, rewrite counts, prediction delta,
+and work counters. Use `--no-tree-ordering --prefix-depth 0` to isolate
+rewriting from tree ordering and prefix sharing. Load times are single samples;
+pool sizes exclude workspace and other metadata.
+
+This prototype does not hoist from only one child or duplicate subtrees. Its
+benefit on trained workloads is still an experiment; the synthetic fixtures
+verify correctness and work reduction, not a general speedup claim. See
+[the transformation notes](docs/constant-split-hoisting.md).
 
 ## Datasets
 

@@ -753,6 +753,7 @@ mod tests {
 
     fn sweep_forest(preds: Vec<VaryingPredicate>, ranges: Vec<FeatureRange>) -> Forest {
         Forest {
+            hoist_stats: crate::HoistStats::default(),
             trees: Vec::new(),
             config: WalkerConfig {
                 n_features: 64, max_group_width: 32,

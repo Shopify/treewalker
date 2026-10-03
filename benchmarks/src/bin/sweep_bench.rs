@@ -422,6 +422,7 @@ impl TuningFlags {
             disable_bitset_intern: self.bitset_intern,
             prefix_depth: self.prefix_depth,
             disable_predicate_dedup: self.predicate_dedup,
+            hoist_constants: false,
         }
     }
 }

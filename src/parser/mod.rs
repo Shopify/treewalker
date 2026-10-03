@@ -35,6 +35,9 @@
 pub(crate) mod common;
 mod binary;
 mod json;
+mod hoist;
+
+pub use hoist::HoistStats;
 
 use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;
@@ -61,14 +64,23 @@ pub fn parse_model(
     config: &WalkerConfig,
     parse_config: &ParseConfig,
 ) -> (Vec<Tree>, Vec<Node>, Vec<u8>, ThresholdType) {
+    parse_model_with_stats(path, config, parse_config, &mut HoistStats::default())
+}
+
+pub(crate) fn parse_model_with_stats(
+    path: impl AsRef<Path>,
+    config: &WalkerConfig,
+    parse_config: &ParseConfig,
+    hoist_stats: &mut HoistStats,
+) -> (Vec<Tree>, Vec<Node>, Vec<u8>, ThresholdType) {
     let path = path.as_ref();
 
     let (mut trees, mut nodes, mut bitsets, threshold_type) = match path
         .extension()
         .and_then(|e| e.to_str())
     {
-        Some("bin") => binary::parse(path, config, parse_config),
-        _ => json::parse(path, config, parse_config),
+        Some("bin") => binary::parse(path, config, parse_config, hoist_stats),
+        _ => json::parse(path, config, parse_config, hoist_stats),
     };
 
     if !parse_config.disable_tree_ordering {
@@ -518,4 +530,3 @@ fn tree_path_summary(tree: &Tree, nodes: &[Node]) -> TreePathSummary {
         len: len as u8,
     }
 }
-

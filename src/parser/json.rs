@@ -31,6 +31,7 @@ pub fn parse(
     path: &Path,
     config: &WalkerConfig,
     parse_config: &ParseConfig,
+    hoist_stats: &mut super::HoistStats,
 ) -> (Vec<Tree>, Vec<Node>, Vec<u8>, ThresholdType) {
     let raw = std::fs::read_to_string(path).expect("failed to read model JSON file");
     // Treelite emits invalid JSON for NaN values: `"threshold": ,` or `"leaf_value": ,`.
@@ -86,6 +87,8 @@ pub fn parse(
     let mut bitset_intern: HashMap<Vec<u32>, usize> = HashMap::default();
 
     let mut ctx = ParseContext {
+        hoist_constants: parse_config.hoist_constants,
+        hoist_stats,
         nodes: &mut nodes,
         bitsets: &mut bitsets,
         bitset_intern: if parse_config.disable_bitset_intern {
@@ -258,5 +261,5 @@ fn process_tree(tree: &OwnedValue, ctx: &mut ParseContext<'_>, scratch: &mut Reo
         .unwrap_or(0);
     let root_idx = id_to_idx[&root_id];
 
-    reorder_and_emit(&temp, root_idx, bitset_start, ctx, scratch)
+    reorder_and_emit(&mut temp, root_idx, bitset_start, ctx, scratch)
 }

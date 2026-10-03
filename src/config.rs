@@ -60,6 +60,9 @@ impl AblationMode {
 /// These require a different `Forest` instance to ablate (model must be re-parsed).
 #[derive(Clone, Copy)]
 pub struct ParseConfig {
+    /// Experimental constant-predicate hoisting and identical-subtree reduction.
+    /// Never increases tree size; disabled by default.
+    pub hoist_constants: bool,
     /// Skip `auto_order_trees` — keep trees in LightGBM's original order.
     pub disable_tree_ordering: bool,
     /// Skip bitset interning — always append to pool, no deduplication.
@@ -77,6 +80,7 @@ pub struct ParseConfig {
 impl Default for ParseConfig {
     fn default() -> Self {
         Self {
+            hoist_constants: false,
             disable_tree_ordering: false,
             disable_bitset_intern: false,
             prefix_depth: 2,

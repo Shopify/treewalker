@@ -22,6 +22,7 @@ use crate::forest::{
 /// Both parsers build a `Vec<TempNode>` per tree (preserving original tree
 /// structure with left/right child indices), then `reorder_and_emit` produces
 /// the optimized `Node` layout in the global pool.
+#[derive(Clone, Copy)]
 pub struct TempNode {
     pub value: f64,
     pub left: i16,
@@ -37,6 +38,8 @@ pub struct TempNode {
 /// Holds references to the global pools (nodes, bitsets) and model-level
 /// configuration. Both parsers populate this incrementally, one tree at a time.
 pub struct ParseContext<'a> {
+    pub hoist_constants: bool,
+    pub hoist_stats: &'a mut super::HoistStats,
     pub nodes: &'a mut Vec<Node>,
     pub bitsets: &'a mut Vec<u8>,
     pub bitset_intern: Option<&'a mut HashMap<Vec<u32>, usize>>,
@@ -191,12 +194,15 @@ pub fn encode_categories(
 ///    at `idx + 1`, the light child is stored in `Node.skip`.
 /// 3. Append to the global `nodes` pool.
 pub fn reorder_and_emit(
-    temp: &[TempNode],
+    temp: &mut [TempNode],
     root_idx: usize,
     bitset_start: u32,
     ctx: &mut ParseContext<'_>,
     scratch: &mut ReorderScratch,
 ) -> Tree {
+    if ctx.hoist_constants {
+        super::hoist::hoist(temp, root_idx, ctx.bitsets, ctx.hoist_stats);
+    }
     let total = temp.len();
 
     scratch.visit_order.clear();

@@ -46,3 +46,4 @@ pub mod predict;
 
 pub use config::{AblationMode, ParseConfig};
 pub use predict::PredictStats;
+pub use parser::HoistStats;
