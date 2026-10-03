@@ -347,7 +347,6 @@ pub struct XGBoostBench {
     ) -> c_int,
     free_proxy_fn: unsafe extern "C" fn(DMatrixHandle) -> c_int,
     free_booster_fn: unsafe extern "C" fn(XGBoosterHandle) -> c_int,
-    n_cols: usize,
     // Pre-allocated f32 conversion buffer (max 128 rows × n_cols).
     f32_buf: Vec<f32>,
     // Pre-allocated JSON config string (reused across calls).
@@ -445,7 +444,6 @@ impl XGBoostBench {
                 predict_from_dense_fn,
                 free_proxy_fn,
                 free_booster_fn,
-                n_cols,
                 f32_buf,
                 predict_config,
             })

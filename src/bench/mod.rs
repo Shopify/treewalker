@@ -151,10 +151,14 @@ fn collect_methods<'a>(
     let n_cols = cell_data.n_cols;
     let forest = &cell_data.forest;
 
+    // These inputs are only needed by the optional external baselines.
+    #[cfg(not(feature = "external-bench"))]
+    let _ = (fw_dir, framework, config, n_cols);
+
     let mut tw_base_results = vec![0.0f64; n_rows];
     let mut tw_full_results = vec![0.0f64; n_rows];
 
-    let mut methods: Vec<BenchMethod<'a>> = vec![
+    let methods: Vec<BenchMethod<'a>> = vec![
         // Row-independent baseline: walks each row fully through every tree,
         // no partial evaluation. Paper label: "TreeWalker (full walk)".
         BenchMethod {
@@ -174,8 +178,10 @@ fn collect_methods<'a>(
     ];
 
     #[cfg(feature = "external-bench")]
-    {
+    let methods = {
         use self::external::ExternalMethod;
+
+        let mut methods = methods;
 
         if framework == "lightgbm"
             && let Some(mut m) = external::LleavesBench::load(&fw_dir.join("lleaves.so"), n_rows)
@@ -224,7 +230,8 @@ fn collect_methods<'a>(
                 predict_group: Box::new(move |s, e| { m.predict_group(data_ref, n_cols, s, e); }),
             });
         }
-    }
+        methods
+    };
 
     methods
 }
@@ -423,11 +430,6 @@ fn run_grid3_ablation(config: &RunConfig) {
                 eprintln!("    {label}: {:.1}µs/obs (blocks={})", t.median_us, t.actual_blocks);
                 // Parse the label back into flag values.
                 let flags: Vec<&str> = label.split(',').map(|f| f.split('=').nth(1).unwrap_or("0")).collect();
-                let row: Vec<&str> = vec![
-                    cell.dataset.as_str(), cell.framework.as_str(), arch,
-                    &cell.nt.to_string(), &cell.md.to_string(), &h_str,
-                ];
-                // This is ugly — build the full row from parts.
                 let nt_s = cell.nt.to_string();
                 let md_s = cell.md.to_string();
                 let n_obs_s = t.n_obs.to_string();

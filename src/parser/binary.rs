@@ -339,8 +339,6 @@ fn read_tree(
     let _num_opt_field_per_tree = read_i32(r);
     let _num_opt_field_per_node = read_i32(r);
 
-    let is_f32 = ctx.threshold_type == ThresholdType::F32;
-
     // -- Build TempNodes into reusable buffer --
     b.temp_nodes.clear();
     let bitset_start = ctx.bitsets.len() as u32;
