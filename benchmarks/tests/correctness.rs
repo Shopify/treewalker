@@ -33,7 +33,7 @@ fn model_file(param_dir: &Path, framework: &str) -> PathBuf {
 // Config discovery — test every artifact
 // ---------------------------------------------------------------------------
 
-const ARTIFACTS_BASE: &str = "paper/experiments/artifacts";
+const ARTIFACTS_BASE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../paper/experiments/artifacts");
 const FRAMEWORKS: &[&str] = &["lightgbm", "xgboost"];
 
 struct TestConfig {
@@ -106,7 +106,7 @@ fn load_forest(param_dir: &Path, framework: &str) -> Forest {
 }
 
 fn load_test_data(param_dir: &Path) -> (Vec<f64>, usize) {
-    let (data, n_rows, _) = treewalker::load_raw_f64(param_dir.join("test_data.bin"));
+    let (data, n_rows, _) = treewalker_bench::load_raw_f64(param_dir.join("test_data.bin"));
     (data, n_rows)
 }
 

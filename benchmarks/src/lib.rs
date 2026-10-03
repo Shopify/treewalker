@@ -1,4 +1,4 @@
-//! Benchmark orchestration: run all methods on all grid cells, write CSV.
+//! TreeWalker benchmark orchestration: run all methods on all grid cells, write CSV.
 //!
 //! This module replaces `sweep.py` — the Rust binary handles grid enumeration,
 //! method loading, per-group timing, and CSV output directly.
@@ -11,16 +11,22 @@
 //! and write CSV rows.
 
 pub mod csv;
+mod data;
 #[cfg(feature = "external-bench")]
 pub mod external;
 pub mod grid;
 pub mod timing;
+mod system;
+
+pub use data::{load_group_offsets, load_raw_f64, try_load_raw_f64};
+pub use system::get_rss_kb;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use crate::config::{AblationMode, ParseConfig};
-use crate::forest::Forest;
+use treewalker::config::{AblationMode, ParseConfig};
+use treewalker::forest::Forest;
+use treewalker::PredictStats;
 
 use self::csv::CsvWriter;
 use self::grid::GridCell;
@@ -503,7 +509,7 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
 
             for (ablation, label) in runtime_combos {
                 cd.forest.borrow_mut().config.ablation = *ablation;
-                let mut total = crate::PredictStats::default();
+                let mut total = PredictStats::default();
                 for &(s, e) in &cd.bounds {
                     total += cd.forest.borrow_mut().predict_with_stats(&cd.data, &mut results, s, e);
                 }
@@ -804,7 +810,7 @@ fn run_grid_scen(config: &RunConfig) {
             ("trace", AblationMode { disable_varying_precompute: true, ..Default::default() }),
         ] {
             cd.forest.borrow_mut().config.ablation = ablation;
-            let mut total = crate::PredictStats::default();
+            let mut total = PredictStats::default();
             let mut results = vec![0.0f64; cd.n_rows];
             for &(s, e) in &cd.bounds {
                 total += cd.forest.borrow_mut().predict_with_stats(&cd.data, &mut results, s, e);
@@ -957,7 +963,7 @@ mod tests {
 
     #[test]
     fn test_discover_cells() {
-        let artifacts = PathBuf::from("paper/experiments/artifacts");
+        let artifacts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../paper/experiments/artifacts");
         if !artifacts.exists() { return; }
         let cells = grid::discover_cells(&artifacts, grid::Grid::All, Some(&["expedia".to_string()]));
         if cells.is_empty() {
@@ -973,7 +979,7 @@ mod tests {
 
     #[test]
     fn test_run_single_cell() {
-        let artifacts = PathBuf::from("paper/experiments/artifacts");
+        let artifacts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../paper/experiments/artifacts");
         if !artifacts.exists() { return; }
         let cells = grid::discover_cells(&artifacts, grid::Grid::All, None);
         let cell = cells.iter().find(|c| {

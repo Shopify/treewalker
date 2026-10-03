@@ -19,11 +19,37 @@ the factorial-grid results; later changes only extend the benchmark harness
 
 | Path | Contents |
 |---|---|
-| `src/` | engine, treelite model parser, benchmark harness, `sweep_bench` binary |
-| `tests/` | correctness tests against treelite GTIL (f64) and native predictions (f32) |
+| `src/` | inference library and treelite model parser |
+| `benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
 | `paper/experiments/scripts/` | dataset preparation, baseline compilation, figures, tables |
 | `paper/experiments/data/` | released result CSVs and machine descriptions |
 | `infra/` | Terraform and VM startup script for the two GCE benchmark machines |
+
+## Building and packaging the library
+
+The root crate contains the inference library. These commands build, test, and
+package it without the benchmark dependencies:
+
+```bash
+cargo build
+cargo test --release
+cargo package
+```
+
+The package includes the Rust library sources, README, and license. Benchmark
+sources, result data, Python scripts, Terraform files, and the repository's
+native CPU build settings are excluded.
+
+The benchmark crate has its own manifest and lockfile. Build it explicitly;
+`--target-dir target` preserves the binary path used by the experiment scripts:
+
+```bash
+cargo build --manifest-path benchmarks/Cargo.toml --target-dir target \
+  --release --features external-bench
+```
+
+The `external-bench` feature enables the C FFI baselines and QuickScorer.
+`quickscorer-bench` enables the legacy CLI's QuickScorer baseline.
 
 ## Datasets
 
@@ -120,7 +146,8 @@ uv sync
 uv run python3 paper/experiments/scripts/fetch_expedia.py --train-csv PATH/data.zip
 uv run python3 paper/experiments/scripts/prepare.py --grid all --prepare-groups --skip-compiled
 uv run python3 paper/experiments/scripts/prepare.py --grid all --compile-only   # tl2cgen, lleaves, sweep_bench
-cargo test --release --features test-helpers
+cargo test --manifest-path benchmarks/Cargo.toml --target-dir target \
+  --release --features test-helpers
 
 taskset -c 0 ./target/release/sweep_bench paper/experiments/artifacts --grid all \
   --output-dir paper/experiments/data --warmup 3 --iters 21 --min-iters 11 \
@@ -156,7 +183,7 @@ only on the released CSVs.
 ## Correctness
 
 LightGBM (f64) predictions match treelite GTIL within 1e-14; XGBoost (f32)
-predictions match native XGBoost within 1e-5 (`tests/correctness.rs`).
+predictions match native XGBoost within 1e-5 (`benchmarks/tests/correctness.rs`).
 Partial evaluation and the full walk agree within 1e-15.
 
 ## Citation

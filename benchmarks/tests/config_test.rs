@@ -3,7 +3,7 @@ use treewalker::config::WalkerConfig;
 fn test_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(
         std::env::var("TEST_ARTIFACTS")
-            .unwrap_or_else(|_| "paper/experiments/artifacts/expedia/nt50_md8".into()),
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../paper/experiments/artifacts/expedia/nt50_md8").into()),
     )
 }
 

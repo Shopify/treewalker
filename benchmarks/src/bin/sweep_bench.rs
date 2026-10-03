@@ -35,6 +35,7 @@ use treewalker::ParseConfig;
 use treewalker::config::AblationMode;
 use treewalker::forest::Forest;
 use treewalker::predict::PredictStats;
+use treewalker_bench::get_rss_kb;
 
 /// Load variable-length group offsets from a binary file.
 ///
@@ -175,44 +176,6 @@ fn collect_stats(forest: &mut Forest, data: &[f64], groups: &Groups) -> PredictS
     }
 
     total
-}
-
-/// Get current process RSS in kilobytes.
-/// Get memory usage in kilobytes.
-///
-/// **Platform note**: Linux reports *current* RSS (`VmRSS`), macOS reports
-/// *peak* RSS (`ru_maxrss`). Cross-platform comparisons require normalization.
-fn get_rss_kb() -> usize {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
-            for line in status.lines() {
-                if let Some(rest) = line.strip_prefix("VmRSS:") {
-                    return rest
-                        .trim()
-                        .trim_end_matches(" kB")
-                        .trim()
-                        .parse()
-                        .unwrap_or(0);
-                }
-            }
-        }
-        0
-    }
-    #[cfg(target_os = "macos")]
-    {
-        unsafe {
-            let mut info: libc::rusage = std::mem::zeroed();
-            if libc::getrusage(libc::RUSAGE_SELF, &raw mut info) == 0 {
-                return info.ru_maxrss as usize / 1024;
-            }
-        }
-        0
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        0
-    }
 }
 
 /// Compute model memory footprint: nodes*16 + bitsets + trees*12.
@@ -933,7 +896,7 @@ fn main() {
         let modes_spec = block_modes_spec.unwrap_or_else(|| "baseline,full".to_string());
         let mode_specs = parse_mode_specs(&modes_spec);
 
-        let (data, n_rows, _n_cols) = treewalker::load_raw_f64(&data_path);
+        let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
 
         // Build groups (needed for index → row mapping).
         let temp_forest = Forest::load(&model_path, &config_path);
@@ -1001,7 +964,7 @@ fn main() {
         let parse_time_us = parse_start.elapsed().as_nanos() as f64 / 1000.0;
         forest.config.ablation = ablation;
 
-        let (data, n_rows, _n_cols) = treewalker::load_raw_f64(&data_path);
+        let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
         let groups = build_groups(&forest, n_rows, group_offsets_path.as_ref());
 
         eprintln!(
@@ -1027,7 +990,7 @@ fn main() {
         let forest = Forest::load(&model_path, &config_path);
         let default_parse_time_us = parse_start.elapsed().as_nanos() as f64 / 1000.0;
 
-        let (data, n_rows, _n_cols) = treewalker::load_raw_f64(&data_path);
+        let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
         let groups = build_groups(&forest, n_rows, group_offsets_path.as_ref());
 
         eprintln!(
@@ -1121,7 +1084,7 @@ fn run_quickscorer_bench(
     max_time: Option<Duration>,
 ) {
     let data_path = data_dir.join("test_data.bin");
-    let (data, n_rows, n_cols) = treewalker::load_raw_f64(&data_path);
+    let (data, n_rows, n_cols) = treewalker_bench::load_raw_f64(&data_path);
 
     // Build groups so we iterate per-observation, not per-row.
     let forest = Forest::load(model_path, config_path);
@@ -1283,7 +1246,7 @@ fn run_validate_mode(args: &[String]) {
     let data_path = data_dir.join("test_data.bin");
 
     let mut forest = Forest::load(&model_path, &config_path);
-    let (data, n_rows, _n_cols) = treewalker::load_raw_f64(&data_path);
+    let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
     let groups = build_groups(&forest, n_rows, group_offsets_path.as_ref());
     let n_obs = groups.n_obs();
 
@@ -1295,7 +1258,7 @@ fn run_validate_mode(args: &[String]) {
     }
 
     // Load reference (write_raw_f64 layout: u64 n_rows, u64 n_cols, f64s).
-    let (ref_data, ref_n, ref_cols) = treewalker::load_raw_f64(&ref_path);
+    let (ref_data, ref_n, ref_cols) = treewalker_bench::load_raw_f64(&ref_path);
     if ref_cols != 1 {
         eprintln!("VALIDATE FAIL: reference n_cols={ref_cols} != 1");
         std::process::exit(1);
@@ -1331,7 +1294,7 @@ fn run_validate_mode(args: &[String]) {
 
 /// Parse --grid mode arguments and dispatch to bench::run_grid().
 fn run_grid_mode(args: &[String]) {
-    use treewalker::bench;
+    use treewalker_bench as bench;
 
     let artifacts_dir = PathBuf::from(&args[1]);
 

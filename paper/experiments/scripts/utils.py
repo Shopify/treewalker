@@ -773,7 +773,8 @@ def build_sweep_bench() -> Path:
         "RUSTFLAGS": "-C target-cpu=native",
     }
     subprocess.run(
-        ["cargo", "build", "--release", "--bin", "sweep_bench",
+        ["cargo", "build", "--manifest-path", "benchmarks/Cargo.toml",
+         "--target-dir", "target", "--release", "--bin", "sweep_bench",
          "--features", "external-bench"],
         cwd=str(PROJECT_ROOT),
         check=True,

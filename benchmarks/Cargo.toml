@@ -1,0 +1,71 @@
+[package]
+name = "treewalker-bench"
+version = "0.1.0"
+edition = "2024"
+description = "TreeWalker benchmark harness and artifact correctness tests"
+license = "MIT"
+publish = false
+
+[features]
+test-helpers = ["treewalker/test-helpers"]
+quickscorer-bench = ["dep:quickscorer"]  # QuickScorer baseline in the legacy CLI
+external-bench = ["dep:libloading", "dep:quickscorer"]  # C FFI baselines + QuickScorer
+
+[dependencies]
+treewalker = { path = ".." }
+serde = { version = "1", features = ["derive"] }
+simd-json = { version = "0.14", features = ["serde_impl"] }
+quickscorer = { version = "=0.1.0", git = "https://github.com/leomanne/quickscorer-rs.git", rev = "8314d03b5ef2d15385f8d0cd86d8f281d11b2d49", optional = true }
+libloading = { version = "0.8", optional = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+ndarray = "0.17"
+ndarray-npy = "0.10"
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+missing_docs_in_private_items = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+cognitive_complexity = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+struct_excessive_bools = "allow"
+doc_markdown = "allow"
+if_not_else = "allow"
+
+# Keep the benchmark optimization settings identical to the inference library.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[profile.profiling]
+inherits = "release"
+debug = true
+debug-assertions = false
+overflow-checks = false
+
+[[bin]]
+name = "sweep_bench"
+path = "src/bin/sweep_bench.rs"
+
+[[test]]
+name = "correctness"
+path = "tests/correctness.rs"
+required-features = ["test-helpers"]
+
+# Artifact tests: cargo test --manifest-path benchmarks/Cargo.toml --release --features test-helpers

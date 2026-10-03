@@ -5,7 +5,7 @@ use treewalker::forest::Forest;
 fn test_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(
         std::env::var("TEST_ARTIFACTS")
-            .unwrap_or_else(|_| "paper/experiments/artifacts/expedia/nt50_md8".into()),
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../paper/experiments/artifacts/expedia/nt50_md8").into()),
     )
 }
 
@@ -152,7 +152,7 @@ fn test_reject_unknown_json_schema() {
 }
 
 fn load_test_bin(path: &std::path::Path) -> (Vec<f64>, usize) {
-    let (data, n_rows, _) = treewalker::load_raw_f64(path);
+    let (data, n_rows, _) = treewalker_bench::load_raw_f64(path);
     (data, n_rows)
 }
 
