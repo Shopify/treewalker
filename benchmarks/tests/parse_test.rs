@@ -1,6 +1,6 @@
-use treewalker::ParseConfig;
-use treewalker::config::WalkerConfig;
-use treewalker::forest::Forest;
+use treewalker_gbdt::ParseConfig;
+use treewalker_gbdt::config::WalkerConfig;
+use treewalker_gbdt::forest::Forest;
 
 fn test_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(

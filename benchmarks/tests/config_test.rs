@@ -1,4 +1,4 @@
-use treewalker::config::WalkerConfig;
+use treewalker_gbdt::config::WalkerConfig;
 
 fn test_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(

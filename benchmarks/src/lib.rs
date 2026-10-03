@@ -24,9 +24,9 @@ pub use system::get_rss_kb;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use treewalker::config::{AblationMode, ParseConfig};
-use treewalker::forest::Forest;
-use treewalker::PredictStats;
+use treewalker_gbdt::config::{AblationMode, ParseConfig};
+use treewalker_gbdt::forest::Forest;
+use treewalker_gbdt::PredictStats;
 
 use self::csv::CsvWriter;
 use self::grid::GridCell;

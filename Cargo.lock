@@ -255,7 +255,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "treewalker"
+name = "treewalker-gbdt"
 version = "1.0.0"
 dependencies = [
  "libc",

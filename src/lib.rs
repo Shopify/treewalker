@@ -24,7 +24,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use treewalker::forest::Forest;
+//! use treewalker_gbdt::forest::Forest;
 //!
 //! // Accepts .json or .bin (treelite binary v4, preferred for large models)
 //! let mut forest = Forest::load("model_treelite.bin", "walker_config.json");

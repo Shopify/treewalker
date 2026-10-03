@@ -31,10 +31,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use treewalker::ParseConfig;
-use treewalker::config::AblationMode;
-use treewalker::forest::Forest;
-use treewalker::predict::PredictStats;
+use treewalker_gbdt::ParseConfig;
+use treewalker_gbdt::config::AblationMode;
+use treewalker_gbdt::forest::Forest;
+use treewalker_gbdt::predict::PredictStats;
 use treewalker_bench::get_rss_kb;
 
 /// Load variable-length group offsets from a binary file.

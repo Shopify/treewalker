@@ -31,8 +31,9 @@ found [under the neurips2026 tag](https://github.com/Shopify/treewalker/releases
 
 ## Building and packaging the library
 
-The root crate contains the inference library. These commands build, test, and
-package it without the benchmark dependencies:
+The root crate, `treewalker-gbdt`, contains the inference library. Rust imports
+use `treewalker_gbdt`, for example `use treewalker_gbdt::forest::Forest;`.
+These commands build, test, and package it without the benchmark dependencies:
 
 ```bash
 cargo build

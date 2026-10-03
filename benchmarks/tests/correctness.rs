@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use treewalker::AblationMode;
-use treewalker::forest::{Forest, ThresholdType};
-use treewalker::config::WalkerConfig;
+use treewalker_gbdt::AblationMode;
+use treewalker_gbdt::forest::{Forest, ThresholdType};
+use treewalker_gbdt::config::WalkerConfig;
 
 // ---------------------------------------------------------------------------
 // Tolerances
@@ -368,7 +368,7 @@ fn test_ablation_all_configs() {
 
 #[test]
 fn test_parse_configs() {
-    use treewalker::ParseConfig;
+    use treewalker_gbdt::ParseConfig;
 
     let parse_configs: &[(&str, ParseConfig)] = &[
         ("no_tree_ordering", ParseConfig { disable_tree_ordering: true, ..Default::default() }),
@@ -562,7 +562,7 @@ fn test_width_32_boundary() {
 
 #[test]
 fn test_node_visit_stats() {
-    use treewalker::PredictStats;
+    use treewalker_gbdt::PredictStats;
 
     let cfg = first_config();
     let mut forest = load_forest(&cfg.param_dir, cfg.framework);

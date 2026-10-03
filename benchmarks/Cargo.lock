@@ -731,16 +731,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "treewalker"
-version = "1.0.0"
-dependencies = [
- "libc",
- "rustc-hash",
- "serde",
- "simd-json",
-]
-
-[[package]]
 name = "treewalker-bench"
 version = "0.1.0"
 dependencies = [
@@ -751,7 +741,17 @@ dependencies = [
  "quickscorer",
  "serde",
  "simd-json",
- "treewalker",
+ "treewalker-gbdt",
+]
+
+[[package]]
+name = "treewalker-gbdt"
+version = "1.0.0"
+dependencies = [
+ "libc",
+ "rustc-hash",
+ "serde",
+ "simd-json",
 ]
 
 [[package]]
