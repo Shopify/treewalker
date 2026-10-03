@@ -81,9 +81,11 @@ rewriting from tree ordering and prefix sharing. Load times are single samples;
 pool sizes exclude workspace and other metadata.
 
 This prototype does not hoist from only one child or duplicate subtrees. Its
-benefit on trained workloads is still an experiment; the synthetic fixtures
-verify correctness and work reduction, not a general speedup claim. See
-[the transformation notes](docs/constant-split-hoisting.md).
+first [exploratory benchmark sweep](docs/hoisting-benchmarks.md) finds real
+rewrites but no general latency improvement on the available trained models.
+The synthetic fixtures verify correctness and work reduction. See
+[the transformation notes](docs/constant-split-hoisting.md) for the scope and
+the sweep runner.
 
 ## Datasets
 

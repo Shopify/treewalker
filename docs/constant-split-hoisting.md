@@ -2,8 +2,9 @@
 
 The first prototype is implemented in `src/parser/hoist.rs`, independently of
 the Treelite import improvements. The identities below preserve the prediction
-function. Their latency benefit and frequency in real DHM models have not been
-measured.
+function. An [exploratory benchmark sweep](hoisting-benchmarks.md) finds real
+rewrite opportunities but no general latency improvement on the available
+trained models. The pass remains disabled by default.
 
 ## Using the prototype
 
@@ -46,6 +47,24 @@ JSON reports include work counters and raw model-pool sizes, which do not
 include prediction workspace or all metadata. Load times are single samples
 and susceptible to cache/order effects. Use a separate output directory for
 experimental reports; do not overwrite the released paper CSVs.
+
+For a serial sweep over prepared survival and ranking cells:
+
+```bash
+cargo build --release --manifest-path benchmarks/Cargo.toml --bin hoist_bench
+python3 paper/experiments/scripts/hoist_sweep.py ARTIFACTS target/hoist-run
+```
+
+The output directory must be new. The runner retains raw JSON and stderr,
+an incremental `summary.csv`, and a manifest with commands, platform and binary
+hash. It prefers binary models, falls back to JSON, discovers group-offset
+files, and translates legacy config names into local copies. The source
+artifacts remain read-only. Both the default and the ordering/prefix ablation
+run unless `--mode default` or `--mode isolated` selects one. Use repeatable
+`--dataset`, `--framework` and `--cell` filters, for example
+`--cell '*/nt500_md8_h16' --repeats 3`. The minimum is 11 timing blocks per run;
+repetitions are separate process invocations. A failed correctness gate is
+recorded in the manifest and stderr and makes the sweep exit unsuccessfully.
 
 One-sided and deeper cofactor search remain future experiments. The next
 decision should depend on opportunity counts and latency from real models.
