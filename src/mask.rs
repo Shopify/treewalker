@@ -69,12 +69,32 @@ macro_rules! impl_row_mask {
                 debug_assert!(n <= Self::WIDTH, "from_width({n}) exceeds WIDTH={}", $width);
                 if n == $width { Self::MAX } else { (1 << n) - 1 }
             }
-            #[inline] fn is_zero(self) -> bool { self == 0 }
-            #[inline] fn trailing_zeros(self) -> u32 { self.trailing_zeros() }
-            #[inline] fn clear_lowest(self) -> Self { self & self.wrapping_sub(1) }
-            #[inline] fn count_ones(self) -> u32 { self.count_ones() }
-            #[inline] fn test_bit(self, r: usize) -> bool { debug_assert!(r < Self::WIDTH); self & (1 << r) != 0 }
-            #[inline] fn set_bit(self, r: usize) -> Self { debug_assert!(r < Self::WIDTH); self | (1 << r) }
+            #[inline]
+            fn is_zero(self) -> bool {
+                self == 0
+            }
+            #[inline]
+            fn trailing_zeros(self) -> u32 {
+                self.trailing_zeros()
+            }
+            #[inline]
+            fn clear_lowest(self) -> Self {
+                self & self.wrapping_sub(1)
+            }
+            #[inline]
+            fn count_ones(self) -> u32 {
+                self.count_ones()
+            }
+            #[inline]
+            fn test_bit(self, r: usize) -> bool {
+                debug_assert!(r < Self::WIDTH);
+                self & (1 << r) != 0
+            }
+            #[inline]
+            fn set_bit(self, r: usize) -> Self {
+                debug_assert!(r < Self::WIDTH);
+                self | (1 << r)
+            }
         }
     };
 }
@@ -111,8 +131,8 @@ mod tests {
         assert!(cleared.test_bit(5));
 
         // AND / OR / NOT
-        let a = M::from_width(4);  // bits 0-3
-        let b = M::ZERO.set_bit(2).set_bit(5);  // bits 2, 5
+        let a = M::from_width(4); // bits 0-3
+        let b = M::ZERO.set_bit(2).set_bit(5); // bits 2, 5
         assert_eq!((a & b).count_ones(), 1); // bit 2
         assert_eq!((a | b).count_ones(), 5); // bits 0,1,2,3,5
 
@@ -122,11 +142,17 @@ mod tests {
     }
 
     #[test]
-    fn test_u32_mask() { test_mask::<u32>(); }
+    fn test_u32_mask() {
+        test_mask::<u32>();
+    }
 
     #[test]
-    fn test_u64_mask() { test_mask::<u64>(); }
+    fn test_u64_mask() {
+        test_mask::<u64>();
+    }
 
     #[test]
-    fn test_u128_mask() { test_mask::<u128>(); }
+    fn test_u128_mask() {
+        test_mask::<u128>();
+    }
 }

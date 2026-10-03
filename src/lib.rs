@@ -3,7 +3,7 @@
 //! # Problem structure
 //!
 //! Grouped prediction tasks expand each entity into `max_group_width` rows and predict
-//! a per-row probability. This creates a specific data structure that tree inference
+//! a per-row scalar output. This creates a specific data structure that tree inference
 //! can exploit:
 //!
 //! - **Constant features** (~78% of splits) are identical across all rows of an
@@ -23,26 +23,36 @@
 //!
 //! # Usage
 //!
-//! ```ignore
-//! use treewalker_gbdt::forest::Forest;
+//! ```no_run
+//! use treewalker_gbdt::{Forest, LoadError};
 //!
-//! // Accepts .json or .bin (treelite binary v4, preferred for large models)
-//! let mut forest = Forest::load("model_treelite.bin", "walker_config.json");
-//!
-//! // data: row-major f64 array, rows = entities × max_group_width, cols = features
-//! // results: one probability per row
-//! let mut results = vec![0.0f64; n_rows];
-//! let h = forest.config.max_group_width;
-//! for obs in 0..n_entities {
-//!     forest.predict(&data, &mut results, obs * h, (obs + 1) * h);
-//! }
+//! # fn main() -> Result<(), LoadError> {
+//! let mut forest = Forest::try_load("model.bin", "walker_config.json")?;
+//! let data = vec![0.0; forest.config.n_features]; // one row, trained column order
+//! let mut output = [0.0];
+//! forest.predict(&data, &mut output, 0, 1);
+//! # Ok(())
+//! # }
 //! ```
+//!
+//! Supports scalar regression, ranking and binary classification with identity or
+//! sigmoid output, including averaging, base scores and positive sigmoid alpha.
+//! Import errors are returned as [`LoadError`]. Inputs have 1–64 features and groups
+//! have 1–128 rows. Group equality and monotonicity are caller contracts; loading
+//! validates the configuration, and prediction guards dimensions and structural
+//! configuration mutations. Float32 models round inputs for comparisons and sum
+//! promoted leaves in float64. See the bundled `docs/treelite-loading.md` for the
+//! full compatibility boundary, memory limits and conversion examples.
 
+mod error;
+pub use error::LoadError;
 pub mod config;
-pub mod mask;
 pub mod forest;
+pub mod mask;
 pub mod parser;
 pub mod predict;
 
-pub use config::{AblationMode, ParseConfig};
+pub use config::{AblationMode, ParseConfig, WalkerConfig};
+pub use forest::Forest;
+pub use parser::ModelFormat;
 pub use predict::PredictStats;

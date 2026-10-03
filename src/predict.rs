@@ -11,7 +11,10 @@
 //! these perfectly since they're constant across all trees in one call.
 
 use crate::config::AblationMode;
-use crate::forest::{Forest, Node, PrefixGroup, ThresholdType, VaryingPredicate, SPLIT_MONO_DEC, SPLIT_MONO_INC, threshold_go_left};
+use crate::forest::{
+    Forest, Node, PrefixGroup, SPLIT_MONO_DEC, SPLIT_MONO_INC, ThresholdType, VaryingPredicate,
+    threshold_go_left,
+};
 use crate::mask::RowMask;
 
 // ---------------------------------------------------------------------------
@@ -35,8 +38,12 @@ impl std::fmt::Display for PredictStats {
         write!(
             f,
             "const={}, varying={}, unsplit={}, recurse={}, leaf={}, row_evals={}, precompute_evals={}",
-            self.constant_steps, self.varying_splits, self.unsplit_skips,
-            self.recursive_calls, self.leaf_hits, self.partition_row_evals,
+            self.constant_steps,
+            self.varying_splits,
+            self.unsplit_skips,
+            self.recursive_calls,
+            self.leaf_hits,
+            self.partition_row_evals,
             self.precompute_row_evals,
         )
     }
@@ -59,9 +66,21 @@ impl std::ops::AddAssign for PredictStats {
 // ---------------------------------------------------------------------------
 
 pub(crate) enum Workspace {
-    G32  { masks: Vec<u32>,  varying_cols: Box<[[f64; 32]; 64]>,  prefix_starts: Vec<u16> },
-    G64  { masks: Vec<u64>,  varying_cols: Box<[[f64; 64]; 64]>,  prefix_starts: Vec<u16> },
-    G128 { masks: Vec<u128>, varying_cols: Box<[[f64; 128]; 64]>, prefix_starts: Vec<u16> },
+    G32 {
+        masks: Vec<u32>,
+        varying_cols: Box<[[f64; 32]; 64]>,
+        prefix_starts: Vec<u16>,
+    },
+    G64 {
+        masks: Vec<u64>,
+        varying_cols: Box<[[f64; 64]; 64]>,
+        prefix_starts: Vec<u16>,
+    },
+    G128 {
+        masks: Vec<u128>,
+        varying_cols: Box<[[f64; 128]; 64]>,
+        prefix_starts: Vec<u16>,
+    },
 }
 
 /// Context for recursive `partial_eval` calls.
@@ -94,6 +113,47 @@ fn sigmoid_inplace(slice: &mut [f64]) {
 }
 
 impl Forest {
+    fn check_input(&self, data: &[f64], results: &[f64], start: usize, end: usize, grouped: bool) {
+        assert!(
+            self.config.structural_key() == self.compiled_config.structural_key(),
+            "Forest.config structural fields changed after loading; reload the forest to change feature classification or maximum group width"
+        );
+        assert!(start <= end, "prediction start exceeds end");
+        if grouped {
+            assert!(start < end, "group must be nonempty");
+            assert!(
+                end - start <= self.config.max_group_width,
+                "group exceeds configured max_group_width"
+            );
+        }
+        let elements = end
+            .checked_mul(self.config.n_features)
+            .expect("prediction dimensions overflow");
+        assert!(elements <= data.len(), "prediction data is too short");
+        assert!(end <= results.len(), "prediction output is too short");
+    }
+
+    #[allow(clippy::float_cmp)] // Exact fast-path identities.
+    fn finalize(&self, values: &mut [f64]) {
+        let out = self.output;
+        if out.divisor != 1.0 || out.base_score != 0.0 {
+            for v in &mut *values {
+                *v = *v / out.divisor + out.base_score;
+            }
+        }
+        match out.postprocessor {
+            crate::parser::Postprocessor::Identity => {}
+            crate::parser::Postprocessor::Sigmoid(alpha) => {
+                if alpha != 1.0 {
+                    for v in &mut *values {
+                        *v *= alpha;
+                    }
+                }
+                sigmoid_inplace(values);
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Workspace management (private)
     // -----------------------------------------------------------------------
@@ -132,9 +192,7 @@ impl Forest {
 
     /// Baseline: evaluate every tree for every row independently. No partial evaluation.
     pub fn predict_full(&self, data: &[f64], results: &mut [f64], start: usize, end: usize) {
-        assert!(start <= end, "predict_full: start ({start}) > end ({end})");
-        assert!(end * self.config.n_features <= data.len());
-        assert!(end <= results.len());
+        self.check_input(data, results, start, end, false);
         match self.threshold_type {
             ThresholdType::F64 => self.predict_full_inner::<false>(data, results, start, end),
             ThresholdType::F32 => self.predict_full_inner::<true>(data, results, start, end),
@@ -143,28 +201,31 @@ impl Forest {
 
     /// Fast production path. All optimizations enabled, no stats.
     pub fn predict(&mut self, data: &[f64], results: &mut [f64], start: usize, end: usize) {
-        assert!(start < end, "predict: empty range (start={start}, end={end})");
-        let n = end - start;
-        assert!(n <= MAX_GROUP_WIDTH, "predict: group width {n} exceeds max {MAX_GROUP_WIDTH}");
-        assert!(end * self.config.n_features <= data.len());
-        assert!(end <= results.len());
+        self.check_input(data, results, start, end, true);
         self.ensure_workspace();
         self.dispatch::<false>(data, results, start, end, AblationMode::default(), None);
     }
 
     /// Benchmark path: runtime ablation flags + stats collection.
     pub fn predict_with_stats(
-        &mut self, data: &[f64], results: &mut [f64], start: usize, end: usize,
+        &mut self,
+        data: &[f64],
+        results: &mut [f64],
+        start: usize,
+        end: usize,
     ) -> PredictStats {
-        assert!(start < end, "predict: empty range (start={start}, end={end})");
-        let n = end - start;
-        assert!(n <= MAX_GROUP_WIDTH, "predict: group width {n} exceeds max {MAX_GROUP_WIDTH}");
-        assert!(end * self.config.n_features <= data.len());
-        assert!(end <= results.len());
+        self.check_input(data, results, start, end, true);
         self.ensure_workspace();
         let ablation = self.config.ablation;
-        self.dispatch::<true>(data, results, start, end, ablation, Some(PredictStats::default()))
-            .unwrap()
+        self.dispatch::<true>(
+            data,
+            results,
+            start,
+            end,
+            ablation,
+            Some(PredictStats::default()),
+        )
+        .unwrap()
     }
 
     // -----------------------------------------------------------------------
@@ -172,23 +233,124 @@ impl Forest {
     // -----------------------------------------------------------------------
 
     fn dispatch<const STATS: bool>(
-        &mut self, data: &[f64], results: &mut [f64], start: usize, end: usize,
-        ablation: AblationMode, stats: Option<PredictStats>,
+        &mut self,
+        data: &[f64],
+        results: &mut [f64],
+        start: usize,
+        end: usize,
+        ablation: AblationMode,
+        stats: Option<PredictStats>,
     ) -> Option<PredictStats> {
         let mut ws = self.workspace.take().unwrap();
         let result = match (self.threshold_type, &mut ws) {
-            (ThresholdType::F64, Workspace::G32 { masks, varying_cols, prefix_starts }) =>
-                self.predict_core::<false, u32, 32, STATS>(data, results, start, end, masks, varying_cols, prefix_starts, ablation, stats),
-            (ThresholdType::F64, Workspace::G64 { masks, varying_cols, prefix_starts }) =>
-                self.predict_core::<false, u64, 64, STATS>(data, results, start, end, masks, varying_cols, prefix_starts, ablation, stats),
-            (ThresholdType::F64, Workspace::G128 { masks, varying_cols, prefix_starts }) =>
-                self.predict_core::<false, u128, 128, STATS>(data, results, start, end, masks, varying_cols, prefix_starts, ablation, stats),
-            (ThresholdType::F32, Workspace::G32 { masks, varying_cols, prefix_starts }) =>
-                self.predict_core::<true, u32, 32, STATS>(data, results, start, end, masks, varying_cols, prefix_starts, ablation, stats),
-            (ThresholdType::F32, Workspace::G64 { masks, varying_cols, prefix_starts }) =>
-                self.predict_core::<true, u64, 64, STATS>(data, results, start, end, masks, varying_cols, prefix_starts, ablation, stats),
-            (ThresholdType::F32, Workspace::G128 { masks, varying_cols, prefix_starts }) =>
-                self.predict_core::<true, u128, 128, STATS>(data, results, start, end, masks, varying_cols, prefix_starts, ablation, stats),
+            (
+                ThresholdType::F64,
+                Workspace::G32 {
+                    masks,
+                    varying_cols,
+                    prefix_starts,
+                },
+            ) => self.predict_core::<false, u32, 32, STATS>(
+                data,
+                results,
+                start,
+                end,
+                masks,
+                varying_cols,
+                prefix_starts,
+                ablation,
+                stats,
+            ),
+            (
+                ThresholdType::F64,
+                Workspace::G64 {
+                    masks,
+                    varying_cols,
+                    prefix_starts,
+                },
+            ) => self.predict_core::<false, u64, 64, STATS>(
+                data,
+                results,
+                start,
+                end,
+                masks,
+                varying_cols,
+                prefix_starts,
+                ablation,
+                stats,
+            ),
+            (
+                ThresholdType::F64,
+                Workspace::G128 {
+                    masks,
+                    varying_cols,
+                    prefix_starts,
+                },
+            ) => self.predict_core::<false, u128, 128, STATS>(
+                data,
+                results,
+                start,
+                end,
+                masks,
+                varying_cols,
+                prefix_starts,
+                ablation,
+                stats,
+            ),
+            (
+                ThresholdType::F32,
+                Workspace::G32 {
+                    masks,
+                    varying_cols,
+                    prefix_starts,
+                },
+            ) => self.predict_core::<true, u32, 32, STATS>(
+                data,
+                results,
+                start,
+                end,
+                masks,
+                varying_cols,
+                prefix_starts,
+                ablation,
+                stats,
+            ),
+            (
+                ThresholdType::F32,
+                Workspace::G64 {
+                    masks,
+                    varying_cols,
+                    prefix_starts,
+                },
+            ) => self.predict_core::<true, u64, 64, STATS>(
+                data,
+                results,
+                start,
+                end,
+                masks,
+                varying_cols,
+                prefix_starts,
+                ablation,
+                stats,
+            ),
+            (
+                ThresholdType::F32,
+                Workspace::G128 {
+                    masks,
+                    varying_cols,
+                    prefix_starts,
+                },
+            ) => self.predict_core::<true, u128, 128, STATS>(
+                data,
+                results,
+                start,
+                end,
+                masks,
+                varying_cols,
+                prefix_starts,
+                ablation,
+                stats,
+            ),
         };
         self.workspace = Some(ws);
         result
@@ -200,10 +362,16 @@ impl Forest {
 
     #[allow(clippy::too_many_arguments)]
     fn predict_core<const F32: bool, M: RowMask, const G: usize, const STATS: bool>(
-        &self, data: &[f64], results: &mut [f64], start: usize, end: usize,
-        masks: &mut [M], varying_cols: &mut [[f64; G]; 64],
+        &self,
+        data: &[f64],
+        results: &mut [f64],
+        start: usize,
+        end: usize,
+        masks: &mut [M],
+        varying_cols: &mut [[f64; G]; 64],
         prefix_starts: &mut [u16],
-        ablation: AblationMode, stats: Option<PredictStats>,
+        ablation: AblationMode,
+        stats: Option<PredictStats>,
     ) -> Option<PredictStats> {
         let n = end - start;
         debug_assert!(n <= G);
@@ -251,15 +419,24 @@ impl Forest {
             stats: if STATS {
                 let precompute_evals = if use_precompute {
                     let n_u64 = n as u64;
-                    let num_advances: u64 = self.feature_ranges.iter()
+                    let num_advances: u64 = self
+                        .feature_ranges
+                        .iter()
                         .map(|r| if r.num_start < r.num_end { n_u64 } else { 0 })
                         .sum();
-                    let cat_evals: u64 = self.feature_ranges.iter()
+                    let cat_evals: u64 = self
+                        .feature_ranges
+                        .iter()
                         .map(|r| u64::from(r.cat_end - r.cat_start) * n_u64)
                         .sum();
                     num_advances + cat_evals
-                } else { 0 };
-                stats.map(|mut s| { s.precompute_row_evals = precompute_evals; s })
+                } else {
+                    0
+                };
+                stats.map(|mut s| {
+                    s.precompute_row_evals = precompute_evals;
+                    s
+                })
             } else {
                 None
             },
@@ -273,7 +450,11 @@ impl Forest {
             prefix_starts.fill(0);
             for group in &self.prefix_groups {
                 self.precompute_prefix_starts::<F32, STATS>(
-                    const_features, &mut ctx.stats, group, k, prefix_starts,
+                    const_features,
+                    &mut ctx.stats,
+                    group,
+                    k,
+                    prefix_starts,
                 );
             }
         }
@@ -284,7 +465,7 @@ impl Forest {
             self.partial_eval::<F32, M, G, STATS>(&mut ctx, start_idx, all_mask);
         }
 
-        sigmoid_inplace(&mut ctx.results[start..end]);
+        self.finalize(&mut ctx.results[start..end]);
         ctx.stats
     }
 
@@ -292,7 +473,13 @@ impl Forest {
     // Full walk baseline
     // -----------------------------------------------------------------------
 
-    fn predict_full_inner<const F32: bool>(&self, data: &[f64], results: &mut [f64], start: usize, end: usize) {
+    fn predict_full_inner<const F32: bool>(
+        &self,
+        data: &[f64],
+        results: &mut [f64],
+        start: usize,
+        end: usize,
+    ) {
         let nf = self.config.n_features;
         let nodes = &self.nodes;
         results[start..end].fill(0.0);
@@ -307,7 +494,7 @@ impl Forest {
                 *res += nodes[base + local].value;
             }
         }
-        sigmoid_inplace(&mut results[start..end]);
+        self.finalize(&mut results[start..end]);
     }
 
     // -----------------------------------------------------------------------
@@ -327,7 +514,9 @@ impl Forest {
         let mut bail_level = k;
         for j in 0..k {
             let node = unsafe { nodes.get_unchecked(rep_base + j) };
-            if STATS && let Some(s) = stats { s.constant_steps += 1; }
+            if STATS && let Some(s) = stats {
+                s.constant_steps += 1;
+            }
             let go_left = self.eval_split::<F32>(node, const_features);
             if go_left != node.heavy_is_left() {
                 bail_level = j;
@@ -350,7 +539,13 @@ impl Forest {
     // -----------------------------------------------------------------------
 
     #[inline]
-    fn step<const F32: bool>(&self, nodes: &[Node], abs_idx: usize, local_idx: usize, features: &[f64]) -> usize {
+    fn step<const F32: bool>(
+        &self,
+        nodes: &[Node],
+        abs_idx: usize,
+        local_idx: usize,
+        features: &[f64],
+    ) -> usize {
         let node = &nodes[abs_idx];
         if self.eval_split::<F32>(node, features) == node.heavy_is_left() {
             local_idx + 1
@@ -365,7 +560,8 @@ impl Forest {
         if val.is_nan() {
             node.default_left()
         } else if node.is_categorical() {
-            self.cat_test(node, val as i32, node.default_left())
+            let val = if F32 { f64::from(val as f32) } else { val };
+            val >= 0.0 && self.cat_test(node, val as i32, node.default_left())
         } else {
             threshold_go_left::<F32>(val, node.value)
         }
@@ -376,9 +572,14 @@ impl Forest {
     // -----------------------------------------------------------------------
 
     fn partial_eval<const F32: bool, M: RowMask, const G: usize, const STATS: bool>(
-        &self, ctx: &mut EvalCtx<M, G>, mut idx: usize, mut row_mask: M,
+        &self,
+        ctx: &mut EvalCtx<M, G>,
+        mut idx: usize,
+        mut row_mask: M,
     ) {
-        if row_mask.is_zero() { return; }
+        if row_mask.is_zero() {
+            return;
+        }
         let nodes = self.nodes.as_slice();
         let base = ctx.base;
         let use_precompute = !ctx.ablation.disable_varying_precompute;
@@ -388,7 +589,9 @@ impl Forest {
         loop {
             // Constant walk — single bit test per node.
             while unsafe { nodes.get_unchecked(base + idx) }.is_walkable() {
-                if STATS && let Some(ref mut s) = ctx.stats { s.constant_steps += 1; }
+                if STATS && let Some(ref mut s) = ctx.stats {
+                    s.constant_steps += 1;
+                }
                 idx = self.step::<F32>(nodes, base + idx, idx, ctx.const_features);
             }
 
@@ -396,20 +599,26 @@ impl Forest {
 
             // Leaf (walked past all constant nodes, could be leaf or varying).
             if node.is_leaf() {
-                if STATS && let Some(ref mut s) = ctx.stats { s.leaf_hits += 1; }
+                if STATS && let Some(ref mut s) = ctx.stats {
+                    s.leaf_hits += 1;
+                }
                 let val = node.value;
                 let start = ctx.start;
                 let mut m = row_mask;
                 while !m.is_zero() {
                     let r = m.trailing_zeros() as usize;
-                    unsafe { *ctx.results.get_unchecked_mut(start + r) += val; }
+                    unsafe {
+                        *ctx.results.get_unchecked_mut(start + r) += val;
+                    }
                     m = m.clear_lowest();
                 }
                 return;
             }
 
             // Varying split.
-            if STATS && let Some(ref mut s) = ctx.stats { s.varying_splits += 1; }
+            if STATS && let Some(ref mut s) = ctx.stats {
+                s.varying_splits += 1;
+            }
 
             let (left_mask, right_mask) = if use_precompute {
                 let pred_id = node.varying_pred_id as usize;
@@ -445,18 +654,24 @@ impl Forest {
             // Unsplit optimization.
             if use_unsplit {
                 if light_mask.is_zero() {
-                    if STATS && let Some(ref mut s) = ctx.stats { s.unsplit_skips += 1; }
+                    if STATS && let Some(ref mut s) = ctx.stats {
+                        s.unsplit_skips += 1;
+                    }
                     idx = heavy_idx;
                     continue;
                 }
                 if heavy_mask.is_zero() {
-                    if STATS && let Some(ref mut s) = ctx.stats { s.unsplit_skips += 1; }
+                    if STATS && let Some(ref mut s) = ctx.stats {
+                        s.unsplit_skips += 1;
+                    }
                     idx = light_idx;
                     continue;
                 }
             }
 
-            if STATS && let Some(ref mut s) = ctx.stats { s.recursive_calls += 1; }
+            if STATS && let Some(ref mut s) = ctx.stats {
+                s.recursive_calls += 1;
+            }
             self.partial_eval::<F32, M, G, STATS>(ctx, light_idx, light_mask);
             idx = heavy_idx;
             row_mask = heavy_mask;
@@ -504,12 +719,17 @@ impl Forest {
 
                 let mut row_ptr = 0usize;
                 let mut non_nan_left = M::ZERO;
-                let preds = &self.varying_predicates[range.num_start as usize..range.num_end as usize];
+                let preds =
+                    &self.varying_predicates[range.num_start as usize..range.num_end as usize];
                 let masks = &mut out_left_masks[range.num_start as usize..range.num_end as usize];
 
                 for (out, pred) in masks.iter_mut().zip(preds.iter()) {
                     let (threshold, default_left) = match pred {
-                        VaryingPredicate::Num { threshold, default_left, .. } => (*threshold, *default_left),
+                        VaryingPredicate::Num {
+                            threshold,
+                            default_left,
+                            ..
+                        } => (*threshold, *default_left),
                         _ => unreachable!(),
                     };
                     while row_ptr < n_non_nan {
@@ -525,7 +745,8 @@ impl Forest {
                 }
             }
 
-            let cat_preds = &self.varying_predicates[range.cat_start as usize..range.cat_end as usize];
+            let cat_preds =
+                &self.varying_predicates[range.cat_start as usize..range.cat_end as usize];
             let cat_masks = &mut out_left_masks[range.cat_start as usize..range.cat_end as usize];
             for (out, pred) in cat_masks.iter_mut().zip(cat_preds.iter()) {
                 let mut left_mask = M::ZERO;
@@ -548,7 +769,10 @@ impl Forest {
         out_left_masks: &mut [M],
     ) {
         debug_assert_eq!(out_left_masks.len(), self.varying_predicates.len());
-        for (out, pred) in out_left_masks.iter_mut().zip(self.varying_predicates.iter()) {
+        for (out, pred) in out_left_masks
+            .iter_mut()
+            .zip(self.varying_predicates.iter())
+        {
             let f = pred.feature() as usize;
             let col = &varying_cols[f];
             let mut left_mask = M::ZERO;
@@ -567,7 +791,10 @@ impl Forest {
 
     #[cfg(any(test, feature = "test-helpers"))]
     pub fn precompute_bruteforce(
-        &self, varying_cols: &[[f64; 32]; 64], n_rows: usize, f32_mode: bool,
+        &self,
+        varying_cols: &[[f64; 32]; 64],
+        n_rows: usize,
+        f32_mode: bool,
     ) -> Vec<u32> {
         let mut out = vec![0u32; self.varying_predicates.len()];
         for (i, pred) in self.varying_predicates.iter().enumerate() {
@@ -581,7 +808,9 @@ impl Forest {
                 } else {
                     pred.goes_left::<false>(val, &self.bitsets)
                 };
-                if goes_left { left_mask |= 1 << r; }
+                if goes_left {
+                    left_mask |= 1 << r;
+                }
             }
             out[i] = left_mask;
         }
@@ -590,7 +819,10 @@ impl Forest {
 
     #[cfg(any(test, feature = "test-helpers"))]
     pub fn precompute_sweep(
-        &self, varying_cols: &[[f64; 32]; 64], n_rows: usize, f32_mode: bool,
+        &self,
+        varying_cols: &[[f64; 32]; 64],
+        n_rows: usize,
+        f32_mode: bool,
     ) -> Vec<u32> {
         let mut out = vec![0u32; self.varying_predicates.len()];
         if f32_mode {
@@ -606,7 +838,11 @@ impl Forest {
     // -----------------------------------------------------------------------
 
     #[inline]
-    fn partition_mono_inc<const F32: bool, M: RowMask>(node: &Node, col: &[f64], row_mask: M) -> (M, M) {
+    fn partition_mono_inc<const F32: bool, M: RowMask>(
+        node: &Node,
+        col: &[f64],
+        row_mask: M,
+    ) -> (M, M) {
         let thresh = node.value;
         let default_left = node.default_left();
         let mut left = M::ZERO;
@@ -614,7 +850,9 @@ impl Forest {
         while !m.is_zero() {
             let r = m.trailing_zeros() as usize;
             if col[r].is_nan() {
-                if default_left { left = left.set_bit(r); }
+                if default_left {
+                    left = left.set_bit(r);
+                }
                 m = m.clear_lowest();
             } else if threshold_go_left::<F32>(col[r], thresh) {
                 left = left.set_bit(r);
@@ -624,7 +862,9 @@ impl Forest {
                     m = m.clear_lowest();
                     while !m.is_zero() {
                         let r2 = m.trailing_zeros() as usize;
-                        if col[r2].is_nan() { left = left.set_bit(r2); }
+                        if col[r2].is_nan() {
+                            left = left.set_bit(r2);
+                        }
                         m = m.clear_lowest();
                     }
                 }
@@ -635,14 +875,20 @@ impl Forest {
     }
 
     #[inline]
-    fn partition_mono_dec<const F32: bool, M: RowMask>(node: &Node, col: &[f64], row_mask: M) -> (M, M) {
+    fn partition_mono_dec<const F32: bool, M: RowMask>(
+        node: &Node,
+        col: &[f64],
+        row_mask: M,
+    ) -> (M, M) {
         let thresh = node.value;
         let mut left = M::ZERO;
         let mut m = row_mask;
         while !m.is_zero() {
             let r = m.trailing_zeros() as usize;
             if col[r].is_nan() {
-                if node.default_left() { left = left.set_bit(r); }
+                if node.default_left() {
+                    left = left.set_bit(r);
+                }
                 m = m.clear_lowest();
             } else if threshold_go_left::<F32>(col[r], thresh) {
                 left = left.set_bit(r);
@@ -650,7 +896,9 @@ impl Forest {
                 while !m.is_zero() {
                     let r2 = m.trailing_zeros() as usize;
                     if col[r2].is_nan() {
-                        if node.default_left() { left = left.set_bit(r2); }
+                        if node.default_left() {
+                            left = left.set_bit(r2);
+                        }
                     } else {
                         left = left.set_bit(r2);
                     }
@@ -665,7 +913,11 @@ impl Forest {
     }
 
     #[inline]
-    fn partition_non_mono<const F32: bool, M: RowMask>(node: &Node, col: &[f64], row_mask: M) -> (M, M) {
+    fn partition_non_mono<const F32: bool, M: RowMask>(
+        node: &Node,
+        col: &[f64],
+        row_mask: M,
+    ) -> (M, M) {
         let thresh = node.value;
         let mut left = M::ZERO;
         let mut m = row_mask;
@@ -673,7 +925,9 @@ impl Forest {
             let r = m.trailing_zeros() as usize;
             m = m.clear_lowest();
             if col[r].is_nan() {
-                if node.default_left() { left = left.set_bit(r); }
+                if node.default_left() {
+                    left = left.set_bit(r);
+                }
             } else if threshold_go_left::<F32>(col[r], thresh) {
                 left = left.set_bit(r);
             }
@@ -682,7 +936,12 @@ impl Forest {
     }
 
     #[inline]
-    fn partition_per_row<const F32: bool, M: RowMask>(&self, node: &Node, row_ptrs: &[&[f64]], row_mask: M) -> (M, M) {
+    fn partition_per_row<const F32: bool, M: RowMask>(
+        &self,
+        node: &Node,
+        row_ptrs: &[&[f64]],
+        row_mask: M,
+    ) -> (M, M) {
         let mut left = M::ZERO;
         let mut m = row_mask;
         while !m.is_zero() {
@@ -708,18 +967,52 @@ mod tests {
 
     fn num_node(threshold: f64, default_left: bool) -> Node {
         Node {
-            value: threshold, skip: -1, varying_pred_id: u16::MAX,
-            feature: 0, flags: u8::from(default_left), cat_n_words: 0,
+            value: threshold,
+            skip: -1,
+            varying_pred_id: u16::MAX,
+            feature: 0,
+            flags: u8::from(default_left),
+            cat_n_words: 0,
         }
     }
 
     #[test]
     fn test_partition_mono_inc_nan_after_threshold() {
         let node = num_node(3.0, true);
-        let col = &[1.0, 2.0, 5.0, f64::NAN, 8.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0][..];
+        let col = &[
+            1.0,
+            2.0,
+            5.0,
+            f64::NAN,
+            8.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ][..];
         let (left, right) = Forest::partition_mono_inc::<false, u32>(&node, col, 0b11111u32);
         assert_eq!(left, 0b01011);
         assert_eq!(right, 0b10100);
@@ -728,10 +1021,40 @@ mod tests {
     #[test]
     fn test_partition_mono_inc_nan_no_default_left() {
         let node = num_node(3.0, false);
-        let col = &[1.0, 2.0, 5.0, f64::NAN, 8.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0][..];
+        let col = &[
+            1.0,
+            2.0,
+            5.0,
+            f64::NAN,
+            8.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ][..];
         let (left, right) = Forest::partition_mono_inc::<false, u32>(&node, col, 0b11111u32);
         assert_eq!(left, 0b00011);
         assert_eq!(right, 0b11100);
@@ -740,10 +1063,40 @@ mod tests {
     #[test]
     fn test_partition_mono_inc_nan_before_threshold() {
         let node = num_node(3.0, true);
-        let col = &[f64::NAN, 1.0, 2.0, 5.0, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0][..];
+        let col = &[
+            f64::NAN,
+            1.0,
+            2.0,
+            5.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ][..];
         let (left, right) = Forest::partition_mono_inc::<false, u32>(&node, col, 0b1111u32);
         assert_eq!(left, 0b0111);
         assert_eq!(right, 0b1000);
@@ -753,22 +1106,39 @@ mod tests {
 
     fn sweep_forest(preds: Vec<VaryingPredicate>, ranges: Vec<FeatureRange>) -> Forest {
         Forest {
+            output: crate::parser::Output {
+                base_score: 0.0,
+                divisor: 1.0,
+                postprocessor: crate::parser::Postprocessor::Sigmoid(1.0),
+            },
+            compiled_config: WalkerConfig::try_new(64, 32, &(0..64).collect::<Vec<_>>(), &[], &[])
+                .unwrap(),
             trees: Vec::new(),
             config: WalkerConfig {
-                n_features: 64, max_group_width: 32,
-                varying_mask: u128::MAX, mono_inc_mask: 0, mono_dec_mask: 0,
+                n_features: 64,
+                max_group_width: 32,
+                varying_mask: u128::from(u64::MAX),
+                mono_inc_mask: 0,
+                mono_dec_mask: 0,
                 ablation: AblationMode::default(),
             },
-            nodes: Vec::new(), bitsets: Vec::new(),
-            varying_predicates: preds, feature_ranges: ranges,
+            nodes: Vec::new(),
+            bitsets: Vec::new(),
+            varying_predicates: preds,
+            feature_ranges: ranges,
             threshold_type: ThresholdType::F64,
-            prefix_groups: Vec::new(), prefix_depth: 0,
+            prefix_groups: Vec::new(),
+            prefix_depth: 0,
             workspace: None,
         }
     }
 
     fn num_pred(feature: u16, threshold: f64, default_left: bool) -> VaryingPredicate {
-        VaryingPredicate::Num { feature, threshold, default_left }
+        VaryingPredicate::Num {
+            feature,
+            threshold,
+            default_left,
+        }
     }
 
     fn run_sweep(forest: &Forest, cols: &[[f64; 32]; 64], n_rows: usize) -> Vec<u32> {
@@ -781,10 +1151,18 @@ mod tests {
     fn test_sweep_all_nan_column() {
         let forest = sweep_forest(
             vec![num_pred(0, 5.0, true), num_pred(0, 10.0, false)],
-            vec![FeatureRange { feature: 0, num_start: 0, num_end: 2, cat_start: 2, cat_end: 2 }],
+            vec![FeatureRange {
+                feature: 0,
+                num_start: 0,
+                num_end: 2,
+                cat_start: 2,
+                cat_end: 2,
+            }],
         );
         let mut cols = Box::new([[0.0f64; 32]; 64]);
-        for r in 0..4 { cols[0][r] = f64::NAN; }
+        for r in 0..4 {
+            cols[0][r] = f64::NAN;
+        }
         let masks = run_sweep(&forest, &cols, 4);
         assert_eq!(masks[0], 0b1111);
         assert_eq!(masks[1], 0b0000);
@@ -794,7 +1172,13 @@ mod tests {
     fn test_sweep_single_row() {
         let forest = sweep_forest(
             vec![num_pred(0, 3.0, false), num_pred(0, 7.0, false)],
-            vec![FeatureRange { feature: 0, num_start: 0, num_end: 2, cat_start: 2, cat_end: 2 }],
+            vec![FeatureRange {
+                feature: 0,
+                num_start: 0,
+                num_end: 2,
+                cat_start: 2,
+                cat_end: 2,
+            }],
         );
         let mut cols = Box::new([[0.0f64; 32]; 64]);
         cols[0][0] = 5.0;
@@ -807,10 +1191,18 @@ mod tests {
     fn test_sweep_all_rows_identical() {
         let forest = sweep_forest(
             vec![num_pred(0, 3.0, false), num_pred(0, 7.0, false)],
-            vec![FeatureRange { feature: 0, num_start: 0, num_end: 2, cat_start: 2, cat_end: 2 }],
+            vec![FeatureRange {
+                feature: 0,
+                num_start: 0,
+                num_end: 2,
+                cat_start: 2,
+                cat_end: 2,
+            }],
         );
         let mut cols = Box::new([[0.0f64; 32]; 64]);
-        for r in 0..8 { cols[0][r] = 5.0; }
+        for r in 0..8 {
+            cols[0][r] = 5.0;
+        }
         let masks = run_sweep(&forest, &cols, 8);
         assert_eq!(masks[0], 0);
         assert_eq!(masks[1], 0b1111_1111);
@@ -820,10 +1212,18 @@ mod tests {
     fn test_sweep_max_group_width() {
         let forest = sweep_forest(
             vec![num_pred(0, 16.0, false)],
-            vec![FeatureRange { feature: 0, num_start: 0, num_end: 1, cat_start: 1, cat_end: 1 }],
+            vec![FeatureRange {
+                feature: 0,
+                num_start: 0,
+                num_end: 1,
+                cat_start: 1,
+                cat_end: 1,
+            }],
         );
         let mut cols = Box::new([[0.0f64; 32]; 64]);
-        for r in 0..32 { cols[0][r] = r as f64; }
+        for r in 0..32 {
+            cols[0][r] = r as f64;
+        }
         let masks = run_sweep(&forest, &cols, 32);
         let expected: u32 = (0..=16).fold(0u32, |m, r| m | (1 << r));
         assert_eq!(masks[0], expected);
@@ -833,11 +1233,20 @@ mod tests {
     fn test_sweep_mixed_nan_and_values() {
         let forest = sweep_forest(
             vec![num_pred(0, 2.0, true), num_pred(0, 4.0, false)],
-            vec![FeatureRange { feature: 0, num_start: 0, num_end: 2, cat_start: 2, cat_end: 2 }],
+            vec![FeatureRange {
+                feature: 0,
+                num_start: 0,
+                num_end: 2,
+                cat_start: 2,
+                cat_end: 2,
+            }],
         );
         let mut cols = Box::new([[0.0f64; 32]; 64]);
-        cols[0][0] = f64::NAN; cols[0][1] = 1.0; cols[0][2] = f64::NAN;
-        cols[0][3] = 5.0; cols[0][4] = 3.0;
+        cols[0][0] = f64::NAN;
+        cols[0][1] = 1.0;
+        cols[0][2] = f64::NAN;
+        cols[0][3] = 5.0;
+        cols[0][4] = 3.0;
         let masks = run_sweep(&forest, &cols, 5);
         assert_eq!(masks[0], 0b00111);
         assert_eq!(masks[1], 0b10010);
@@ -846,11 +1255,23 @@ mod tests {
     #[test]
     fn test_sweep_no_numerical_predicates() {
         let forest = sweep_forest(
-            vec![VaryingPredicate::CatInline { feature: 0, default_left: false, word: 0b1010 }],
-            vec![FeatureRange { feature: 0, num_start: 0, num_end: 0, cat_start: 0, cat_end: 1 }],
+            vec![VaryingPredicate::CatInline {
+                feature: 0,
+                default_left: false,
+                word: 0b1010,
+            }],
+            vec![FeatureRange {
+                feature: 0,
+                num_start: 0,
+                num_end: 0,
+                cat_start: 0,
+                cat_end: 1,
+            }],
         );
         let mut cols = Box::new([[0.0f64; 32]; 64]);
-        cols[0][0] = 0.0; cols[0][1] = 1.0; cols[0][2] = 3.0;
+        cols[0][0] = 0.0;
+        cols[0][1] = 1.0;
+        cols[0][2] = 3.0;
         let masks = run_sweep(&forest, &cols, 3);
         assert_eq!(masks[0], 0b110);
     }
@@ -859,13 +1280,24 @@ mod tests {
     fn test_sweep_f32_threshold_collisions() {
         let t1: f64 = 1.0 + f64::from(2.0f32.powi(-24));
         let t2: f64 = 1.0 + f64::from(2.0f32.powi(-25));
-        assert_eq!((t1 as f32).to_bits(), (t2 as f32).to_bits(), "precondition: same f32");
+        assert_eq!(
+            (t1 as f32).to_bits(),
+            (t2 as f32).to_bits(),
+            "precondition: same f32"
+        );
         let forest = sweep_forest(
             vec![num_pred(0, t1, false), num_pred(0, t2, false)],
-            vec![FeatureRange { feature: 0, num_start: 0, num_end: 2, cat_start: 2, cat_end: 2 }],
+            vec![FeatureRange {
+                feature: 0,
+                num_start: 0,
+                num_end: 2,
+                cat_start: 2,
+                cat_end: 2,
+            }],
         );
         let mut cols = Box::new([[0.0f64; 32]; 64]);
-        cols[0][0] = 1.0; cols[0][1] = 1.000_000_15;
+        cols[0][0] = 1.0;
+        cols[0][1] = 1.000_000_15;
         let mut out = vec![0u32; 2];
         forest.precompute_varying_masks::<true, u32, 32>(&cols, 2, &mut out);
         assert_eq!(out[0], out[1]);
