@@ -18,8 +18,8 @@ const TOL_F32: f64 = 1e-5;
 /// Partial eval vs full walk: must be bitwise identical (same code path, same precision).
 const TOL_EXACT: f64 = 1e-15;
 
-/// simd-json addresses documents with 32-bit offsets.
-const SIMD_JSON_MAX_BYTES: u64 = u32::MAX as u64;
+/// Current importer bounds JSON memory; larger models use streaming binary.
+const SIMD_JSON_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Treelite model for a config: the binary export when present (the benchmark
 /// harness prefers it), else JSON. The largest grid model's JSON export
@@ -47,7 +47,8 @@ struct TestConfig {
 
 /// Discover all (dataset, params, framework) combos that have artifacts.
 fn all_configs() -> Vec<TestConfig> {
-    let base = PathBuf::from(ARTIFACTS_BASE);
+    let base = std::env::var_os("TEST_ARTIFACTS_BASE")
+        .map_or_else(|| PathBuf::from(ARTIFACTS_BASE), PathBuf::from);
     let mut configs = Vec::new();
 
     let mut datasets: Vec<_> = std::fs::read_dir(&base)
@@ -103,6 +104,21 @@ fn all_configs() -> Vec<TestConfig> {
 
 fn load_forest(param_dir: &Path, framework: &str) -> Forest {
     Forest::load(model_file(param_dir, framework), param_dir.join("walker_config.json"))
+}
+
+fn load_forest_at_width(param_dir: &Path, framework: &str, width: usize) -> Forest {
+    let mut config = WalkerConfig::from_file(param_dir.join("walker_config.json"));
+    config.max_group_width = width;
+    let path = model_file(param_dir, framework);
+    let format = if path.extension().is_some_and(|e| e == "bin") {
+        treewalker_gbdt::ModelFormat::TreeliteBinaryV4
+    } else {
+        treewalker_gbdt::ModelFormat::TreeliteJson
+    };
+    Forest::from_reader(
+        std::fs::File::open(path).unwrap(), format, config,
+        &treewalker_gbdt::ParseConfig::default(),
+    ).unwrap()
 }
 
 fn load_test_data(param_dir: &Path) -> (Vec<f64>, usize) {
@@ -506,13 +522,10 @@ fn test_cat_out_of_range_partial_matches_full() {
 /// overflow bug at width=16 (where `(1u16 << 16) - 1` wrapped to 0).
 #[test]
 fn test_width_32_boundary() {
-    // Find any config with a real model. We'll override max_group_width to 32.
+    // Load a real model with max_group_width set to the u32 boundary.
     let base_cfg = first_config();
-    let mut forest = load_forest(&base_cfg.param_dir, base_cfg.framework);
+    let mut forest = load_forest_at_width(&base_cfg.param_dir, base_cfg.framework, 32);
     let nf = forest.config.n_features;
-
-    // Override max_group_width to 32 (the u32 boundary).
-    forest.config.max_group_width = 32;
 
     // Build synthetic test data: 32 rows × n_features.
     // Use the first observation's constant features, vary the TV features linearly.
@@ -670,13 +683,11 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
     let first_cfg = all_configs().into_iter().next()
         .expect("No configs found — run prepare.py");
 
-    let mut forest = load_forest(&first_cfg.param_dir, first_cfg.framework);
+    let mut forest = load_forest_at_width(&first_cfg.param_dir, first_cfg.framework, target_width);
     let (orig_data, orig_n_rows) = load_test_data(&first_cfg.param_dir);
     let nf = forest.config.n_features;
-    let orig_gw = forest.config.max_group_width;
-
-    // Override max_group_width to test the wider mask path.
-    forest.config.max_group_width = target_width;
+    let orig_gw = WalkerConfig::from_file(first_cfg.param_dir.join("walker_config.json"))
+        .max_group_width;
 
     // Build synthetic groups: take the first 10 original groups' constant
     // features, expand each to `target_width` rows by cycling varying features

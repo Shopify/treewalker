@@ -1,0 +1,111 @@
+{
+  "treelite": "4.7.0",
+  "numpy": "2.2.6",
+  "sklearn": "1.6.1",
+  "models": [
+    {
+      "name": "sigmoid_f64",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "sigmoid_f32",
+      "input_dtype": "float32",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-07,
+      "rtol": 1e-07
+    },
+    {
+      "name": "sigmoid_alpha",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "identity",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "ranking",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "average_base",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "categories_left",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "categories_right",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "categories_f32",
+      "input_dtype": "float32",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-07,
+      "rtol": 1e-07
+    },
+    {
+      "name": "lt_zero",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "positive_infinity",
+      "input_dtype": "float64",
+      "json": false,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "negative_infinity",
+      "input_dtype": "float64",
+      "json": false,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    },
+    {
+      "name": "random_forest",
+      "input_dtype": "float64",
+      "json": true,
+      "oracle": "Treelite GTIL 4.7.0",
+      "atol": 1e-14,
+      "rtol": 1e-14
+    }
+  ]
+}

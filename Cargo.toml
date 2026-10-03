@@ -5,7 +5,7 @@ edition = "2024"
 description = "Grouped tree-ensemble inference via recursive partial evaluation"
 license = "MIT"
 repository = "https://github.com/Shopify/treewalker"
-include = ["src/**", "tests/**", "Cargo.toml", "README.md", "LICENSE"]
+include = ["src/**", "tests/**", "docs/treelite-loading.md", "docs/treelite-loading-validation.md", "Cargo.toml", "README.md", "LICENSE"]
 
 [features]
 test-helpers = []  # expose internal precompute functions for artifact integration tests

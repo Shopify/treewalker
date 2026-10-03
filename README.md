@@ -10,10 +10,9 @@ the engine, the benchmark harness, the scripts that turn public datasets into
 models and benchmark runs, the result CSVs behind every number in the paper,
 and the cloud setup used for the measurements.
 
-The engine sources (`src/predict.rs`, `src/forest.rs`, `src/parser/`,
-`src/mask.rs`, `src/config.rs`) are identical to the revision that produced
-the factorial-grid results; later changes only extend the benchmark harness
-(scenario grid, `--validate`).
+The released results use the engine preserved under the `neurips2026` tag.
+The current library adds validated scalar Treelite loading. These changes are
+separate from the archived paper measurements.
 
 This repository serves two purposes: as a source for the library and as a
 permanent archive of the code at time of submission. The latter can always be
@@ -41,9 +40,10 @@ cargo test --release
 cargo package
 ```
 
-The package includes the Rust library sources, README, and license. Benchmark
-sources, result data, Python scripts, Terraform files, and the repository's
-native CPU build settings are excluded.
+The package includes the Rust library sources, loading documentation, README,
+license, and small independent compatibility fixtures with their optional Python
+generators. Benchmark sources, result data, experiment scripts, Terraform files,
+and the repository's native CPU build settings are excluded.
 
 The benchmark crate has its own manifest and lockfile. Build it explicitly;
 `--target-dir target` preserves the binary path used by the experiment scripts:
@@ -55,6 +55,19 @@ cargo build --manifest-path benchmarks/Cargo.toml --target-dir target \
 
 The `external-bench` feature enables the C FFI baselines and QuickScorer.
 `quickscorer-bench` enables the legacy CLI's QuickScorer baseline.
+
+## Loading models
+
+Use `Forest::try_load("model.bin", "walker_config.json")` for fallible loading.
+`Forest::from_reader` and `from_bytes` accept an explicit `ModelFormat` and a
+validated `WalkerConfig`. The existing panic-based loaders remain available.
+
+The supported subset includes scalar regression, ranking and binary
+classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base
+scores. Binary Treelite v4 is recommended; native XGBoost JSON must first be
+converted through Treelite. Limits are 64 features and 128 rows per group.
+See [Treelite loading](docs/treelite-loading.md) for export examples, the exact
+output and precision policy, errors, limits, and the caller's grouping contract.
 
 ## Datasets
 

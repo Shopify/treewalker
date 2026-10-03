@@ -136,14 +136,14 @@ fn test_lightgbm_json_matches_native() {
 }
 
 #[test]
-#[should_panic(expected = "Model file must be .json or .bin")]
+#[should_panic(expected = "must end in .bin or .json")]
 fn test_reject_non_json() {
     let dir = test_dir();
     Forest::load("model.csv", dir.join("walker_config.json"));
 }
 
 #[test]
-#[should_panic(expected = "Only binary-logistic (sigmoid) models supported")]
+#[should_panic(expected = "unknown JSON field")]
 fn test_reject_unknown_json_schema() {
     let dir = test_dir();
     if !require_artifacts(&dir) { return; }
