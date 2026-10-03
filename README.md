@@ -15,6 +15,10 @@ The engine sources (`src/predict.rs`, `src/forest.rs`, `src/parser/`,
 the factorial-grid results; later changes only extend the benchmark harness
 (scenario grid, `--validate`).
 
+This repository serves two purposes: as a source for the library and as a
+permanent archive of the code at time of submission. The latter can always be
+found [under the neurips2026 tag](https://github.com/Shopify/treewalker/releases/tag/neurips2026).
+
 ## Layout
 
 | Path | Contents |
