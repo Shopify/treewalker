@@ -5,8 +5,8 @@
 //!
 //! # Architecture
 //!
-//! [`CellData`] loads test data, model, and group boundaries for one cell.
-//! [`collect_methods`] builds `BenchMethod` closures for all available prediction
+//! `CellData` loads test data, model, and group boundaries for one cell.
+//! `collect_methods` builds `BenchMethod` closures for all available prediction
 //! methods. Grid runners iterate cells, call these helpers, run [`bench_blocked`],
 //! and write CSV rows.
 
