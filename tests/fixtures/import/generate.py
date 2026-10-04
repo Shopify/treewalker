@@ -1,6 +1,16 @@
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["treelite==4.7.2", "numpy==2.5.3", "scikit-learn==1.9.1", "scipy==1.18.1"]
+#
+# [[tool.uv.index]]
+# name = "pypi"
+# url = "https://pypi.org/simple"
+# ///
 """Independent fixtures; normal Rust tests need no Python.
 
-DYLD_LIBRARY_PATH=/opt/homebrew/opt/libomp/lib uv run --no-project --with treelite==4.7.0 --with numpy==2.2.6 --with scikit-learn==1.6.1 --with scipy==1.15.3 python tests/fixtures/import/generate.py
+uv run --locked --script tests/fixtures/import/generate.py
+
+generate.py.lock pins every dependency, transitive ones included.
 """
 import json
 from pathlib import Path
@@ -32,7 +42,7 @@ def save(name, model, dtype='float64', json_ok=True, inputs=data):
     ref = treelite.gtil.predict(model, inputs.astype(dtype), nthread=1).reshape(-1, 1)
     raw(root / f'{name}_reference.bin', ref)
     manifest['models'].append(dict(name=name, input_dtype=dtype, json=json_ok,
-        oracle='Treelite GTIL 4.7.0', atol=1e-7 if dtype=='float32' else 1e-14, rtol=1e-7 if dtype=='float32' else 1e-14))
+        oracle=f'Treelite GTIL {treelite.__version__}', atol=1e-7 if dtype=='float32' else 1e-14, rtol=1e-7 if dtype=='float32' else 1e-14))
 
 def build(name, dtype='float64', task='kBinaryClf', post='sigmoid', alpha=1.0, average=False, base=0.125, cat=False, invert=False, threshold=1.0, op=None, ids=None, json_ok=True):
     builder = ModelBuilder(threshold_type=dtype, leaf_output_type=dtype,

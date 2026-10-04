@@ -222,11 +222,13 @@ on `PATH` or given by `--llc` and `--clang`. Every `uv run` passes
 syncs. `sweep_bench` loads the native LightGBM and XGBoost
 libraries given by `--lgb-lib` and `--xgb-lib`.
 
-`uv.lock` and `experiments/compile.py.lock` resolve against PyPI through the
-`pypi` index that the project and the script declare, which takes priority
-over any index in a user's uv configuration. Relock with `uv lock` and
-`uv lock --script experiments/compile.py`; `uv lock --check` (with `--script`
-for the script) verifies a lock without changing it.
+`uv.lock`, `experiments/compile.py.lock` and
+`tests/fixtures/import/generate.py.lock` resolve against PyPI through the
+`pypi` index that the project and both scripts declare, which takes priority
+over any index in a user's uv configuration. Relock with `uv lock`,
+`uv lock --script experiments/compile.py` and
+`uv lock --script tests/fixtures/import/generate.py`; `uv lock --check` (with
+`--script` for a script) verifies a lock without changing it.
 
 ### What to expect from a rerun
 
