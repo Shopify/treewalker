@@ -1,12 +1,13 @@
 //! Grid definitions and artifact directory discovery.
 //!
-//! Replaces the Python grid constants and dataset scanning logic from
-//! `sweep.py` and `utils.py`.
+//! The released grids' constants and the artifact directory scan. The grids
+//! now live in `experiments/grids.toml`; the runner redesign reads them from
+//! the execution manifest instead.
 
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
-// Grid combo constants (from Python utils.py)
+// Grid combo constants (the released grids)
 // ---------------------------------------------------------------------------
 
 /// Grid 1: full factorial `T × L × H`.

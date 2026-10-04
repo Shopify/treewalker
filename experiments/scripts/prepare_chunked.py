@@ -9,7 +9,7 @@ We compare per-row latency against the G=128 reference plateau.
 
 Dataset: SUPPORT only. Model: the existing reference config nt500_md8_h16
 (n_trees=500, max_depth=8, horizon=16), LightGBM. The anchor (500, 8, 16) is
-the "reference" entry in ABLATION_ANCHORS_B (utils.py), so no deviation.
+the "reference" anchor of the ablation suite (grids.toml), so no deviation.
 
 Construction (deterministic, np.random.default_rng(42)):
   SUPPORT test data is a fixed panel of 1774 patients x 16 rows. Each patient's
@@ -43,7 +43,7 @@ Rust edits): each chunked cell is written as a self-contained artifact dir
 under experiments/artifacts/support/e2_chunked_g{G}/ with walker_config.json,
 test_data.bin, group_offsets.bin, lightgbm/model_treelite.json (copied) and
 lightgbm/predictions.npy (GTIL on the custom rows, same treelite.gtil.predict
-call prepare.py uses). The test discovers these dirs and verifies
+call treewalker_exp.train uses). The test discovers these dirs and verifies
 forest.predict (per offset chunk) vs predictions.npy within 1e-14.
 
 Output:
@@ -64,24 +64,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform as _platform
 import shutil
-import struct
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import (  # noqa: E402
-    ARTIFACTS_DIR,
-    DATA_DIR,
-    PROJECT_ROOT,
-    detect_architecture,
-    read_group_offsets,
-    write_group_offsets,
-    write_raw_f64,
-)
+from treewalker_exp.formats import read_group_offsets, read_matrix, write_group_offsets
+from treewalker_exp.formats import write_matrix as write_raw_f64
+from treewalker_exp.paths import resolve
+
+_PATHS = resolve()
+ARTIFACTS_DIR, DATA_DIR, PROJECT_ROOT = _PATHS.artifacts, _PATHS.data, _PATHS.repo
+
+
+def detect_architecture() -> str:
+    return "arm" if _platform.machine().lower() in ("arm64", "aarch64") else "intel"
 
 # ---------------------------------------------------------------------------
 # E2 configuration
@@ -104,16 +104,12 @@ MAX_TIME_SECS = 15.0
 
 
 # ---------------------------------------------------------------------------
-# Low-level I/O (formats match utils.py / sweep_bench exactly)
+# Low-level I/O (formats from treewalker_exp.formats, as sweep_bench reads them)
 # ---------------------------------------------------------------------------
 
 def load_test_data(path: Path) -> np.ndarray:
     """Load test_data.bin -> (n_rows, n_cols) float64 array."""
-    raw = path.read_bytes()
-    n_rows = struct.unpack("<Q", raw[:8])[0]
-    n_cols = struct.unpack("<Q", raw[8:16])[0]
-    arr = np.frombuffer(raw[16:], dtype="<f8").reshape(n_rows, n_cols)
-    return np.ascontiguousarray(arr)
+    return np.array(read_matrix(path))
 
 
 def load_walker_config(path: Path) -> dict:
@@ -195,7 +191,7 @@ def build_chunked_cell(panels: np.ndarray, logical_G: int, out_dir: Path,
 def generate_gtil_predictions(rows: np.ndarray, out_dir: Path) -> np.ndarray:
     """Generate LightGBM GTIL reference predictions on the custom rows.
 
-    Same call as prepare.py::_generate_predictions for lightgbm (f64 thresholds,
+    Same call as treewalker_exp.train.Reference for lightgbm (f64 thresholds,
     exact match with TreeWalker). Writes lightgbm/predictions.npy.
     """
     import treelite
@@ -476,7 +472,7 @@ def main():
     print(f"E2 chunked-G: platform={platform}, cells={cells}, R={TOTAL_ROWS}, "
           f"pool={POOL_SIZE}, chunk={CHUNK}", file=sys.stderr)
 
-    # Pre-flight: the reference SUPPORT artifacts must exist (produced by prepare.py).
+    # Pre-flight: the reference SUPPORT artifacts must exist (produced by treewalker-exp prepare).
     # On a fresh checkout this is the only external dependency; fail loudly if absent.
     required = [REF_PARAM_DIR / "test_data.bin",
                 REF_PARAM_DIR / "walker_config.json",
@@ -484,9 +480,9 @@ def main():
                 REF_PARAM_DIR / "lightgbm" / "model_treelite.json"]
     missing = [str(p) for p in required if not p.exists()]
     if missing:
-        print("E2 ERROR: reference SUPPORT artifacts missing. Run prepare.py first, e.g.\n"
-              "  uv run python3 experiments/scripts/prepare.py "
-              "--datasets support --combos 500,8,16 --skip-compiled\n"
+        print("E2 ERROR: reference SUPPORT artifacts missing. Prepare them first:\n"
+              "  uv run treewalker-exp prepare --suite factorial "
+              "--cell 'support/nt500_md8_h16/*/panel'\n"
               "Missing:", file=sys.stderr)
         for m in missing:
             print(f"    {m}", file=sys.stderr)

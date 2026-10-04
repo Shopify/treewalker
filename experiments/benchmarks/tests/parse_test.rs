@@ -16,7 +16,10 @@ fn test_dir() -> PathBuf {
 fn require_artifacts(dir: &Path) -> bool {
     let needed = dir.join("walker_config.json");
     if !needed.exists() {
-        eprintln!("Skipping: {} not found (run prepare.py)", needed.display());
+        eprintln!(
+            "Skipping: {} not found (run treewalker-exp prepare)",
+            needed.display()
+        );
         return false;
     }
     true
@@ -44,7 +47,10 @@ fn empty_thresholds(path: &Path) -> usize {
 fn load_json(dir: &Path, parse: &LoadOptions) -> Option<Forest> {
     let model = dir.join("lightgbm/model_treelite.json");
     if !model.exists() {
-        eprintln!("Skipping: {} not found (run prepare.py)", model.display());
+        eprintln!(
+            "Skipping: {} not found (run treewalker-exp prepare)",
+            model.display()
+        );
         return None;
     }
     match Forest::load_with(&model, dir.join("walker_config.json"), parse) {

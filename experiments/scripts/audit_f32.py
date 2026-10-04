@@ -40,6 +40,8 @@ from pathlib import Path
 import numpy as np
 import xgboost as xgb
 
+from treewalker_exp.formats import read_matrix
+
 
 ARTIFACTS = Path("experiments/artifacts")
 
@@ -57,18 +59,11 @@ def kahan_sum(values: list[float]) -> float:
 
 
 def load_test_data_bin(path: Path, n_features: int) -> np.ndarray:
-    """Read raw f64 test data (matches src/lib.rs::load_raw_f64).
-
-    Format:
-      n_rows u64 LE (8 bytes)
-      n_cols u64 LE (8 bytes)
-      data: n_rows * n_cols * f64 LE
-    """
-    raw = path.read_bytes()
-    n_rows = int.from_bytes(raw[0:8], "little")
-    n_cols = int.from_bytes(raw[8:16], "little")
-    assert n_cols == n_features, f"feature count mismatch: bin says {n_cols}, expected {n_features}"
-    data = np.frombuffer(raw[16:], dtype=np.float64).reshape(n_rows, n_cols).copy()
+    """Read test_data.bin (treewalker_exp.formats; matches load_raw_f64 in Rust)."""
+    data = np.array(read_matrix(path))
+    assert data.shape[1] == n_features, (
+        f"feature count mismatch: bin says {data.shape[1]}, expected {n_features}"
+    )
     return data
 
 

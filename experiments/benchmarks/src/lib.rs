@@ -713,7 +713,8 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
 // Grid 4: Group distribution experiments (Expedia only)
 // ---------------------------------------------------------------------------
 
-/// Known distribution subdirectory names (from prepare.py --prepare-groups).
+/// Distribution subdirectory names of the released Grid 4. treewalker-exp no
+/// longer writes them; only `empirical`, the parent directory, remains.
 const GROUP_DISTRIBUTIONS: &[&str] = &["empirical", "fixed8", "fixed16", "fixed32", "geom8"];
 
 fn run_grid4_distributions(config: &RunConfig) {
@@ -940,7 +941,7 @@ fn count_work(cd: &CellData, ablation: Ablation, results: &mut [f64]) -> WorkCou
 /// over all `(k, G)` cells, with work counters and an inline
 /// correctness check against the GTIL f64 reference.
 ///
-/// Layout (written by `prepare_scenario.py`):
+/// Layout (written by `treewalker-exp prepare --suite scenario-v1`):
 ///   `<artifacts>/scenario_credit/lightgbm/`  — shared trained model
 ///   `<artifacts>/scenario_credit/cells/k{K}_G{G}/` — per-cell data + config
 ///        + `reference.bin` (GTIL f64 reference for the correctness gate)

@@ -184,18 +184,12 @@ phase 8 "Python dependencies"
 run_as_bench "
   source \"\$HOME/.local/bin/env\"
   cd '$REPO_DIR'
-  uv sync
+  CXX='$REPO_DIR/infra/scripts/cxx-cstdint' uv sync --group baselines
 "
-
-# Install tl2cgen separately (optional dep — needs g++ wrapper on aarch64
-# because treelite's postprocessor.h is missing #include <cstdint>)
-cat > /usr/local/bin/g++-fix << 'GCCEOF'
-#!/bin/bash
-exec /usr/bin/g++ -include cstdint "$@"
-GCCEOF
-chmod +x /usr/local/bin/g++-fix
-run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && CXX=/usr/local/bin/g++-fix uv pip install 'tl2cgen>=1.0.0'" || log "WARNING: tl2cgen install failed"
-run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv pip install 'lleaves @ git+https://github.com/siboehm/lleaves.git@v1.4.1'" || log "WARNING: lleaves install failed"
+# tl2cgen comes from the locked baselines group; with no aarch64 Linux wheel
+# it builds from source there, through the tracked <cstdint> wrapper. lleaves
+# lives in experiments/compile.py's script lock, which uv installs on first use.
+# Every later uv run passes --group baselines, so uv keeps tl2cgen installed.
 log "uv sync complete"
 
 # Override LightGBM .so with native-built version.
@@ -219,8 +213,8 @@ else
 fi
 
 # Verify imports and version match
-run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv run python3 -c 'import lightgbm; print(f\"lightgbm {lightgbm.__version__}\")'"
-run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv run python3 -c 'import xgboost; print(f\"xgboost {xgboost.__version__}\")'"
+run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv run --group baselines python3 -c 'import lightgbm; print(f\"lightgbm {lightgbm.__version__}\")'"
+run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv run --group baselines python3 -c 'import xgboost; print(f\"xgboost {xgboost.__version__}\")'"
 
 # ---------------------------------------------------------------------------
 # Phase 9: Generate / download artifacts
@@ -228,7 +222,7 @@ run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv run pytho
 if [ "$ROLE" = "trainer" ]; then
   phase 9 "Generate artifacts + upload (trainer role)"
 
-  # Pull any existing artifacts from GCS first so prepare.py skips them.
+  # Pull any existing artifacts from GCS first; prep reuses those whose manifests match.
   mkdir -p "$REPO_DIR/experiments/artifacts"
   chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
   if gcloud storage ls "$GCS_ARTIFACTS_URI/" &>/dev/null; then
@@ -237,7 +231,7 @@ if [ "$ROLE" = "trainer" ]; then
     # Remove stale sentinel so we write a fresh one after upload.
     rm -f "$REPO_DIR/experiments/artifacts/UPLOAD_DONE"
     chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
-    log "Pulled existing artifacts from GCS (prepare.py will skip them)"
+    log "Pulled existing artifacts from GCS (prep reuses those whose manifests match)"
   else
     log "No existing artifacts in GCS — training from scratch"
   fi
@@ -252,24 +246,24 @@ if [ "$ROLE" = "trainer" ]; then
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 experiments/scripts/prepare.py --datasets support --combos 500,8,16 --skip-compiled
-      uv run python3 experiments/scripts/prepare_scenario.py
-      uv run python3 experiments/scripts/prepare_chunked.py --stage prepare
-      uv run python3 experiments/scripts/prepare_chunked.py --stage correctness
+      uv run --group baselines treewalker-exp prepare --suite factorial --cell 'support/nt500_md8_h16/*/panel'
+      uv run --group baselines treewalker-exp prepare --suite scenario-v1 --validate
+      uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage prepare
+      uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage correctness
     "
     log "Rebuttal artifacts generated (SUPPORT + scenario + chunked), correctness gates passed"
   else
     # Expedia is not redistributable: Terraform uploads the locally built
     # parquet; check its fingerprint before training on it.
-    [ -n "$GCS_EXPEDIA_URI" ] || fail "bench_suite=paper needs expedia.parquet (see fetch_expedia.py)"
+    [ -n "$GCS_EXPEDIA_URI" ] || fail "bench_suite=paper needs expedia.parquet (see treewalker-exp fetch-expedia)"
     gcloud storage cp "$GCS_EXPEDIA_URI" "$REPO_DIR/experiments/data/expedia.parquet"
     chown $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/data/expedia.parquet"
     run_as_bench "
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 experiments/scripts/fetch_expedia.py --check-only
-      uv run python3 experiments/scripts/prepare.py --grid all --prepare-groups --skip-compiled
+      uv run --group baselines treewalker-exp fetch-expedia --check-only
+      uv run --group baselines treewalker-exp prepare --suite factorial
     "
     log "Artifacts generated (models + data)"
   fi
@@ -293,7 +287,8 @@ if [ "$ROLE" = "trainer" ]; then
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 experiments/scripts/prepare.py --grid all --compile-only
+      uv run --group baselines treewalker-exp compile-baselines --suite factorial
+      uv run --group baselines treewalker-exp build-bench
     "
     log "Local .so compilation complete"
   fi
@@ -332,14 +327,14 @@ else
 
   if [ "$BENCH_SUITE" = "rebuttal" ]; then
     # Rebuttal suite: artifacts (incl. scenario cells, chunked dirs, references)
-    # came from GCS. prepare_scenario skips existing artifacts but re-validates
-    # (builds sweep_bench as a side effect); chunked correctness re-runs on this arch.
+    # came from GCS. prepare reuses the cells whose manifests match and
+    # re-validates them (building sweep_bench); chunked correctness re-runs on this arch.
     run_as_bench "
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 experiments/scripts/prepare_scenario.py
-      uv run python3 experiments/scripts/prepare_chunked.py --stage correctness
+      uv run --group baselines treewalker-exp prepare --suite scenario-v1 --validate
+      uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage correctness
     "
     log "Rebuttal correctness gates passed on this architecture"
   else
@@ -348,7 +343,8 @@ else
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 experiments/scripts/prepare.py --grid all --compile-only
+      uv run --group baselines treewalker-exp compile-baselines --suite factorial
+      uv run --group baselines treewalker-exp build-bench
     "
     log "Local .so compilation complete"
   fi
@@ -432,7 +428,7 @@ if [ "$BENCH_SUITE" = "rebuttal" ]; then
     source \"\$HOME/.local/bin/env\"
     source \"\$HOME/.cargo/env\"
     cd '$REPO_DIR'
-    taskset -c 0 uv run python3 experiments/scripts/prepare_chunked.py --stage timing
+    taskset -c 0 uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage timing
   "
   log "E2 chunked-G timing complete"
 
@@ -441,7 +437,7 @@ if [ "$BENCH_SUITE" = "rebuttal" ]; then
   run_as_bench "
     source \"\$HOME/.local/bin/env\"
     cd '$REPO_DIR'
-    uv run python3 experiments/scripts/summarize_scenario.py --arch '$ARCH_LABEL' \
+    uv run --group baselines python3 experiments/scripts/summarize_scenario.py --arch '$ARCH_LABEL' \
       --platform-note 'GCE $MACHINE_TYPE, Ubuntu 24.04 LTS, SMT off, core-pinned (taskset -c 0)'
   "
   log "Rebuttal summaries written"

@@ -853,7 +853,7 @@ fn main() {
 
     // -----------------------------------------------------------------------
     // Validate mode: run TreeWalker on a cell and compare to an f64 reference.
-    // Triggered by --validate FILE. Used by prepare_scenario.py as the
+    // Triggered by --validate FILE. Used by `treewalker-exp prepare --validate` as the
     // per-cell correctness gate (TOL_F64 = 1e-14 for LightGBM).
     // -----------------------------------------------------------------------
     if args.iter().any(|a| a == "--validate") {
