@@ -318,3 +318,20 @@ fn predicate_masks_from_the_sweep_match_the_brute_force() {
         }
     }
 }
+
+#[test]
+fn staged_calls_check_their_input_before_resizing() {
+    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
+    let mut r = forest.research_predictor(Ablation::default());
+    let mut stages = Stages {
+        tree_sum: vec![f64::NAN; 4],
+        ..Default::default()
+    };
+    let rows = vec![0.0; 129 * 2];
+    let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        r.predict_group_stages(&rows, &mut stages);
+    }));
+    assert!(err.is_err(), "129 rows exceed max_group_width 128");
+    assert_eq!(stages.tree_sum.len(), 4);
+    assert!(stages.tree_sum.iter().all(|v| v.is_nan()));
+}
