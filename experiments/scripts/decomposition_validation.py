@@ -32,8 +32,6 @@ Notes:
 - The row-independent baseline G·T·L uses tree depth as a conservative
   ceiling on average root-to-leaf depth.
 """
-from __future__ import annotations
-
 import csv
 import sys
 from pathlib import Path

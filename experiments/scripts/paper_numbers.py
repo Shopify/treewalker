@@ -10,8 +10,6 @@ audit_f32.py, the correctness tests, and treewalker-exp prepare instead.
 
     uv run python3 experiments/scripts/paper_numbers.py
 """
-from __future__ import annotations
-
 import csv
 import math
 import statistics as st

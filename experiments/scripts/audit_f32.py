@@ -31,8 +31,6 @@ Outputs
   mean_ratio, worst_ratio).
 - Final decision printed at the end.
 """
-from __future__ import annotations
-
 import json
 import sys
 from pathlib import Path
