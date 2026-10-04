@@ -58,13 +58,9 @@ pub trait RowMask:
     #[must_use]
     fn set_bit(self, r: usize) -> Self;
 
-    /// Bits that start a run of set bits: bit `r` set and bit `r - 1` clear.
-    #[must_use]
-    fn run_starts(self) -> Self;
-
-    /// Bits that end a run of set bits: bit `r` set and bit `r + 1` clear.
-    #[must_use]
-    fn run_ends(self) -> Self;
+    /// Call `f(start, end)` for every maximal run of set bits `start..end`, in
+    /// increasing order.
+    fn for_each_run(self, f: impl FnMut(usize, usize));
 
     /// Call `f` with the index of every set bit, in increasing order.
     fn for_each_bit(self, f: impl FnMut(usize));
@@ -112,12 +108,17 @@ macro_rules! impl_row_mask {
                 self | (1 << r)
             }
             #[inline]
-            fn run_starts(self) -> Self {
-                self & !(self << 1)
-            }
-            #[inline]
-            fn run_ends(self) -> Self {
-                self & !(self >> 1)
+            fn for_each_run(self, mut f: impl FnMut(usize, usize)) {
+                let mut starts = self & !(self << 1);
+                let mut ends = self & !(self >> 1);
+                while starts != 0 {
+                    f(
+                        starts.trailing_zeros() as usize,
+                        ends.trailing_zeros() as usize + 1,
+                    );
+                    starts &= starts.wrapping_sub(1);
+                    ends &= ends.wrapping_sub(1);
+                }
             }
             #[inline]
             fn for_each_bit(self, mut f: impl FnMut(usize)) {
@@ -249,25 +250,36 @@ impl<const W: usize> RowMask for Bits<W> {
         self.0[r / 64] |= 1 << (r % 64);
         self
     }
+    /// Walks the set words only, so a run costs O(1) plus the words it spans.
     #[inline]
-    fn run_starts(self) -> Self {
-        let mut out = [0; W];
-        let mut below = 0; // top bit of the previous word, shifted in at bit 0
-        for (o, &w) in out.iter_mut().zip(&self.0) {
-            *o = w & !((w << 1) | below);
-            below = w >> 63;
+    fn for_each_run(self, mut f: impl FnMut(usize, usize)) {
+        let mut i = 0;
+        while i < W {
+            let mut w = self.0[i];
+            while w != 0 {
+                let lo = w.trailing_zeros() as usize;
+                let ones = (w >> lo).trailing_ones() as usize;
+                let start = 64 * i + lo;
+                if lo + ones < 64 {
+                    f(start, start + ones);
+                    w &= !(((1 << ones) - 1) << lo);
+                    continue;
+                }
+                // The run reaches the top of word i: extend it through full words.
+                i += 1;
+                while i < W && self.0[i] == u64::MAX {
+                    i += 1;
+                }
+                if i == W {
+                    f(start, Self::WIDTH);
+                    return;
+                }
+                let t = self.0[i].trailing_ones() as usize;
+                f(start, 64 * i + t);
+                w = self.0[i] & !((1 << t) - 1);
+            }
+            i += 1;
         }
-        Self(out)
-    }
-    #[inline]
-    fn run_ends(self) -> Self {
-        let mut out = [0; W];
-        let mut above = 0; // bit 0 of the next word, shifted in at bit 63
-        for (o, &w) in out.iter_mut().zip(&self.0).rev() {
-            *o = w & !((w >> 1) | above);
-            above = w << 63;
-        }
-        Self(out)
     }
     #[inline]
     fn for_each_bit(self, mut f: impl FnMut(usize)) {
@@ -327,12 +339,45 @@ mod tests {
 
         // Runs: rows 0-1, 3, 5-(WIDTH-1).
         let runs = M::from_width(2) | M::ZERO.set_bit(3) | (full & !M::from_width(5));
-        assert_eq!(bits(runs.run_starts()), [0, 3, 5]);
-        assert_eq!(bits(runs.run_ends()), [1, 3, M::WIDTH - 1]);
-        assert_eq!(bits(full.run_starts()), [0]);
-        assert_eq!(bits(full.run_ends()), [M::WIDTH - 1]);
-        assert!(M::ZERO.run_starts().is_zero() && M::ZERO.run_ends().is_zero());
+        assert_eq!(run_list(runs), [(0, 2), (3, 4), (5, M::WIDTH)]);
+        assert_eq!(run_list(full), [(0, M::WIDTH)]);
+        assert_eq!(run_list(M::ZERO), []);
         assert_eq!(bits(b), [2, 5]);
+
+        // Random masks against a bit-by-bit scan.
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        for _ in 0..2000 {
+            let mut mask = M::ZERO;
+            let density = state % 7;
+            for row in 0..M::WIDTH {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                if (state >> 33) % 7 <= density {
+                    mask = mask.set_bit(row);
+                }
+            }
+            let mut expected = Vec::new();
+            let mut row = 0;
+            while row < M::WIDTH {
+                if mask.test_bit(row) {
+                    let begin = row;
+                    while row < M::WIDTH && mask.test_bit(row) {
+                        row += 1;
+                    }
+                    expected.push((begin, row));
+                } else {
+                    row += 1;
+                }
+            }
+            assert_eq!(run_list(mask), expected);
+        }
+    }
+
+    fn run_list<M: RowMask>(m: M) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        m.for_each_run(|s, e| out.push((s, e)));
+        out
     }
 
     fn bits<M: RowMask>(m: M) -> Vec<usize> {
@@ -375,12 +420,15 @@ mod tests {
         for r in (60..=70).chain([127, 128, 191]) {
             m = m.set_bit(r);
         }
-        assert_eq!(bits(m.run_starts()), [60, 127, 191]);
-        assert_eq!(bits(m.run_ends()), [70, 128, 191]);
+        assert_eq!(run_list(m), [(60, 71), (127, 129), (191, 192)]);
+        let long = Bits::<4>::from_width(256) & !Bits::<4>::from_width(3);
+        assert_eq!(run_list(long), [(3, 256)]);
+        let spans = Bits::<4>::from_width(200) & !Bits::<4>::from_width(10);
+        assert_eq!(run_list(spans), [(10, 200)]);
         assert_eq!(bits(m).len(), 14);
         assert_eq!(m.trailing_zeros(), 60);
         assert_eq!(bits(m.clear_lowest())[0], 61);
         assert_eq!(Bits::<4>::from_width(130).count_ones(), 130);
-        assert_eq!(bits(Bits::<4>::from_width(130).run_ends()), [129]);
+        assert_eq!(run_list(Bits::<4>::from_width(130)), [(0, 130)]);
     }
 }

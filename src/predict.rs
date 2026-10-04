@@ -588,12 +588,10 @@ impl Forest {
                     // diff has n + 1 entries; runs lie within rows 0..n.
                     let x = crate::exact::to_fixed(node.value, e);
                     let diff = &mut *ctx.diff;
-                    row_mask
-                        .run_starts()
-                        .for_each_bit(|a| unsafe { *diff.get_unchecked_mut(a) += x });
-                    row_mask
-                        .run_ends()
-                        .for_each_bit(|b| unsafe { *diff.get_unchecked_mut(b + 1) -= x });
+                    row_mask.for_each_run(|a, b| unsafe {
+                        *diff.get_unchecked_mut(a) += x;
+                        *diff.get_unchecked_mut(b) -= x;
+                    });
                 } else {
                     let val = node.value;
                     let results = &mut ctx.results[ctx.start..];
