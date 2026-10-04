@@ -8,6 +8,18 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_double, c_int, c_void};
 use std::path::Path;
 
+/// Print a libloading error after `context`. libloading reports the system's
+/// `dlerror` message as the error's source, not in its `Display` text.
+fn report(context: impl std::fmt::Display) -> impl FnOnce(libloading::Error) {
+    move |e| {
+        use std::error::Error as _;
+        match e.source() {
+            Some(cause) => eprintln!("  {context}: {e}: {cause}"),
+            None => eprintln!("  {context}: {e}"),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Trait
 // ---------------------------------------------------------------------------
@@ -51,13 +63,16 @@ impl LleavesBench {
         // The caller guarantees so_path points to a valid lleaves .so.
         unsafe {
             let lib = Library::new(so_path)
-                .map_err(|e| eprintln!("  lleaves: failed to load {}: {e}", so_path.display()))
+                .map_err(report(format!(
+                    "lleaves: failed to load {}",
+                    so_path.display()
+                )))
                 .ok()?;
             let forest_root: Symbol<
                 unsafe extern "C" fn(*const c_double, *mut c_double, c_int, c_int),
             > = lib
-                .get(b"forest_root")
-                .map_err(|e| eprintln!("  lleaves: symbol error: {e}"))
+                .get(c"forest_root")
+                .map_err(report("lleaves: symbol error"))
                 .ok()?;
             let forest_root = *forest_root;
             Some(Self {
@@ -126,18 +141,21 @@ impl Tl2cgenBench {
         // codegen (main_node.cc). Entry is repr(C) matching the generated union.
         unsafe {
             let lib = Library::new(so_path)
-                .map_err(|e| eprintln!("  tl2cgen: failed to load {}: {e}", so_path.display()))
+                .map_err(report(format!(
+                    "tl2cgen: failed to load {}",
+                    so_path.display()
+                )))
                 .ok()?;
 
             let get_num_feature: Symbol<unsafe extern "C" fn() -> c_int> = lib
-                .get(b"get_num_feature")
-                .map_err(|e| eprintln!("  tl2cgen: symbol error (get_num_feature): {e}"))
+                .get(c"get_num_feature")
+                .map_err(report("tl2cgen: symbol error (get_num_feature)"))
                 .ok()?;
             let n_features = get_num_feature() as usize;
 
             let predict_fn: Symbol<unsafe extern "C" fn(*mut Tl2cgenEntry, c_int, *mut c_double)> =
-                lib.get(b"predict")
-                    .map_err(|e| eprintln!("  tl2cgen: symbol error (predict): {e}"))
+                lib.get(c"predict")
+                    .map_err(report("tl2cgen: symbol error (predict)"))
                     .ok()?;
             let predict_fn = *predict_fn;
 
@@ -245,23 +263,26 @@ impl LightGBMBench {
         // signatures documented at https://lightgbm.readthedocs.io/en/latest/C-API.html
         unsafe {
             let lib = Library::new(lib_path)
-                .map_err(|e| eprintln!("  lightgbm: failed to load {}: {e}", lib_path.display()))
+                .map_err(report(format!(
+                    "lightgbm: failed to load {}",
+                    lib_path.display()
+                )))
                 .ok()?;
 
             // Resolve symbols.
             let create_fn: Symbol<
                 unsafe extern "C" fn(*const c_char, *mut c_int, *mut BoosterHandle) -> c_int,
             > = lib
-                .get(b"LGBM_BoosterCreateFromModelfile")
-                .map_err(|e| eprintln!("  lightgbm: symbol error: {e}"))
+                .get(c"LGBM_BoosterCreateFromModelfile")
+                .map_err(report("lightgbm: symbol error"))
                 .ok()?;
             let predict_fn: Symbol<LgbmPredictFn> = lib
-                .get(b"LGBM_BoosterPredictForMat")
-                .map_err(|e| eprintln!("  lightgbm: symbol error: {e}"))
+                .get(c"LGBM_BoosterPredictForMat")
+                .map_err(report("lightgbm: symbol error"))
                 .ok()?;
             let free_fn: Symbol<unsafe extern "C" fn(BoosterHandle) -> c_int> = lib
-                .get(b"LGBM_BoosterFree")
-                .map_err(|e| eprintln!("  lightgbm: symbol error: {e}"))
+                .get(c"LGBM_BoosterFree")
+                .map_err(report("lightgbm: symbol error"))
                 .ok()?;
 
             // Load model.
@@ -392,21 +413,24 @@ impl XGBoostBench {
         // with signatures per https://xgboost.readthedocs.io/en/stable/c.html
         unsafe {
             let lib = Library::new(lib_path)
-                .map_err(|e| eprintln!("  xgboost: failed to load {}: {e}", lib_path.display()))
+                .map_err(report(format!(
+                    "xgboost: failed to load {}",
+                    lib_path.display()
+                )))
                 .ok()?;
 
             // Resolve symbols.
             let booster_create: Symbol<
                 unsafe extern "C" fn(*const DMatrixHandle, u64, *mut XGBoosterHandle) -> c_int,
-            > = lib.get(b"XGBoosterCreate").ok()?;
+            > = lib.get(c"XGBoosterCreate").ok()?;
             let booster_load: Symbol<
                 unsafe extern "C" fn(XGBoosterHandle, *const c_char) -> c_int,
-            > = lib.get(b"XGBoosterLoadModel").ok()?;
+            > = lib.get(c"XGBoosterLoadModel").ok()?;
             let booster_set_param: Symbol<
                 unsafe extern "C" fn(XGBoosterHandle, *const c_char, *const c_char) -> c_int,
-            > = lib.get(b"XGBoosterSetParam").ok()?;
+            > = lib.get(c"XGBoosterSetParam").ok()?;
             let proxy_create: Symbol<unsafe extern "C" fn(*mut DMatrixHandle) -> c_int> =
-                lib.get(b"XGProxyDMatrixCreate").ok()?;
+                lib.get(c"XGProxyDMatrixCreate").ok()?;
             let predict_from_dense_fn: Symbol<
                 unsafe extern "C" fn(
                     XGBoosterHandle,
@@ -417,11 +441,11 @@ impl XGBoostBench {
                     *mut u64,
                     *mut *const f32,
                 ) -> c_int,
-            > = lib.get(b"XGBoosterPredictFromDense").ok()?;
+            > = lib.get(c"XGBoosterPredictFromDense").ok()?;
             let free_proxy_fn: Symbol<unsafe extern "C" fn(DMatrixHandle) -> c_int> =
-                lib.get(b"XGDMatrixFree").ok()?;
+                lib.get(c"XGDMatrixFree").ok()?;
             let free_booster_fn: Symbol<unsafe extern "C" fn(XGBoosterHandle) -> c_int> =
-                lib.get(b"XGBoosterFree").ok()?;
+                lib.get(c"XGBoosterFree").ok()?;
 
             // Create booster.
             let mut handle: XGBoosterHandle = std::ptr::null_mut();
