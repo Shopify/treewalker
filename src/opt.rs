@@ -1,4 +1,4 @@
-//! Experimental kernels (opt-experiments branch).
+//! Experimental kernels (`--features experimental`; not part of the stable API).
 //!
 //! `Forest::predict` is untouched; everything here is a separate code path so the
 //! baseline timing is unaffected. Variants:
@@ -7,7 +7,17 @@
 //! - K-tree lockstep constant walk (bit-exact: leaves still applied in tree order)
 //! - schedule-feature mask caching across groups of equal width
 //! - mask width chosen per group / forced wide (dispatch experiment)
-//! - profile-guided layout (profiling kernel + parser hook in `parser::layout`)
+//! - profile-guided and hot/cold layout (profiling kernel + parser hook in `parser::layout`)
+//! - child-kind hints and the unified fall-through compare (`add_child_hints`,
+//!   `flip_transform`); recursive and explicit-stack walks
+//! - exact fixed-point accumulation (`exact_scale`, `LeafMode::Exact`): order-independent,
+//!   correctly rounded tree sums
+//! - compact 8-byte nodes with per-group threshold ranks (`compact`, `predict_compact`)
+//! - run-list row masks for groups wider than 128 rows (`predict_runs`)
+//!
+//! All outputs go through `Forest::finalize`, so bit-exact variants equal `predict()`.
+//! Benchmarks: `benchmarks/src/bin/{opt_bench,run_bench,probe}.rs`; tests:
+//! `tests/experimental.rs`.
 // Research code: correctness and suspicious lints stay on; style/pedantic lints are
 // relaxed for this module only.
 #![allow(
