@@ -27,10 +27,11 @@
 //! use treewalker_gbdt::{Forest, LoadError};
 //!
 //! # fn main() -> Result<(), LoadError> {
-//! let mut forest = Forest::try_load("model.bin", "walker_config.json")?;
-//! let data = vec![0.0; forest.config.n_features]; // one row, trained column order
+//! let forest = Forest::try_load("model.bin", "walker_config.json")?;
+//! let mut predictor = forest.predictor(); // reuse it: one per worker
+//! let rows = vec![0.0; forest.config().n_features]; // one row, trained column order
 //! let mut output = [0.0];
-//! forest.predict(&data, &mut output, 0, 1);
+//! predictor.predict_group(&rows, &mut output);
 //! # Ok(())
 //! # }
 //! ```
@@ -48,16 +49,27 @@
 
 #![deny(clippy::undocumented_unsafe_blocks)]
 
+mod config;
 mod error;
-pub use error::LoadError;
-pub mod config;
 mod exact;
-pub mod forest;
-pub mod mask;
-pub mod parser;
-pub mod predict;
+mod forest;
+mod mask;
+mod parser;
+mod predict;
+#[cfg(feature = "research")]
+pub mod research;
 
-pub use config::{AblationMode, ParseConfig, WalkerConfig};
+pub use config::{ParseConfig, WalkerConfig};
+pub use error::LoadError;
 pub use forest::Forest;
 pub use parser::ModelFormat;
-pub use predict::PredictStats;
+pub use predict::Predictor;
+
+const _: () = {
+    const fn send_sync<T: Send + Sync>() {}
+    const fn send<T: Send>() {}
+    send_sync::<Forest>();
+    send::<Predictor>();
+    #[cfg(feature = "research")]
+    send::<research::ResearchPredictor>();
+};

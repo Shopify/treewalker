@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use treewalker_gbdt::config::WalkerConfig;
-use treewalker_gbdt::forest::Forest;
-use treewalker_gbdt::{LoadError, ParseConfig};
+use treewalker_gbdt::{Forest, LoadError, ParseConfig, WalkerConfig};
 
 fn test_dir() -> PathBuf {
     PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
@@ -138,10 +136,10 @@ fn test_tree_ordering_changes_order_but_not_output() {
     }
 
     let config = WalkerConfig::from_file(dir.join("walker_config.json"));
-    let Some(mut forest_ordered) = load_json(&dir, &ParseConfig::default()) else {
+    let Some(forest_ordered) = load_json(&dir, &ParseConfig::default()) else {
         return;
     };
-    let mut forest_original = load_json(
+    let forest_original = load_json(
         &dir,
         &ParseConfig {
             disable_tree_ordering: true,
@@ -167,12 +165,12 @@ fn test_tree_ordering_changes_order_but_not_output() {
     let mut results_ordered = vec![0.0f64; n_rows];
     let mut results_original = vec![0.0f64; n_rows];
 
-    for s in 0..n_obs {
-        let start = s * pl;
-        let end = start + pl;
-        forest_ordered.predict(&data, &mut results_ordered, start, end);
-        forest_original.predict(&data, &mut results_original, start, end);
-    }
+    forest_ordered
+        .predictor()
+        .predict_fixed(&data, pl, &mut results_ordered);
+    forest_original
+        .predictor()
+        .predict_fixed(&data, pl, &mut results_original);
 
     for (i, (a, b)) in results_ordered
         .iter()
@@ -190,7 +188,7 @@ fn test_lightgbm_json_matches_native() {
         return;
     }
 
-    let Some(mut forest) = load_json(&dir, &ParseConfig::default()) else {
+    let Some(forest) = load_json(&dir, &ParseConfig::default()) else {
         return;
     };
     let preds_path = dir.join("lightgbm/predictions.npy");
@@ -207,15 +205,11 @@ fn test_lightgbm_json_matches_native() {
     let mut results = vec![0.0f64; n_rows];
     let offsets = load_group_offsets_if_present(&dir);
 
+    let mut predictor = forest.predictor();
     if let Some(offs) = &offsets {
-        for pair in offs.windows(2) {
-            forest.predict(&data, &mut results, pair[0], pair[1]);
-        }
+        predictor.predict_groups(&data, offs, &mut results);
     } else {
-        let pl = forest.config.max_group_width;
-        for s in 0..(n_rows / pl) {
-            forest.predict(&data, &mut results, s * pl, (s + 1) * pl);
-        }
+        predictor.predict_fixed(&data, forest.config().max_group_width, &mut results);
     }
 
     let max_diff = results

@@ -1,14 +1,13 @@
 //! The per-node kernel: prefix starts, the constant walk and recursive partial
 //! evaluation, and the sorted-threshold sweep that precomputes varying masks.
 
-use super::{EvalCtx, PredictStats};
-use crate::config::AblationMode;
+use super::{Ablation, EvalCtx, WorkCounters};
 use crate::forest::{
-    Forest, Node, PrefixGroup, SPLIT_MONO_DEC, SPLIT_MONO_INC, VaryingPredicate, threshold_go_left,
+    Model, Node, PrefixGroup, SPLIT_MONO_DEC, SPLIT_MONO_INC, VaryingPredicate, threshold_go_left,
 };
 use crate::mask::RowMask;
 
-impl Forest {
+impl Model {
     // -----------------------------------------------------------------------
     // Prefix group evaluation (mask-agnostic)
     // -----------------------------------------------------------------------
@@ -16,7 +15,7 @@ impl Forest {
     pub(super) fn precompute_prefix_starts<const F32: bool, const STATS: bool>(
         &self,
         const_features: &[f64],
-        stats: &mut Option<PredictStats>,
+        counters: &mut WorkCounters,
         group: &PrefixGroup,
         k: usize,
         prefix_starts: &mut [u16],
@@ -28,8 +27,8 @@ impl Forest {
             // SAFETY: prefix groups hold only trees whose first k heavy-path nodes are
             // constant splits, so rep_base + j with j < k lies in the representative tree.
             let node = unsafe { nodes.get_unchecked(rep_base + j) };
-            if STATS && let Some(s) = stats {
-                s.constant_steps += 1;
+            if STATS {
+                counters.constant_steps += 1;
             }
             let go_left = self.eval_split::<F32>(node, const_features);
             if go_left != node.heavy_is_left() {
@@ -54,7 +53,7 @@ impl Forest {
     // -----------------------------------------------------------------------
 
     #[inline]
-    pub(super) fn step<const F32: bool>(
+    pub(crate) fn step<const F32: bool>(
         &self,
         nodes: &[Node],
         abs_idx: usize,
@@ -85,10 +84,15 @@ impl Forest {
     }
 
     // -----------------------------------------------------------------------
-    // Partial eval — ablation and stats only when STATS
+    // Partial eval — counters only with STATS, ablation flags only with ABLATE
     // -----------------------------------------------------------------------
 
-    pub(super) fn partial_eval<const F32: bool, M: RowMask, const STATS: bool>(
+    pub(super) fn partial_eval<
+        const F32: bool,
+        M: RowMask,
+        const STATS: bool,
+        const ABLATE: bool,
+    >(
         &self,
         ctx: &mut EvalCtx<M>,
         mut idx: usize,
@@ -99,10 +103,10 @@ impl Forest {
         }
         let nodes = self.nodes.as_slice();
         let base = ctx.base;
-        let ablation = if STATS {
+        let ablation = if ABLATE {
             ctx.ablation
         } else {
-            AblationMode::default()
+            Ablation::default()
         };
         let use_precompute = !ablation.disable_varying_precompute;
         let use_unsplit = !ablation.disable_unsplit;
@@ -113,8 +117,8 @@ impl Forest {
             // SAFETY: base is a tree's node_start and idx a tree-local index reached by
             // fall-through or skip; validation keeps both inside the tree.
             while unsafe { nodes.get_unchecked(base + idx) }.is_walkable() {
-                if STATS && let Some(ref mut s) = ctx.stats {
-                    s.constant_steps += 1;
+                if STATS {
+                    ctx.counters.constant_steps += 1;
                 }
                 idx = self.step::<F32>(nodes, base + idx, idx, ctx.const_features);
             }
@@ -124,8 +128,8 @@ impl Forest {
 
             // Leaf (walked past all constant nodes, could be leaf or varying).
             if node.is_leaf() {
-                if STATS && let Some(ref mut s) = ctx.stats {
-                    s.leaf_hits += 1;
+                if STATS {
+                    ctx.counters.leaf_hits += 1;
                 }
                 if let Some(e) = ctx.scale {
                     let x = crate::exact::to_fixed(node.value, e);
@@ -138,16 +142,16 @@ impl Forest {
                 } else {
                     let val = node.value;
                     let results = &mut ctx.results[ctx.start..];
-                    // SAFETY: set bits are rows of this piece, below n, and check_input
-                    // asserts that results holds the piece's rows from start on.
+                    // SAFETY: set bits are rows of this piece, below n, and the piece's
+                    // rows start..start + n lie within results.
                     row_mask.for_each_bit(|r| unsafe { *results.get_unchecked_mut(r) += val });
                 }
                 return;
             }
 
             // Varying split.
-            if STATS && let Some(ref mut s) = ctx.stats {
-                s.varying_splits += 1;
+            if STATS {
+                ctx.counters.varying_splits += 1;
             }
 
             let (left_mask, right_mask) = if use_precompute {
@@ -170,8 +174,8 @@ impl Forest {
                 } else {
                     Self::partition_non_mono::<F32, M>(node, col, row_mask)
                 };
-                if STATS && let Some(ref mut s) = ctx.stats {
-                    s.partition_row_evals += u64::from(row_mask.count_ones());
+                if STATS {
+                    ctx.counters.partition_row_evals += u64::from(row_mask.count_ones());
                 }
                 result
             };
@@ -186,25 +190,25 @@ impl Forest {
             // Unsplit optimization.
             if use_unsplit {
                 if light_mask.is_zero() {
-                    if STATS && let Some(ref mut s) = ctx.stats {
-                        s.unsplit_skips += 1;
+                    if STATS {
+                        ctx.counters.unsplit_skips += 1;
                     }
                     idx = heavy_idx;
                     continue;
                 }
                 if heavy_mask.is_zero() {
-                    if STATS && let Some(ref mut s) = ctx.stats {
-                        s.unsplit_skips += 1;
+                    if STATS {
+                        ctx.counters.unsplit_skips += 1;
                     }
                     idx = light_idx;
                     continue;
                 }
             }
 
-            if STATS && let Some(ref mut s) = ctx.stats {
-                s.recursive_calls += 1;
+            if STATS {
+                ctx.counters.recursive_calls += 1;
             }
-            self.partial_eval::<F32, M, STATS>(ctx, light_idx, light_mask);
+            self.partial_eval::<F32, M, STATS, ABLATE>(ctx, light_idx, light_mask);
             idx = heavy_idx;
             row_mask = heavy_mask;
         }
@@ -217,7 +221,7 @@ impl Forest {
     /// Left masks of every varying predicate for one piece: per feature, sort the
     /// rows by value once and sweep the feature's sorted thresholds.
     #[inline]
-    pub(super) fn precompute_varying_masks<const F32: bool, M: RowMask>(
+    pub(crate) fn precompute_varying_masks<const F32: bool, M: RowMask>(
         &self,
         rows: &[f64],
         column: &mut [f64],
@@ -300,30 +304,27 @@ impl Forest {
 
 #[cfg(test)]
 mod tests {
-    use super::super::rows_from_columns;
-    use crate::config::{AblationMode, WalkerConfig};
-    use crate::forest::{FeatureRange, Forest, ThresholdType, VaryingPredicate};
+    use crate::config::WalkerConfig;
+    use crate::forest::{FeatureRange, Model, ThresholdType, VaryingPredicate};
+
+    /// Row-major rows from width-32 feature columns.
+    fn rows_from_columns(cols: &[[f64; 32]; 64], n_rows: usize, n_features: usize) -> Vec<f64> {
+        (0..n_rows)
+            .flat_map(|r| (0..n_features).map(move |f| cols[f][r]))
+            .collect()
+    }
 
     // --- Sweep tests ---
 
-    fn sweep_forest(preds: Vec<VaryingPredicate>, ranges: Vec<FeatureRange>) -> Forest {
-        Forest {
+    fn sweep_forest(preds: Vec<VaryingPredicate>, ranges: Vec<FeatureRange>) -> Model {
+        Model {
             output: crate::parser::Output {
                 base_score: 0.0,
                 divisor: 1.0,
                 postprocessor: crate::parser::Postprocessor::Sigmoid(1.0),
             },
-            compiled_config: WalkerConfig::try_new(64, 32, &(0..64).collect::<Vec<_>>(), &[], &[])
-                .unwrap(),
             trees: Vec::new(),
-            config: WalkerConfig {
-                n_features: 64,
-                max_group_width: 32,
-                varying_mask: u128::from(u64::MAX),
-                mono_inc_mask: 0,
-                mono_dec_mask: 0,
-                ablation: AblationMode::default(),
-            },
+            config: WalkerConfig::try_new(64, 32, &(0..64).collect::<Vec<_>>(), &[], &[]).unwrap(),
             nodes: Vec::new(),
             bitsets: Vec::new(),
             varying_predicates: preds,
@@ -332,7 +333,6 @@ mod tests {
             prefix_groups: Vec::new(),
             prefix_depth: 0,
             fixed_scale: None,
-            workspace: None,
         }
     }
 
@@ -345,7 +345,7 @@ mod tests {
     }
 
     pub(super) fn sweep<const F32: bool>(
-        forest: &Forest,
+        forest: &Model,
         cols: &[[f64; 32]; 64],
         n_rows: usize,
     ) -> Vec<u32> {
@@ -356,7 +356,7 @@ mod tests {
         out
     }
 
-    fn run_sweep(forest: &Forest, cols: &[[f64; 32]; 64], n_rows: usize) -> Vec<u32> {
+    fn run_sweep(forest: &Model, cols: &[[f64; 32]; 64], n_rows: usize) -> Vec<u32> {
         sweep::<false>(forest, cols, n_rows)
     }
 

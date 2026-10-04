@@ -27,35 +27,6 @@ struct WalkerConfigFile {
     mono_dec_features: Vec<usize>,
 }
 
-/// Ablation flags — disable individual optimizations for controlled experiments.
-///
-/// Used by the paper's ablation study to measure each trick's contribution.
-/// Only [`Forest::predict_with_stats`](crate::Forest::predict_with_stats) reads the
-/// flags, at runtime; `predict` is compiled with every optimization on.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub struct AblationMode {
-    /// Treat all monotonic varying features as non-monotonic (disable early-break scans).
-    /// Only effective when `disable_varying_precompute` is also set — the precompute path
-    /// evaluates all predicates identically regardless of monotonicity.
-    pub disable_monotonic: bool,
-    /// Always recurse both children at varying splits (disable unsplit shortcut).
-    pub disable_unsplit: bool,
-    /// Fall back to per-row partition functions instead of precomputed varying masks.
-    pub disable_varying_precompute: bool,
-    /// Use brute-force O(P×n) precompute instead of the sorted-threshold sweep.
-    /// Only effective when precompute is enabled (the default).
-    pub disable_predicate_sweep: bool,
-}
-
-impl AblationMode {
-    /// True when no ablation flags are set — selects the fast path.
-    #[inline]
-    #[must_use]
-    pub fn is_default(&self) -> bool {
-        *self == Self::default()
-    }
-}
-
 /// Parse-time configuration — controls optimizations baked into the data layout.
 ///
 /// These require a different `Forest` instance to ablate (model must be re-parsed).
@@ -101,7 +72,7 @@ impl Default for ParseConfig {
 pub struct WalkerConfig {
     pub n_features: usize,
     /// Maximum rows per group: any positive number. It selects the row-mask width;
-    /// groups wider than [`MAX_PIECE_ROWS`](crate::predict::MAX_PIECE_ROWS) run in
+    /// groups wider than 1,024 rows run in
     /// pieces of that many rows. For fixed-width groups this equals the group width;
     /// for variable-width groups, it is the upper bound.
     pub max_group_width: usize,
@@ -111,8 +82,6 @@ pub struct WalkerConfig {
     pub mono_inc_mask: u128,
     /// Bit `i` is set if feature `i` is monotonic decreasing across the panel.
     pub mono_dec_mask: u128,
-    /// Runtime ablation flags for controlled experiments.
-    pub ablation: AblationMode,
 }
 
 impl WalkerConfig {
@@ -190,7 +159,6 @@ impl WalkerConfig {
             varying_mask: to_mask(varying_features, "varying_features")?,
             mono_inc_mask: to_mask(mono_inc_features, "mono_inc_features")?,
             mono_dec_mask: to_mask(mono_dec_features, "mono_dec_features")?,
-            ablation: AblationMode::default(),
         };
         config.validate()?;
         Ok(config)
@@ -220,16 +188,6 @@ impl WalkerConfig {
             ));
         }
         Ok(())
-    }
-
-    pub(crate) const fn structural_key(&self) -> (usize, usize, u128, u128, u128) {
-        (
-            self.n_features,
-            self.max_group_width,
-            self.varying_mask,
-            self.mono_inc_mask,
-            self.mono_dec_mask,
-        )
     }
 
     /// Check if feature `feat` is varying. Single AND + compare.

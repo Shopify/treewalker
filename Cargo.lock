@@ -666,6 +666,7 @@ dependencies = [
  "serde",
  "simd-json",
  "thiserror",
+ "treewalker-gbdt",
 ]
 
 [[package]]
