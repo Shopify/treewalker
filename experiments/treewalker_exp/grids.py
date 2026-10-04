@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 SURVIVAL = {"support", "flchain"}
-GENERATORS = {"panel-v1", "ranking-sessions-v1", "whatif-v1"}
+GENERATORS = {"panel-v2", "ranking-sessions-v2", "ranking-cohort-v2", "whatif-v1", "whatif-v2"}
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -54,11 +54,11 @@ class Cell:
     def workload_id(self) -> str:
         p = self.param
         match self.generator:
-            case "panel-v1":
+            case "panel-v2":
                 return "panel"
-            case "ranking-sessions-v1":
+            case "ranking-sessions-v2":
                 return "sessions"
-            case "ranking-cohort-v1":
+            case "ranking-cohort-v2":
                 return f"cohort{p['min_candidates']}-n{p['size']}"
             case _:
                 return f"{self.generator}-k{p['k']}-G{p['G']}"
@@ -106,7 +106,7 @@ def _workload_cells(name: str, w: dict[str, Any], defaults: dict[str, Any]) -> l
             params: list[tuple[tuple[str, Any], ...]]
             if gen.startswith("whatif"):
                 params = [(("k", k), ("G", g)) for k, g in product(w["k"], w["G"])]
-            elif gen == "ranking-cohort-v1":
+            elif gen == "ranking-cohort-v2":
                 params = [
                     (("min_candidates", w["min_candidates"]), ("size", n)) for n in w["sizes"]
                 ]
@@ -140,10 +140,10 @@ def _ablation(doc: dict[str, Any], s: dict[str, Any]) -> Suite:
     for nt, md, g in s["anchors"]:
         for dataset in s["panel_datasets"]:
             for fw in frameworks:
-                cells.append(Cell("panel", "panel-v1", Model(dataset, nt, md, g), fw))
+                cells.append(Cell("panel", "panel-v2", Model(dataset, nt, md, g), fw))
         for dataset in s["ranking_datasets"]:
             for fw in frameworks:
-                cells.append(Cell("ranking", "ranking-sessions-v1", Model(dataset, nt, md), fw))
+                cells.append(Cell("ranking", "ranking-sessions-v2", Model(dataset, nt, md), fw))
     unique = list({c.id: c for c in cells}.values())
     extra = {k: s[k] for k in ("anchors", "runtime_variants", "parse_flags", "interaction_anchors")}
     return Suite("ablation", s["description"], unique, extra)
@@ -151,3 +151,7 @@ def _ablation(doc: dict[str, Any], s: dict[str, Any]) -> Suite:
 
 def defaults(doc: dict[str, Any]) -> dict[str, Any]:
     return doc["defaults"]
+
+
+def treelite_json_models(doc: dict[str, Any]) -> frozenset[str]:
+    return frozenset(doc.get("treelite_json", {}).get("models", []))

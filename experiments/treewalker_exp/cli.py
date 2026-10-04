@@ -143,8 +143,9 @@ def prepare(
         bool, typer.Option(help="Check whatif-v1 cells with sweep_bench --validate.")
     ] = False,
 ) -> None:
-    """Train models and write each cell's data and references."""
+    """Train models and write each cell's data, references and cell.json."""
     from . import grids
+    from . import manifest as mf
 
     paths, doc, cells = _cells(suite, dataset, workload, model, framework, cell)
     models = sorted({(c.model, c.framework) for c in cells})
@@ -157,8 +158,12 @@ def prepare(
     from .prepare import Context
     from .prepare import prepare as run
 
-    report = run(Context(paths, grids.defaults(doc)), cells, force)
-    print(f"prepared {report.models} models, {report.cells} cells", file=sys.stderr)
+    ctx = Context(paths, grids.defaults(doc), grids.treelite_json_models(doc))
+    report = run(ctx, cells, force)
+    for name in suite:
+        out, m = mf.write(paths, grids.suite(doc, name))
+        print(f"manifest {out}: {m['counts']}", file=sys.stderr)
+    print(f"prepared {report.models} models; cells {report.cells}", file=sys.stderr)
     failed = list(report.failed)
     if validate:
         failed += _validate_scenario(paths, [c for c in cells if c.generator == "whatif-v1"])
@@ -184,6 +189,19 @@ def _validate_scenario(paths, cells) -> list[str]:
     return failed
 
 
+@app.command()
+def manifest(suite: Suites) -> None:
+    """Resolve suites into execution manifests from the prepared cells."""
+    from . import grids
+    from . import manifest as mf
+
+    paths = _paths()
+    doc = grids.load(paths.grids)
+    for name in suite:
+        out, m = mf.write(paths, grids.suite(doc, name))
+        print(f"{out}: {m['counts']}")
+
+
 @app.command("compile-baselines")
 def compile_baselines(
     suite: Suites,
@@ -205,6 +223,9 @@ def compile_baselines(
     """
     import os
     from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    from . import baselines as bl
+    from . import formats as fm
 
     paths, _, cells = _cells(suite, dataset, workload, model, framework, cell)
     tools = only or ["tl2cgen", "lleaves"]
@@ -242,6 +263,19 @@ def compile_baselines(
             except Exception as e:
                 failed.append(label)
                 print(f"  [{i}/{len(tasks)}] FAIL: {label}: {e}", file=sys.stderr)
+    # Record each model's compiled baselines in its cells.
+    for c in cells:
+        cell_json = c.dir(paths.artifacts) / "cell.json"
+        fw_dir = c.model.dir(paths.artifacts) / c.framework
+        if not cell_json.exists():
+            continue
+        doc = fm.read_cell(cell_json)
+        doc["baselines"] = {
+            tool: bl.summary(fm.read_json(fw_dir / f"{tool}.json"))
+            for tool in ("tl2cgen", "lleaves")
+            if (fw_dir / f"{tool}.json").exists()
+        }
+        fm.write_cell(cell_json, doc)
     if failed:
         raise typer.Exit(1)
 
