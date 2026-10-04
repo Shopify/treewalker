@@ -53,10 +53,12 @@ impl LleavesBench {
             let lib = Library::new(so_path)
                 .map_err(|e| eprintln!("  lleaves: failed to load {}: {e}", so_path.display()))
                 .ok()?;
-            let forest_root: Symbol<unsafe extern "C" fn(*const c_double, *mut c_double, c_int, c_int)> =
-                lib.get(b"forest_root")
-                    .map_err(|e| eprintln!("  lleaves: symbol error: {e}"))
-                    .ok()?;
+            let forest_root: Symbol<
+                unsafe extern "C" fn(*const c_double, *mut c_double, c_int, c_int),
+            > = lib
+                .get(b"forest_root")
+                .map_err(|e| eprintln!("  lleaves: symbol error: {e}"))
+                .ok()?;
             let forest_root = *forest_root;
             Some(Self {
                 _lib: lib,
@@ -224,7 +226,12 @@ impl LightGBMBench {
     ///
     /// # Safety
     /// `lib_path` must be a valid LightGBM shared library.
-    pub fn load(lib_path: &Path, model_path: &Path, n_cols: usize, max_group_width: usize) -> Option<Self> {
+    pub fn load(
+        lib_path: &Path,
+        model_path: &Path,
+        n_cols: usize,
+        max_group_width: usize,
+    ) -> Option<Self> {
         if !lib_path.exists() || !model_path.exists() {
             return None;
         }
@@ -338,9 +345,9 @@ pub struct XGBoostBench {
     // Inplace prediction from dense array
     predict_from_dense_fn: unsafe extern "C" fn(
         XGBoosterHandle,
-        *const c_char, // JSON array interface
-        *const c_char, // JSON config
-        DMatrixHandle, // proxy
+        *const c_char,   // JSON array interface
+        *const c_char,   // JSON config
+        DMatrixHandle,   // proxy
         *mut *const u64, // out_shape
         *mut u64,        // out_dim
         *mut *const f32, // out_result
@@ -380,14 +387,17 @@ impl XGBoostBench {
             let booster_set_param: Symbol<
                 unsafe extern "C" fn(XGBoosterHandle, *const c_char, *const c_char) -> c_int,
             > = lib.get(b"XGBoosterSetParam").ok()?;
-            let proxy_create: Symbol<
-                unsafe extern "C" fn(*mut DMatrixHandle) -> c_int,
-            > = lib.get(b"XGProxyDMatrixCreate").ok()?;
+            let proxy_create: Symbol<unsafe extern "C" fn(*mut DMatrixHandle) -> c_int> =
+                lib.get(b"XGProxyDMatrixCreate").ok()?;
             let predict_from_dense_fn: Symbol<
                 unsafe extern "C" fn(
                     XGBoosterHandle,
-                    *const c_char, *const c_char, DMatrixHandle,
-                    *mut *const u64, *mut u64, *mut *const f32,
+                    *const c_char,
+                    *const c_char,
+                    DMatrixHandle,
+                    *mut *const u64,
+                    *mut u64,
+                    *mut *const f32,
                 ) -> c_int,
             > = lib.get(b"XGBoosterPredictFromDense").ok()?;
             let free_proxy_fn: Symbol<unsafe extern "C" fn(DMatrixHandle) -> c_int> =
@@ -434,8 +444,9 @@ impl XGBoostBench {
             let f32_buf = vec![0.0f32; 128 * n_cols];
             // Prediction config: normal prediction, no iteration limit.
             let predict_config = CString::new(
-                r#"{"type":0,"training":false,"iteration_range":[0,0],"strict_shape":false}"#
-            ).unwrap();
+                r#"{"type":0,"training":false,"iteration_range":[0,0],"strict_shape":false}"#,
+            )
+            .unwrap();
 
             Some(Self {
                 _lib: lib,
@@ -466,7 +477,9 @@ impl ExternalMethod for XGBoostBench {
         // This is the same mechanism Python's inplace_predict uses under the hood.
         let array_json = format!(
             r#"{{"data":[{},false],"shape":[{},{}],"typestr":"<f4","version":3}}"#,
-            self.f32_buf.as_ptr() as usize, nrow, n_cols,
+            self.f32_buf.as_ptr() as usize,
+            nrow,
+            n_cols,
         );
         let array_cstr = CString::new(array_json).unwrap();
 
@@ -527,15 +540,18 @@ impl QuickScorerBench {
         if !model_path.exists() {
             return None;
         }
-        let result = std::panic::catch_unwind(|| {
-            quickscorer::QuickScorer::from_model_file(model_path)
-        });
+        let result =
+            std::panic::catch_unwind(|| quickscorer::QuickScorer::from_model_file(model_path));
         match result {
             Ok(Ok(qs)) => {
                 // Pre-convert all data to f32 (QuickScorer uses f32).
                 let data_f32: Vec<f32> = data.iter().map(|&v| v as f32).collect();
                 eprintln!("  quickscorer: loaded");
-                Some(Self { qs, data_f32, n_cols })
+                Some(Self {
+                    qs,
+                    data_f32,
+                    n_cols,
+                })
             }
             Ok(Err(e)) => {
                 eprintln!("  quickscorer: load error: {e}");

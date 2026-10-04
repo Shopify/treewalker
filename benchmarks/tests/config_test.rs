@@ -1,10 +1,13 @@
 use treewalker_gbdt::config::WalkerConfig;
 
 fn test_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(
-        std::env::var("TEST_ARTIFACTS")
-            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../paper/experiments/artifacts/expedia/nt50_md8").into()),
-    )
+    std::path::PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../paper/experiments/artifacts/expedia/nt50_md8"
+        )
+        .into()
+    }))
 }
 
 #[test]
@@ -12,7 +15,10 @@ fn test_load_walker_config() {
     let dir = test_dir();
     let config_path = dir.join("walker_config.json");
     if !config_path.exists() {
-        eprintln!("Skipping test_load_walker_config: {} not found", config_path.display());
+        eprintln!(
+            "Skipping test_load_walker_config: {} not found",
+            config_path.display()
+        );
         return;
     }
     let config = WalkerConfig::from_file(&config_path);

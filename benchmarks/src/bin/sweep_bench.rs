@@ -31,11 +31,11 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use treewalker_bench::get_rss_kb;
 use treewalker_gbdt::ParseConfig;
 use treewalker_gbdt::config::AblationMode;
 use treewalker_gbdt::forest::Forest;
 use treewalker_gbdt::predict::PredictStats;
-use treewalker_bench::get_rss_kb;
 
 /// Load variable-length group offsets from a binary file.
 ///
@@ -66,12 +66,14 @@ fn load_group_offsets(path: &std::path::Path) -> Vec<usize> {
         assert!(
             pair[0] <= pair[1],
             "group_offsets must be monotonically increasing (group {i}: {} > {})",
-            pair[0], pair[1],
+            pair[0],
+            pair[1],
         );
         assert!(
             (1..=128).contains(&width),
             "group {i} has {width} rows (offsets {}..{}), but predict supports 1..=128 rows per entity",
-            pair[0], pair[1],
+            pair[0],
+            pair[1],
         );
     }
 
@@ -149,7 +151,10 @@ fn bench<F: FnMut()>(
         let start = Instant::now();
         predict_fn();
         timings.push(start.elapsed().as_nanos() as f64 / 1000.0 / n_obs as f64);
-        if let Some(budget) = max_time && i + 1 >= min_iters && wall.elapsed() >= budget {
+        if let Some(budget) = max_time
+            && i + 1 >= min_iters
+            && wall.elapsed() >= budget
+        {
             break;
         }
     }
@@ -245,17 +250,29 @@ fn bench_full_baseline(
             forest.predict_full(data, &mut results, start, end);
         }
         // Respect max_time budget during warmup.
-        if let Some(budget) = ctl.max_time && warmup_wall.elapsed() >= budget {
-            eprintln!("  (full warmup cut short after {}/{} passes)", w + 1, ctl.warmup);
+        if let Some(budget) = ctl.max_time
+            && warmup_wall.elapsed() >= budget
+        {
+            eprintln!(
+                "  (full warmup cut short after {}/{} passes)",
+                w + 1,
+                ctl.warmup
+            );
             break;
         }
     }
-    bench(|| {
-        for s in 0..n_obs {
-            let (start, end) = groups.start_end(s);
-            forest.predict_full(data, &mut results, start, end);
-        }
-    }, n_obs, ctl.iters, ctl.min_iters, ctl.max_time)
+    bench(
+        || {
+            for s in 0..n_obs {
+                let (start, end) = groups.start_end(s);
+                forest.predict_full(data, &mut results, start, end);
+            }
+        },
+        n_obs,
+        ctl.iters,
+        ctl.min_iters,
+        ctl.max_time,
+    )
 }
 
 /// Run one ablation mode: warmup, partial bench, stats, and produce a `BenchResult`.
@@ -279,19 +296,31 @@ fn run_one_mode(
             let (start, end) = groups.start_end(s);
             forest.predict(data, &mut results, start, end);
         }
-        if let Some(budget) = ctl.max_time && warmup_wall.elapsed() >= budget {
-            eprintln!("  (partial warmup cut short after {}/{} passes)", w + 1, ctl.warmup);
+        if let Some(budget) = ctl.max_time
+            && warmup_wall.elapsed() >= budget
+        {
+            eprintln!(
+                "  (partial warmup cut short after {}/{} passes)",
+                w + 1,
+                ctl.warmup
+            );
             break;
         }
     }
 
     // Partial bench
-    let partial = bench(|| {
-        for s in 0..n_obs {
-            let (start, end) = groups.start_end(s);
-            forest.predict(data, &mut results, start, end);
-        }
-    }, n_obs, ctl.iters, ctl.min_iters, ctl.max_time);
+    let partial = bench(
+        || {
+            for s in 0..n_obs {
+                let (start, end) = groups.start_end(s);
+                forest.predict(data, &mut results, start, end);
+            }
+        },
+        n_obs,
+        ctl.iters,
+        ctl.min_iters,
+        ctl.max_time,
+    );
 
     let rss_kb = get_rss_kb();
     let stats = if ctl.skip_stats {
@@ -302,7 +331,10 @@ fn run_one_mode(
 
     eprintln!(
         "  {mode_name:<25} partial={:.1}\u{00b5}s  full={:.1}\u{00b5}s  speedup={:.1}x  iters={}",
-        partial.median, full.median, full.median / partial.median, partial.actual_iters,
+        partial.median,
+        full.median,
+        full.median / partial.median,
+        partial.actual_iters,
     );
 
     let (ns_per_row, ext_rss, ext_parse, ext_model) = if ctl.emit_extended {
@@ -346,25 +378,44 @@ fn run_one_mode(
 
 /// All known ablation mode names.
 const ALL_MODES: &[&str] = &[
-    "baseline", "no_monotonic", "no_unsplit",
-    "no_varying_precompute", "all_disabled",
-    "no_tree_ordering", "no_bitset_intern", "no_prefix_grouping",
+    "baseline",
+    "no_monotonic",
+    "no_unsplit",
+    "no_varying_precompute",
+    "all_disabled",
+    "no_tree_ordering",
+    "no_bitset_intern",
+    "no_prefix_grouping",
 ];
 
 /// Build a mode name from sorted active disable flags.
 fn compose_mode_name(flags: &TuningFlags) -> String {
     let d = TuningFlags::default();
     let mut parts = Vec::new();
-    if flags.precompute { parts.push("no_precompute".to_string()); }
-    if flags.unsplit { parts.push("no_unsplit".to_string()); }
-    if flags.monotonic { parts.push("no_monotonic".to_string()); }
-    if flags.predicate_sweep { parts.push("no_sweep".to_string()); }
-    if flags.tree_ordering { parts.push("no_tree_ordering".to_string()); }
+    if flags.precompute {
+        parts.push("no_precompute".to_string());
+    }
+    if flags.unsplit {
+        parts.push("no_unsplit".to_string());
+    }
+    if flags.monotonic {
+        parts.push("no_monotonic".to_string());
+    }
+    if flags.predicate_sweep {
+        parts.push("no_sweep".to_string());
+    }
+    if flags.tree_ordering {
+        parts.push("no_tree_ordering".to_string());
+    }
     if flags.prefix_depth != d.prefix_depth {
         parts.push(format!("prefix_depth_{}", flags.prefix_depth));
     }
-    if flags.bitset_intern { parts.push("no_bitset_intern".to_string()); }
-    if flags.predicate_dedup { parts.push("no_dedup".to_string()); }
+    if flags.bitset_intern {
+        parts.push("no_bitset_intern".to_string());
+    }
+    if flags.predicate_dedup {
+        parts.push("no_dedup".to_string());
+    }
     if parts.is_empty() {
         "baseline".into()
     } else {
@@ -402,8 +453,13 @@ impl Default for TuningFlags {
 impl TuningFlags {
     fn any_set(&self) -> bool {
         let d = Self::default();
-        self.precompute || self.unsplit || self.monotonic || self.predicate_sweep
-            || self.tree_ordering || self.bitset_intern || self.predicate_dedup
+        self.precompute
+            || self.unsplit
+            || self.monotonic
+            || self.predicate_sweep
+            || self.tree_ordering
+            || self.bitset_intern
+            || self.predicate_dedup
             || self.prefix_depth != d.prefix_depth
     }
 
@@ -545,32 +601,45 @@ fn run_block_mode(
     let mut repeats_per_mode: Vec<usize> = Vec::with_capacity(n_modes);
     for m in modes.iter_mut() {
         let r = calibrate_repeats(
-            &mut m.forest, data, &mut results, &batches[0], groups, cfg.target_ms,
+            &mut m.forest,
+            data,
+            &mut results,
+            &batches[0],
+            groups,
+            cfg.target_ms,
         );
         repeats_per_mode.push(r);
     }
 
     eprintln!(
         "Block mode: {} modes, {} batches, {} pool groups, {}-{} blocks",
-        n_modes, cfg.n_batches, pool.len(), cfg.min_blocks, cfg.max_blocks,
+        n_modes,
+        cfg.n_batches,
+        pool.len(),
+        cfg.min_blocks,
+        cfg.max_blocks,
     );
     for (i, m) in modes.iter().enumerate() {
-        eprintln!("  mode[{i}] = {} (inner_repeats={})", m.name, repeats_per_mode[i]);
+        eprintln!(
+            "  mode[{i}] = {} (inner_repeats={})",
+            m.name, repeats_per_mode[i]
+        );
     }
 
     for block_id in 0..cfg.max_blocks {
         let batch_id = block_id % batches.len();
         let batch = &batches[batch_id];
-        let batch_rows: usize = batch.iter().map(|&g| {
-            let (s, e) = groups.start_end(g);
-            e - s
-        }).sum();
+        let batch_rows: usize = batch
+            .iter()
+            .map(|&g| {
+                let (s, e) = groups.start_end(g);
+                e - s
+            })
+            .sum();
         let n_groups = batch.len();
 
         // Cyclic rotation of mode order.
-        let mode_order: Vec<usize> = (0..n_modes)
-            .map(|i| (i + block_id) % n_modes)
-            .collect();
+        let mode_order: Vec<usize> = (0..n_modes).map(|i| (i + block_id) % n_modes).collect();
 
         for (order_idx, &mi) in mode_order.iter().enumerate() {
             let m = &mut modes[mi];
@@ -610,7 +679,9 @@ fn run_block_mode(
             // For now, emit a progress line to stderr.
             eprintln!(
                 "  block {}/{}: {} measurements",
-                block_id + 1, cfg.max_blocks, (block_id + 1) * n_modes,
+                block_id + 1,
+                cfg.max_blocks,
+                (block_id + 1) * n_modes,
             );
         }
     }
@@ -627,15 +698,23 @@ fn parse_mode_specs(spec: &str) -> Vec<(String, AblationMode, ParseConfig)> {
     let mut modes = Vec::new();
     for name in spec.split(',') {
         let name = name.trim();
-        if name.is_empty() { continue; }
+        if name.is_empty() {
+            continue;
+        }
         let (ablation, parse) = match name {
             "baseline" | "full" => (AblationMode::default(), ParseConfig::default()),
             "no_unsplit" => (
-                AblationMode { disable_unsplit: true, ..Default::default() },
+                AblationMode {
+                    disable_unsplit: true,
+                    ..Default::default()
+                },
                 ParseConfig::default(),
             ),
             "no_precompute" => (
-                AblationMode { disable_varying_precompute: true, ..Default::default() },
+                AblationMode {
+                    disable_varying_precompute: true,
+                    ..Default::default()
+                },
                 ParseConfig::default(),
             ),
             "no_monotonic" => (
@@ -647,7 +726,10 @@ fn parse_mode_specs(spec: &str) -> Vec<(String, AblationMode, ParseConfig)> {
                 ParseConfig::default(),
             ),
             "no_sweep" => (
-                AblationMode { disable_predicate_sweep: true, ..Default::default() },
+                AblationMode {
+                    disable_predicate_sweep: true,
+                    ..Default::default()
+                },
                 ParseConfig::default(),
             ),
             "all_disabled" => (
@@ -661,15 +743,24 @@ fn parse_mode_specs(spec: &str) -> Vec<(String, AblationMode, ParseConfig)> {
             ),
             "p:no_tree_ordering" => (
                 AblationMode::default(),
-                ParseConfig { disable_tree_ordering: true, ..Default::default() },
+                ParseConfig {
+                    disable_tree_ordering: true,
+                    ..Default::default()
+                },
             ),
             "p:no_bitset_intern" => (
                 AblationMode::default(),
-                ParseConfig { disable_bitset_intern: true, ..Default::default() },
+                ParseConfig {
+                    disable_bitset_intern: true,
+                    ..Default::default()
+                },
             ),
             "p:no_prefix_grouping" => (
                 AblationMode::default(),
-                ParseConfig { prefix_depth: 0, ..Default::default() },
+                ParseConfig {
+                    prefix_depth: 0,
+                    ..Default::default()
+                },
             ),
             _ => {
                 eprintln!("Unknown block-mode mode: {name}");
@@ -697,8 +788,12 @@ fn main() {
              \x20      [--n-batches N] [--target-ms MS] [--min-blocks N] [--max-blocks N]"
         );
         eprintln!("Modes: {}", ALL_MODES.join(", "));
-        eprintln!("Block modes: baseline,full,no_unsplit,no_precompute,no_monotonic,no_sweep,all_disabled,p:no_tree_ordering,p:no_bitset_intern,p:no_prefix_grouping");
-        eprintln!("Tuning: --disable-{{precompute,unsplit,monotonic,predicate-sweep,tree-ordering,bitset-intern,predicate-dedup}} --prefix-depth N");
+        eprintln!(
+            "Block modes: baseline,full,no_unsplit,no_precompute,no_monotonic,no_sweep,all_disabled,p:no_tree_ordering,p:no_bitset_intern,p:no_prefix_grouping"
+        );
+        eprintln!(
+            "Tuning: --disable-{{precompute,unsplit,monotonic,predicate-sweep,tree-ordering,bitset-intern,predicate-dedup}} --prefix-depth N"
+        );
         eprintln!("\n--min-iters N   Minimum iterations before max-time can exit (default: 11)");
         eprintln!("--skip-full     Skip full-walk baseline (report speedup as NaN)");
         eprintln!("--skip-stats    Skip stats collection pass (zero out stats fields)");
@@ -810,7 +905,10 @@ fn main() {
                 i += 2;
             }
             // Block-mode flags.
-            "--block-mode" => { block_mode = true; i += 1; }
+            "--block-mode" => {
+                block_mode = true;
+                i += 1;
+            }
             "--pool" => {
                 pool_path = Some(PathBuf::from(next(i, flag)));
                 i += 2;
@@ -852,11 +950,26 @@ fn main() {
                 i += 2;
             }
             // Boolean disable flags — no value needed.
-            "--disable-precompute" => { tuning.precompute = true; i += 1; }
-            "--disable-unsplit" => { tuning.unsplit = true; i += 1; }
-            "--disable-monotonic" => { tuning.monotonic = true; i += 1; }
-            "--disable-predicate-sweep" => { tuning.predicate_sweep = true; i += 1; }
-            "--disable-tree-ordering" => { tuning.tree_ordering = true; i += 1; }
+            "--disable-precompute" => {
+                tuning.precompute = true;
+                i += 1;
+            }
+            "--disable-unsplit" => {
+                tuning.unsplit = true;
+                i += 1;
+            }
+            "--disable-monotonic" => {
+                tuning.monotonic = true;
+                i += 1;
+            }
+            "--disable-predicate-sweep" => {
+                tuning.predicate_sweep = true;
+                i += 1;
+            }
+            "--disable-tree-ordering" => {
+                tuning.tree_ordering = true;
+                i += 1;
+            }
             "--prefix-depth" => {
                 let val = next(i, flag);
                 tuning.prefix_depth = val.parse().unwrap_or_else(|e| {
@@ -865,11 +978,26 @@ fn main() {
                 });
                 i += 2;
             }
-            "--disable-bitset-intern" => { tuning.bitset_intern = true; i += 1; }
-            "--disable-predicate-dedup" => { tuning.predicate_dedup = true; i += 1; }
-            "--emit-extended" => { emit_extended = true; i += 1; }
-            "--skip-full" => { skip_full = true; i += 1; }
-            "--skip-stats" => { skip_stats = true; i += 1; }
+            "--disable-bitset-intern" => {
+                tuning.bitset_intern = true;
+                i += 1;
+            }
+            "--disable-predicate-dedup" => {
+                tuning.predicate_dedup = true;
+                i += 1;
+            }
+            "--emit-extended" => {
+                emit_extended = true;
+                i += 1;
+            }
+            "--skip-full" => {
+                skip_full = true;
+                i += 1;
+            }
+            "--skip-stats" => {
+                skip_stats = true;
+                i += 1;
+            }
             #[cfg(feature = "quickscorer-bench")]
             "--quickscorer" => {
                 quickscorer_model = Some(PathBuf::from(next(i, flag)));
@@ -885,7 +1013,11 @@ fn main() {
     let data_dir = data_dir.as_ref().unwrap_or(&model_dir);
     let bin_path = model_dir.join("model_treelite.bin");
     let json_path = model_dir.join("model_treelite.json");
-    let model_path = if bin_path.exists() { bin_path } else { json_path };
+    let model_path = if bin_path.exists() {
+        bin_path
+    } else {
+        json_path
+    };
     let config_path = data_dir.join("walker_config.json");
     let data_path = data_dir.join("test_data.bin");
 
@@ -926,17 +1058,25 @@ fn main() {
                 // Full-walk mode uses predict_full; handled specially.
                 // We still need a forest for it.
                 let f = Forest::load_with_config(&model_path, &config_path, parse_config);
-                modes.push(BlockMode { name: name.clone(), forest: f });
+                modes.push(BlockMode {
+                    name: name.clone(),
+                    forest: f,
+                });
             } else {
                 let mut f = Forest::load_with_config(&model_path, &config_path, parse_config);
                 f.config.ablation = *ablation;
-                modes.push(BlockMode { name: name.clone(), forest: f });
+                modes.push(BlockMode {
+                    name: name.clone(),
+                    forest: f,
+                });
             }
         }
 
         eprintln!(
             "Block mode: {} groups in pool (of {} total), {} modes",
-            pool.len(), n_total_groups, modes.len(),
+            pool.len(),
+            n_total_groups,
+            modes.len(),
         );
 
         run_block_mode(&mut modes, &data, &groups, &pool, &block_cfg);
@@ -951,7 +1091,16 @@ fn main() {
         std::process::exit(1);
     }
 
-    let ctl = BenchControl { warmup, iters, min_iters, max_time, emit_extended, skip_full, skip_stats, parse_time_us: 0.0 };
+    let ctl = BenchControl {
+        warmup,
+        iters,
+        min_iters,
+        max_time,
+        emit_extended,
+        skip_full,
+        skip_stats,
+        parse_time_us: 0.0,
+    };
 
     if tuning.any_set() {
         // Composable single-config mode from --disable-* flags.
@@ -969,14 +1118,29 @@ fn main() {
 
         eprintln!(
             "Loaded: {} trees, {} features, group_width={}, {} observations{}",
-            forest.trees().len(), forest.config.n_features, forest.config.max_group_width,
-            groups.n_obs(), if group_offsets_path.is_some() { " (variable groups)" } else { "" },
+            forest.trees().len(),
+            forest.config.n_features,
+            forest.config.max_group_width,
+            groups.n_obs(),
+            if group_offsets_path.is_some() {
+                " (variable groups)"
+            } else {
+                ""
+            },
         );
         eprintln!("  mode: {mode_name} (composed from --disable-* flags)");
 
-        let ctl = BenchControl { parse_time_us, ..ctl };
+        let ctl = BenchControl {
+            parse_time_us,
+            ..ctl
+        };
         let full = if ctl.skip_full {
-            TimingSummary { median: f64::NAN, p5: f64::NAN, p95: f64::NAN, actual_iters: 0 }
+            TimingSummary {
+                median: f64::NAN,
+                p5: f64::NAN,
+                p95: f64::NAN,
+                actual_iters: 0,
+            }
         } else {
             bench_full_baseline(&forest, &data, &groups, &ctl)
         };
@@ -995,35 +1159,93 @@ fn main() {
 
         eprintln!(
             "Loaded: {} trees, {} features, group_width={}, {} observations{}",
-            forest.trees().len(), forest.config.n_features, forest.config.max_group_width,
-            groups.n_obs(), if group_offsets_path.is_some() { " (variable groups)" } else { "" },
+            forest.trees().len(),
+            forest.config.n_features,
+            forest.config.max_group_width,
+            groups.n_obs(),
+            if group_offsets_path.is_some() {
+                " (variable groups)"
+            } else {
+                ""
+            },
         );
         drop(forest);
 
-        let should_run = |name: &str| -> bool {
-            mode_filter.as_ref().is_none_or(|f| f == name)
-        };
+        let should_run = |name: &str| -> bool { mode_filter.as_ref().is_none_or(|f| f == name) };
 
         let runtime_modes: &[(&str, AblationMode)] = &[
             ("baseline", AblationMode::default()),
-            ("no_unsplit", AblationMode { disable_unsplit: true, ..Default::default() }),
-            ("no_varying_precompute", AblationMode { disable_varying_precompute: true, ..Default::default() }),
+            (
+                "no_unsplit",
+                AblationMode {
+                    disable_unsplit: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "no_varying_precompute",
+                AblationMode {
+                    disable_varying_precompute: true,
+                    ..Default::default()
+                },
+            ),
             // Monotonic only has effect when precompute is also disabled (precompute
             // evaluates all predicates identically regardless of monotonicity).
-            ("no_monotonic", AblationMode { disable_monotonic: true, disable_varying_precompute: true, ..Default::default() }),
-            ("all_disabled", AblationMode { disable_monotonic: true, disable_unsplit: true, disable_varying_precompute: true, disable_predicate_sweep: true }),
+            (
+                "no_monotonic",
+                AblationMode {
+                    disable_monotonic: true,
+                    disable_varying_precompute: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "all_disabled",
+                AblationMode {
+                    disable_monotonic: true,
+                    disable_unsplit: true,
+                    disable_varying_precompute: true,
+                    disable_predicate_sweep: true,
+                },
+            ),
         ];
 
         let parse_modes: &[(&str, ParseConfig)] = &[
-            ("no_tree_ordering", ParseConfig { disable_tree_ordering: true, ..Default::default() }),
-            ("no_bitset_intern", ParseConfig { disable_bitset_intern: true, ..Default::default() }),
-            ("no_prefix_grouping", ParseConfig { prefix_depth: 0, ..Default::default() }),
+            (
+                "no_tree_ordering",
+                ParseConfig {
+                    disable_tree_ordering: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "no_bitset_intern",
+                ParseConfig {
+                    disable_bitset_intern: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "no_prefix_grouping",
+                ParseConfig {
+                    prefix_depth: 0,
+                    ..Default::default()
+                },
+            ),
         ];
 
         // Full baseline
-        let ctl = BenchControl { parse_time_us: default_parse_time_us, ..ctl };
+        let ctl = BenchControl {
+            parse_time_us: default_parse_time_us,
+            ..ctl
+        };
         let full = if ctl.skip_full {
-            TimingSummary { median: f64::NAN, p5: f64::NAN, p95: f64::NAN, actual_iters: 0 }
+            TimingSummary {
+                median: f64::NAN,
+                p5: f64::NAN,
+                p95: f64::NAN,
+                actual_iters: 0,
+            }
         } else {
             let full_forest = Forest::load(&model_path, &config_path);
             bench_full_baseline(&full_forest, &data, &groups, &ctl)
@@ -1032,24 +1254,38 @@ fn main() {
         let mut json_results = Vec::new();
 
         for &(name, ablation) in runtime_modes {
-            if !should_run(name) { continue; }
+            if !should_run(name) {
+                continue;
+            }
             let mut f = Forest::load(&model_path, &config_path);
             f.config.ablation = ablation;
             json_results.push(run_one_mode(name, &mut f, &full, &data, &groups, &ctl));
         }
 
         for &(name, ref pc) in parse_modes {
-            if !should_run(name) { continue; }
+            if !should_run(name) {
+                continue;
+            }
             let pt_start = Instant::now();
             let mut f = Forest::load_with_config(&model_path, &config_path, pc);
             let pt_us = pt_start.elapsed().as_nanos() as f64 / 1000.0;
-            let mode_ctl = BenchControl { parse_time_us: pt_us, ..ctl };
+            let mode_ctl = BenchControl {
+                parse_time_us: pt_us,
+                ..ctl
+            };
             let mode_full = if ctl.skip_full {
-                TimingSummary { median: f64::NAN, p5: f64::NAN, p95: f64::NAN, actual_iters: 0 }
+                TimingSummary {
+                    median: f64::NAN,
+                    p5: f64::NAN,
+                    p95: f64::NAN,
+                    actual_iters: 0,
+                }
             } else {
                 bench_full_baseline(&f, &data, &groups, &mode_ctl)
             };
-            json_results.push(run_one_mode(name, &mut f, &mode_full, &data, &groups, &mode_ctl));
+            json_results.push(run_one_mode(
+                name, &mut f, &mode_full, &data, &groups, &mode_ctl,
+            ));
         }
 
         let output = simd_json::serde::to_string_pretty(&json_results).unwrap();
@@ -1060,8 +1296,15 @@ fn main() {
     #[cfg(feature = "quickscorer-bench")]
     if let Some(ref qs_model_path) = quickscorer_model {
         run_quickscorer_bench(
-            qs_model_path, &model_path, &config_path, data_dir,
-            group_offsets_path.as_ref(), warmup, iters, min_iters, max_time,
+            qs_model_path,
+            &model_path,
+            &config_path,
+            data_dir,
+            group_offsets_path.as_ref(),
+            warmup,
+            iters,
+            min_iters,
+            max_time,
         );
     }
 }
@@ -1072,6 +1315,7 @@ fn main() {
 /// inner loop calls `score_fast` once per row, so QuickScorer pays the real
 /// per-group cost including loop and function-call overhead.
 #[cfg(feature = "quickscorer-bench")]
+#[allow(clippy::too_many_arguments)]
 fn run_quickscorer_bench(
     qs_model_path: &std::path::Path,
     model_path: &std::path::Path,
@@ -1094,9 +1338,8 @@ fn run_quickscorer_bench(
 
     eprintln!("\n--- QuickScorer baseline (per-group, {n_obs} obs) ---");
     let qs_start = Instant::now();
-    let qs_result = std::panic::catch_unwind(|| {
-        quickscorer::QuickScorer::from_model_file(qs_model_path)
-    });
+    let qs_result =
+        std::panic::catch_unwind(|| quickscorer::QuickScorer::from_model_file(qs_model_path));
     let mut qs = match qs_result {
         Ok(Ok(qs)) => qs,
         Ok(Err(e)) => {
@@ -1125,7 +1368,9 @@ fn run_quickscorer_bench(
                 let _ = qs.score_fast(row);
             }
         }
-        if let Some(budget) = max_time && warmup_wall.elapsed() >= budget {
+        if let Some(budget) = max_time
+            && warmup_wall.elapsed() >= budget
+        {
             eprintln!("  (qs warmup cut short after {}/{warmup} passes)", w + 1);
             break;
         }
@@ -1145,7 +1390,10 @@ fn run_quickscorer_bench(
                 }
             }
             timings.push(iter_start.elapsed().as_nanos() as f64 / 1000.0 / n_obs as f64);
-            if let Some(budget) = max_time && i + 1 >= min_iters && wall.elapsed() >= budget {
+            if let Some(budget) = max_time
+                && i + 1 >= min_iters
+                && wall.elapsed() >= budget
+            {
                 break;
             }
         }
@@ -1178,7 +1426,8 @@ fn build_groups(forest: &Forest, n_rows: usize, group_offsets_path: Option<&Path
     if let Some(gpath) = group_offsets_path {
         let offsets = load_group_offsets(gpath);
         assert_eq!(
-            *offsets.last().unwrap(), n_rows,
+            *offsets.last().unwrap(),
+            n_rows,
             "group_offsets last offset ({}) != n_rows ({n_rows})",
             offsets.last().unwrap(),
         );
@@ -1186,11 +1435,15 @@ fn build_groups(forest: &Forest, n_rows: usize, group_offsets_path: Option<&Path
     } else {
         let pl = forest.config.max_group_width;
         assert_eq!(
-            n_rows % pl, 0,
+            n_rows % pl,
+            0,
             "n_rows ({n_rows}) is not divisible by group_width ({pl}); \
              tail rows would be silently dropped. Use --group-offsets for variable groups.",
         );
-        Groups::Fixed { n_obs: n_rows / pl, group_width: pl }
+        Groups::Fixed {
+            n_obs: n_rows / pl,
+            group_width: pl,
+        }
     }
 }
 
@@ -1222,9 +1475,18 @@ fn run_validate_mode(args: &[String]) {
             })
         };
         match flag {
-            "--data-dir" => { data_dir = Some(PathBuf::from(next(i, flag))); i += 2; }
-            "--group-offsets" => { group_offsets_path = Some(PathBuf::from(next(i, flag))); i += 2; }
-            "--validate" => { ref_path = Some(PathBuf::from(next(i, flag))); i += 2; }
+            "--data-dir" => {
+                data_dir = Some(PathBuf::from(next(i, flag)));
+                i += 2;
+            }
+            "--group-offsets" => {
+                group_offsets_path = Some(PathBuf::from(next(i, flag)));
+                i += 2;
+            }
+            "--validate" => {
+                ref_path = Some(PathBuf::from(next(i, flag)));
+                i += 2;
+            }
             "--tol" => {
                 tol = next(i, flag).parse().unwrap_or_else(|e| {
                     eprintln!("--tol: invalid value: {e}");
@@ -1232,7 +1494,9 @@ fn run_validate_mode(args: &[String]) {
                 });
                 i += 2;
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
 
@@ -1241,7 +1505,11 @@ fn run_validate_mode(args: &[String]) {
 
     let bin_path = model_dir.join("model_treelite.bin");
     let json_path = model_dir.join("model_treelite.json");
-    let model_path = if bin_path.exists() { bin_path } else { json_path };
+    let model_path = if bin_path.exists() {
+        bin_path
+    } else {
+        json_path
+    };
     let config_path = data_dir.join("walker_config.json");
     let data_path = data_dir.join("test_data.bin");
 
@@ -1279,7 +1547,9 @@ fn run_validate_mode(args: &[String]) {
     }
 
     if max_delta <= tol {
-        println!("VALIDATE PASS max_delta={max_delta:.6e} tol={tol:.0e} n_rows={n_rows} n_obs={n_obs}");
+        println!(
+            "VALIDATE PASS max_delta={max_delta:.6e} tol={tol:.0e} n_rows={n_rows} n_obs={n_obs}"
+        );
         eprintln!("  VALIDATE PASS max_delta={max_delta:.6e} (worst row {worst}) tol={tol:.0e}");
     } else {
         eprintln!("VALIDATE FAIL max_delta={max_delta:.6e} > tol={tol:.0e} (worst row {worst})");
@@ -1347,31 +1617,36 @@ fn run_grid_mode(args: &[String]) {
             }
             "--warmup" => {
                 warmup = next_val(i, flag).parse().unwrap_or_else(|e| {
-                    eprintln!("--warmup: {e}"); std::process::exit(1);
+                    eprintln!("--warmup: {e}");
+                    std::process::exit(1);
                 });
                 i += 2;
             }
             "--iters" => {
                 max_iters = next_val(i, flag).parse().unwrap_or_else(|e| {
-                    eprintln!("--iters: {e}"); std::process::exit(1);
+                    eprintln!("--iters: {e}");
+                    std::process::exit(1);
                 });
                 i += 2;
             }
             "--min-iters" => {
                 min_iters = next_val(i, flag).parse().unwrap_or_else(|e| {
-                    eprintln!("--min-iters: {e}"); std::process::exit(1);
+                    eprintln!("--min-iters: {e}");
+                    std::process::exit(1);
                 });
                 i += 2;
             }
             "--max-time-secs" => {
                 max_time_secs = Some(next_val(i, flag).parse().unwrap_or_else(|e| {
-                    eprintln!("--max-time-secs: {e}"); std::process::exit(1);
+                    eprintln!("--max-time-secs: {e}");
+                    std::process::exit(1);
                 }));
                 i += 2;
             }
             "--seed" => {
                 seed = next_val(i, flag).parse().unwrap_or_else(|e| {
-                    eprintln!("--seed: {e}"); std::process::exit(1);
+                    eprintln!("--seed: {e}");
+                    std::process::exit(1);
                 });
                 i += 2;
             }

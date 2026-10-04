@@ -15,8 +15,8 @@ mod data;
 #[cfg(feature = "external-bench")]
 pub mod external;
 pub mod grid;
-pub mod timing;
 mod system;
+pub mod timing;
 
 pub use data::{load_group_offsets, load_raw_f64, try_load_raw_f64};
 pub use system::get_rss_kb;
@@ -24,9 +24,9 @@ pub use system::get_rss_kb;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
+use treewalker_gbdt::PredictStats;
 use treewalker_gbdt::config::{AblationMode, ParseConfig};
 use treewalker_gbdt::forest::Forest;
-use treewalker_gbdt::PredictStats;
 
 use self::csv::CsvWriter;
 use self::grid::GridCell;
@@ -99,7 +99,11 @@ impl CellData {
 
         let bin_path = fw_dir.join("model_treelite.bin");
         let json_path = fw_dir.join("model_treelite.json");
-        let model_path = if bin_path.exists() { bin_path } else { json_path };
+        let model_path = if bin_path.exists() {
+            bin_path
+        } else {
+            json_path
+        };
         if !model_path.exists() {
             return None;
         }
@@ -111,9 +115,13 @@ impl CellData {
 
         let bounds = build_group_boundaries(&forest, n_rows, data_dir);
         Some(Self {
-            data, n_rows, n_cols,
+            data,
+            n_rows,
+            n_cols,
             forest: RefCell::new(forest),
-            bounds, parse_time_us, model_bytes,
+            bounds,
+            parse_time_us,
+            model_bytes,
         })
     }
 
@@ -132,7 +140,11 @@ fn build_group_boundaries(forest: &Forest, n_rows: usize, data_dir: &Path) -> Ve
             .collect()
     } else {
         let gw = forest.config.max_group_width;
-        assert_eq!(n_rows % gw, 0, "n_rows ({n_rows}) not divisible by group_width ({gw})");
+        assert_eq!(
+            n_rows % gw,
+            0,
+            "n_rows ({n_rows}) not divisible by group_width ({gw})"
+        );
         let n_obs = n_rows / gw;
         (0..n_obs).map(|g| (g * gw, (g + 1) * gw)).collect()
     }
@@ -170,7 +182,9 @@ fn collect_methods<'a>(
         BenchMethod {
             name: "treewalker_fullwalk".to_string(),
             predict_group: Box::new(move |s, e| {
-                forest.borrow().predict_full(data_ref, &mut tw_base_results, s, e);
+                forest
+                    .borrow()
+                    .predict_full(data_ref, &mut tw_base_results, s, e);
             }),
         },
         // Optimized TreeWalker: partial evaluation exploiting constant features.
@@ -178,7 +192,9 @@ fn collect_methods<'a>(
         BenchMethod {
             name: "treewalker".to_string(),
             predict_group: Box::new(move |s, e| {
-                forest.borrow_mut().predict(data_ref, &mut tw_full_results, s, e);
+                forest
+                    .borrow_mut()
+                    .predict(data_ref, &mut tw_full_results, s, e);
             }),
         },
     ];
@@ -194,14 +210,18 @@ fn collect_methods<'a>(
         {
             methods.push(BenchMethod {
                 name: m.name().to_string(),
-                predict_group: Box::new(move |s, e| { m.predict_group(data_ref, n_cols, s, e); }),
+                predict_group: Box::new(move |s, e| {
+                    m.predict_group(data_ref, n_cols, s, e);
+                }),
             });
         }
 
         if let Some(mut m) = external::Tl2cgenBench::load(&fw_dir.join("tl2cgen.so")) {
             methods.push(BenchMethod {
                 name: m.name().to_string(),
-                predict_group: Box::new(move |s, e| { m.predict_group(data_ref, n_cols, s, e); }),
+                predict_group: Box::new(move |s, e| {
+                    m.predict_group(data_ref, n_cols, s, e);
+                }),
             });
         }
 
@@ -209,31 +229,44 @@ fn collect_methods<'a>(
             && let Some(ref lgb_lib) = config.lgb_lib
         {
             let max_gw = forest.borrow().config.max_group_width;
-            if let Some(mut m) = external::LightGBMBench::load(lgb_lib, &fw_dir.join("model_native.txt"), n_cols, max_gw) {
+            if let Some(mut m) = external::LightGBMBench::load(
+                lgb_lib,
+                &fw_dir.join("model_native.txt"),
+                n_cols,
+                max_gw,
+            ) {
                 methods.push(BenchMethod {
                     name: m.name().to_string(),
-                    predict_group: Box::new(move |s, e| { m.predict_group(data_ref, n_cols, s, e); }),
+                    predict_group: Box::new(move |s, e| {
+                        m.predict_group(data_ref, n_cols, s, e);
+                    }),
                 });
             }
         }
 
         if framework == "xgboost"
             && let Some(ref xgb_lib) = config.xgb_lib
-            && let Some(mut m) = external::XGBoostBench::load(xgb_lib, &fw_dir.join("model_native.json"), n_cols)
+            && let Some(mut m) =
+                external::XGBoostBench::load(xgb_lib, &fw_dir.join("model_native.json"), n_cols)
         {
             methods.push(BenchMethod {
                 name: m.name().to_string(),
-                predict_group: Box::new(move |s, e| { m.predict_group(data_ref, n_cols, s, e); }),
+                predict_group: Box::new(move |s, e| {
+                    m.predict_group(data_ref, n_cols, s, e);
+                }),
             });
         }
 
         // QuickScorer: only works with LightGBM TXT format.
         if framework == "lightgbm"
-            && let Some(mut m) = external::QuickScorerBench::load(&fw_dir.join("model_native.txt"), data_ref, n_cols)
+            && let Some(mut m) =
+                external::QuickScorerBench::load(&fw_dir.join("model_native.txt"), data_ref, n_cols)
         {
             methods.push(BenchMethod {
                 name: m.name().to_string(),
-                predict_group: Box::new(move |s, e| { m.predict_group(data_ref, n_cols, s, e); }),
+                predict_group: Box::new(move |s, e| {
+                    m.predict_group(data_ref, n_cols, s, e);
+                }),
             });
         }
         methods
@@ -256,7 +289,11 @@ fn block_config(config: &RunConfig) -> BlockConfig {
 
 /// Architecture label for output files.
 const fn detect_architecture() -> &'static str {
-    if cfg!(target_arch = "aarch64") { "arm" } else { "intel" }
+    if cfg!(target_arch = "aarch64") {
+        "arm"
+    } else {
+        "intel"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +306,9 @@ const SENTINEL_PERIOD: usize = 25;
 fn run_grid1(config: &RunConfig) {
     let arch = detect_architecture();
     let cells = grid::discover_cells(
-        &config.artifacts_dir, grid::Grid::G1, config.datasets_filter.as_deref(),
+        &config.artifacts_dir,
+        grid::Grid::G1,
+        config.datasets_filter.as_deref(),
     );
     if cells.is_empty() {
         eprintln!("Grid 1: no cells found, skipping");
@@ -278,17 +317,36 @@ fn run_grid1(config: &RunConfig) {
 
     let csv_path = config.output_dir.join(format!("grid1_results_{arch}.csv"));
     let columns = [
-        "dataset", "framework", "arch", "n_trees", "max_depth", "horizon",
-        "method", "n_obs", "iters", "median_us", "p5_us", "p95_us",
+        "dataset",
+        "framework",
+        "arch",
+        "n_trees",
+        "max_depth",
+        "horizon",
+        "method",
+        "n_obs",
+        "iters",
+        "median_us",
+        "p5_us",
+        "p95_us",
     ];
     let key_cols = [
-        "dataset", "framework", "n_trees", "max_depth", "horizon", "method",
+        "dataset",
+        "framework",
+        "n_trees",
+        "max_depth",
+        "horizon",
+        "method",
     ];
     let mut csv = CsvWriter::new(&csv_path, &columns, &key_cols);
     let bcfg = block_config(config);
 
     eprintln!("\n{}", "=".repeat(60));
-    eprintln!("Grid 1: {} cells, output: {}", cells.len(), csv_path.display());
+    eprintln!(
+        "Grid 1: {} cells, output: {}",
+        cells.len(),
+        csv_path.display()
+    );
     eprintln!("{}", "=".repeat(60));
 
     let mut sentinel_baseline: Option<f64> = None;
@@ -296,21 +354,37 @@ fn run_grid1(config: &RunConfig) {
     for (i, cell) in cells.iter().enumerate() {
         eprintln!("\n[{}/{}] {}", i + 1, cells.len(), cell.label());
 
-        let Some(cd) = CellData::load(&cell.param_dir, &cell.fw_dir, &ParseConfig::default()) else {
+        let Some(cd) = CellData::load(&cell.param_dir, &cell.fw_dir, &ParseConfig::default())
+        else {
             eprintln!("  skipping (missing files)");
             continue;
         };
         let mut methods = collect_methods(&cd, &cell.fw_dir, &cell.framework, config);
         let timings = bench_blocked(&cd.bounds, &mut methods, &bcfg);
 
-        let h_str = if cell.is_ctr { String::new() } else { cell.horizon.to_string() };
+        let h_str = if cell.is_ctr {
+            String::new()
+        } else {
+            cell.horizon.to_string()
+        };
         for (m, t) in methods.iter().zip(&timings) {
-            eprintln!("    {}: {:.1}µs/obs (blocks={})", m.name, t.median_us, t.actual_blocks);
+            eprintln!(
+                "    {}: {:.1}µs/obs (blocks={})",
+                m.name, t.median_us, t.actual_blocks
+            );
             csv.write_row(&[
-                cell.dataset.as_str(), cell.framework.as_str(), arch,
-                &cell.nt.to_string(), &cell.md.to_string(), &h_str,
-                &m.name, &t.n_obs.to_string(), &t.actual_blocks.to_string(),
-                &format!("{:.6}", t.median_us), &format!("{:.6}", t.p5_us), &format!("{:.6}", t.p95_us),
+                cell.dataset.as_str(),
+                cell.framework.as_str(),
+                arch,
+                &cell.nt.to_string(),
+                &cell.md.to_string(),
+                &h_str,
+                &m.name,
+                &t.n_obs.to_string(),
+                &t.actual_blocks.to_string(),
+                &format!("{:.6}", t.median_us),
+                &format!("{:.6}", t.p5_us),
+                &format!("{:.6}", t.p95_us),
             ]);
         }
 
@@ -321,28 +395,43 @@ fn run_grid1(config: &RunConfig) {
             sentinel_baseline = Some(t.median_us);
         }
         // Check sentinel drift every SENTINEL_PERIOD cells.
-        if i > 0 && i % SENTINEL_PERIOD == 0
+        if i > 0
+            && i % SENTINEL_PERIOD == 0
             && let Some(baseline_us) = sentinel_baseline
         {
             // Re-time the first cell.
             let sentinel_cell = &cells[0];
-            if let Some(scd) = CellData::load(&sentinel_cell.param_dir, &sentinel_cell.fw_dir, &ParseConfig::default())
-                && let Some(st) = {
-                    let mut smethods = collect_methods(&scd, &sentinel_cell.fw_dir, &sentinel_cell.framework, config);
-                    let stimings = bench_blocked(&scd.bounds, &mut smethods, &bcfg);
-                    stimings.into_iter().next()
-                }
-            {
+            if let Some(scd) = CellData::load(
+                &sentinel_cell.param_dir,
+                &sentinel_cell.fw_dir,
+                &ParseConfig::default(),
+            ) && let Some(st) = {
+                let mut smethods = collect_methods(
+                    &scd,
+                    &sentinel_cell.fw_dir,
+                    &sentinel_cell.framework,
+                    config,
+                );
+                let stimings = bench_blocked(&scd.bounds, &mut smethods, &bcfg);
+                stimings.into_iter().next()
+            } {
                 let drift_pct = ((st.median_us - baseline_us) / baseline_us * 100.0).abs();
                 if drift_pct > 3.0 {
-                    eprintln!("  \u{26a0} SENTINEL DRIFT: {drift_pct:.1}% (baseline={baseline_us:.1}, now={:.1})", st.median_us);
+                    eprintln!(
+                        "  \u{26a0} SENTINEL DRIFT: {drift_pct:.1}% (baseline={baseline_us:.1}, now={:.1})",
+                        st.median_us
+                    );
                 } else {
                     eprintln!("  \u{2713} sentinel: {drift_pct:.1}% drift");
                 }
             }
         }
     }
-    eprintln!("\nGrid 1 done: {} rows \u{2192} {}", csv.n_rows(), csv.path().display());
+    eprintln!(
+        "\nGrid 1 done: {} rows \u{2192} {}",
+        csv.n_rows(),
+        csv.path().display()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +441,9 @@ fn run_grid1(config: &RunConfig) {
 fn run_grid3_ablation(config: &RunConfig) {
     let arch = detect_architecture();
     let cells = grid::discover_cells(
-        &config.artifacts_dir, grid::Grid::G3, config.datasets_filter.as_deref(),
+        &config.artifacts_dir,
+        grid::Grid::G3,
+        config.datasets_filter.as_deref(),
     );
     if cells.is_empty() {
         eprintln!("Grid 3: no cells found, skipping");
@@ -361,15 +452,36 @@ fn run_grid3_ablation(config: &RunConfig) {
 
     let csv_path = config.output_dir.join(format!("grid3_results_{arch}.csv"));
     let columns = [
-        "dataset", "framework", "arch", "n_trees", "max_depth", "horizon",
-        "disable_precompute", "disable_unsplit", "disable_monotonic",
-        "disable_tree_ordering", "disable_prefix_grouping", "disable_bitset_intern",
-        "n_obs", "iters", "median_us", "p5_us", "p95_us",
+        "dataset",
+        "framework",
+        "arch",
+        "n_trees",
+        "max_depth",
+        "horizon",
+        "disable_precompute",
+        "disable_unsplit",
+        "disable_monotonic",
+        "disable_tree_ordering",
+        "disable_prefix_grouping",
+        "disable_bitset_intern",
+        "n_obs",
+        "iters",
+        "median_us",
+        "p5_us",
+        "p95_us",
     ];
     let key_cols = [
-        "dataset", "framework", "n_trees", "max_depth", "horizon",
-        "disable_precompute", "disable_unsplit", "disable_monotonic",
-        "disable_tree_ordering", "disable_prefix_grouping", "disable_bitset_intern",
+        "dataset",
+        "framework",
+        "n_trees",
+        "max_depth",
+        "horizon",
+        "disable_precompute",
+        "disable_unsplit",
+        "disable_monotonic",
+        "disable_tree_ordering",
+        "disable_prefix_grouping",
+        "disable_bitset_intern",
     ];
     let mut csv = CsvWriter::new(&csv_path, &columns, &key_cols);
     let bcfg = block_config(config);
@@ -386,15 +498,28 @@ fn run_grid3_ablation(config: &RunConfig) {
         let combos = ablation_combos(is_prime);
         eprintln!(
             "\n[{}/{}] {} ({} combos, {})",
-            i + 1, cells.len(), cell.label(), combos.len(),
-            if is_prime { "full-cross" } else { "within-group" },
+            i + 1,
+            cells.len(),
+            cell.label(),
+            combos.len(),
+            if is_prime {
+                "full-cross"
+            } else {
+                "within-group"
+            },
         );
 
         // Group combos by ParseConfig to minimize forest reloads.
-        let mut by_parse: std::collections::BTreeMap<(bool, bool, bool), Vec<(AblationMode, String)>> =
-            std::collections::BTreeMap::new();
+        let mut by_parse: std::collections::BTreeMap<
+            (bool, bool, bool),
+            Vec<(AblationMode, String)>,
+        > = std::collections::BTreeMap::new();
         for (am, pc, label) in &combos {
-            let key = (pc.disable_tree_ordering, pc.prefix_depth == 0, pc.disable_bitset_intern);
+            let key = (
+                pc.disable_tree_ordering,
+                pc.prefix_depth == 0,
+                pc.disable_bitset_intern,
+            );
             by_parse.entry(key).or_default().push((*am, label.clone()));
         }
 
@@ -431,11 +556,21 @@ fn run_grid3_ablation(config: &RunConfig) {
 
             let timings = bench_blocked(&cd.bounds, &mut methods, &bcfg);
 
-            let h_str = if cell.is_ctr { String::new() } else { cell.horizon.to_string() };
+            let h_str = if cell.is_ctr {
+                String::new()
+            } else {
+                cell.horizon.to_string()
+            };
             for (label, t) in labels.iter().zip(&timings) {
-                eprintln!("    {label}: {:.1}µs/obs (blocks={})", t.median_us, t.actual_blocks);
+                eprintln!(
+                    "    {label}: {:.1}µs/obs (blocks={})",
+                    t.median_us, t.actual_blocks
+                );
                 // Parse the label back into flag values.
-                let flags: Vec<&str> = label.split(',').map(|f| f.split('=').nth(1).unwrap_or("0")).collect();
+                let flags: Vec<&str> = label
+                    .split(',')
+                    .map(|f| f.split('=').nth(1).unwrap_or("0"))
+                    .collect();
                 let nt_s = cell.nt.to_string();
                 let md_s = cell.md.to_string();
                 let n_obs_s = t.n_obs.to_string();
@@ -444,18 +579,33 @@ fn run_grid3_ablation(config: &RunConfig) {
                 let p5_s = format!("{:.6}", t.p5_us);
                 let p95_s = format!("{:.6}", t.p95_us);
                 csv.write_row(&[
-                    cell.dataset.as_str(), cell.framework.as_str(), arch,
-                    &nt_s, &md_s, &h_str,
-                    flags.first().unwrap_or(&"0"), flags.get(1).unwrap_or(&"0"),
-                    flags.get(2).unwrap_or(&"0"), flags.get(3).unwrap_or(&"0"),
-                    flags.get(4).unwrap_or(&"0"), flags.get(5).unwrap_or(&"0"),
-                    &n_obs_s, &blocks_s, &med_s, &p5_s, &p95_s,
+                    cell.dataset.as_str(),
+                    cell.framework.as_str(),
+                    arch,
+                    &nt_s,
+                    &md_s,
+                    &h_str,
+                    flags.first().unwrap_or(&"0"),
+                    flags.get(1).unwrap_or(&"0"),
+                    flags.get(2).unwrap_or(&"0"),
+                    flags.get(3).unwrap_or(&"0"),
+                    flags.get(4).unwrap_or(&"0"),
+                    flags.get(5).unwrap_or(&"0"),
+                    &n_obs_s,
+                    &blocks_s,
+                    &med_s,
+                    &p5_s,
+                    &p95_s,
                 ]);
             }
         }
     }
 
-    eprintln!("\nGrid 3 done: {} rows → {}", csv.n_rows(), csv.path().display());
+    eprintln!(
+        "\nGrid 3 done: {} rows → {}",
+        csv.n_rows(),
+        csv.path().display()
+    );
 
     // Stats collection pass (separate CSV).
     if config.collect_stats {
@@ -467,17 +617,42 @@ fn run_grid3_ablation(config: &RunConfig) {
 fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
     let stats_path = config.output_dir.join(format!("grid3_stats_{arch}.csv"));
     let columns = [
-        "dataset", "framework", "arch", "n_trees", "max_depth", "horizon",
-        "disable_precompute", "disable_unsplit", "disable_monotonic",
-        "disable_tree_ordering", "disable_prefix_grouping", "disable_bitset_intern",
-        "n_obs", "constant_steps", "varying_splits", "unsplit_skips",
-        "recursive_calls", "leaf_hits", "partition_row_evals", "precompute_row_evals",
-        "parse_time_us", "rss_kb", "model_bytes",
+        "dataset",
+        "framework",
+        "arch",
+        "n_trees",
+        "max_depth",
+        "horizon",
+        "disable_precompute",
+        "disable_unsplit",
+        "disable_monotonic",
+        "disable_tree_ordering",
+        "disable_prefix_grouping",
+        "disable_bitset_intern",
+        "n_obs",
+        "constant_steps",
+        "varying_splits",
+        "unsplit_skips",
+        "recursive_calls",
+        "leaf_hits",
+        "partition_row_evals",
+        "precompute_row_evals",
+        "parse_time_us",
+        "rss_kb",
+        "model_bytes",
     ];
     let key_cols = [
-        "dataset", "framework", "n_trees", "max_depth", "horizon",
-        "disable_precompute", "disable_unsplit", "disable_monotonic",
-        "disable_tree_ordering", "disable_prefix_grouping", "disable_bitset_intern",
+        "dataset",
+        "framework",
+        "n_trees",
+        "max_depth",
+        "horizon",
+        "disable_precompute",
+        "disable_unsplit",
+        "disable_monotonic",
+        "disable_tree_ordering",
+        "disable_prefix_grouping",
+        "disable_bitset_intern",
     ];
     let mut csv = CsvWriter::new(&stats_path, &columns, &key_cols);
     let b_prime: std::collections::HashSet<(usize, usize, usize)> =
@@ -490,10 +665,16 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
         let combos = ablation_combos(is_prime);
 
         // Group by ParseConfig.
-        let mut by_parse: std::collections::BTreeMap<(bool, bool, bool), Vec<(AblationMode, String)>> =
-            std::collections::BTreeMap::new();
+        let mut by_parse: std::collections::BTreeMap<
+            (bool, bool, bool),
+            Vec<(AblationMode, String)>,
+        > = std::collections::BTreeMap::new();
         for (am, pc, label) in &combos {
-            let key = (pc.disable_tree_ordering, pc.prefix_depth == 0, pc.disable_bitset_intern);
+            let key = (
+                pc.disable_tree_ordering,
+                pc.prefix_depth == 0,
+                pc.disable_bitset_intern,
+            );
             by_parse.entry(key).or_default().push((*am, label.clone()));
         }
 
@@ -504,30 +685,52 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
                 disable_bitset_intern: pkey.2,
                 disable_predicate_dedup: false,
             };
-            let Some(cd) = CellData::load(&cell.param_dir, &cell.fw_dir, &pc) else { continue };
+            let Some(cd) = CellData::load(&cell.param_dir, &cell.fw_dir, &pc) else {
+                continue;
+            };
             let mut results = vec![0.0f64; cd.n_rows];
 
             for (ablation, label) in runtime_combos {
                 cd.forest.borrow_mut().config.ablation = *ablation;
                 let mut total = PredictStats::default();
                 for &(s, e) in &cd.bounds {
-                    total += cd.forest.borrow_mut().predict_with_stats(&cd.data, &mut results, s, e);
+                    total +=
+                        cd.forest
+                            .borrow_mut()
+                            .predict_with_stats(&cd.data, &mut results, s, e);
                 }
-                let h_str = if cell.is_ctr { String::new() } else { cell.horizon.to_string() };
-                let flags: Vec<&str> = label.split(',').map(|f| f.split('=').nth(1).unwrap_or("0")).collect();
+                let h_str = if cell.is_ctr {
+                    String::new()
+                } else {
+                    cell.horizon.to_string()
+                };
+                let flags: Vec<&str> = label
+                    .split(',')
+                    .map(|f| f.split('=').nth(1).unwrap_or("0"))
+                    .collect();
                 let nt_s = cell.nt.to_string();
                 let md_s = cell.md.to_string();
                 let n_obs_s = cd.bounds.len().to_string();
                 csv.write_row(&[
-                    cell.dataset.as_str(), cell.framework.as_str(), arch,
-                    &nt_s, &md_s, &h_str,
-                    flags.first().unwrap_or(&"0"), flags.get(1).unwrap_or(&"0"),
-                    flags.get(2).unwrap_or(&"0"), flags.get(3).unwrap_or(&"0"),
-                    flags.get(4).unwrap_or(&"0"), flags.get(5).unwrap_or(&"0"),
+                    cell.dataset.as_str(),
+                    cell.framework.as_str(),
+                    arch,
+                    &nt_s,
+                    &md_s,
+                    &h_str,
+                    flags.first().unwrap_or(&"0"),
+                    flags.get(1).unwrap_or(&"0"),
+                    flags.get(2).unwrap_or(&"0"),
+                    flags.get(3).unwrap_or(&"0"),
+                    flags.get(4).unwrap_or(&"0"),
+                    flags.get(5).unwrap_or(&"0"),
                     &n_obs_s,
-                    &total.constant_steps.to_string(), &total.varying_splits.to_string(),
-                    &total.unsplit_skips.to_string(), &total.recursive_calls.to_string(),
-                    &total.leaf_hits.to_string(), &total.partition_row_evals.to_string(),
+                    &total.constant_steps.to_string(),
+                    &total.varying_splits.to_string(),
+                    &total.unsplit_skips.to_string(),
+                    &total.recursive_calls.to_string(),
+                    &total.leaf_hits.to_string(),
+                    &total.partition_row_evals.to_string(),
                     &total.precompute_row_evals.to_string(),
                     &format!("{:.0}", cd.parse_time_us),
                     &crate::get_rss_kb().to_string(),
@@ -537,7 +740,11 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
         }
         eprintln!("  {} stats collected", cell.label());
     }
-    eprintln!("Grid 3 stats done: {} rows → {}", csv.n_rows(), stats_path.display());
+    eprintln!(
+        "Grid 3 stats done: {} rows → {}",
+        csv.n_rows(),
+        stats_path.display()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -557,18 +764,36 @@ fn run_grid4_distributions(config: &RunConfig) {
 
     let csv_path = config.output_dir.join(format!("grid4_results_{arch}.csv"));
     let columns = [
-        "dataset", "framework", "arch", "n_trees", "max_depth",
-        "group_dist", "mean_group_size", "n_groups",
-        "method", "n_obs", "iters", "median_us", "p5_us", "p95_us",
+        "dataset",
+        "framework",
+        "arch",
+        "n_trees",
+        "max_depth",
+        "group_dist",
+        "mean_group_size",
+        "n_groups",
+        "method",
+        "n_obs",
+        "iters",
+        "median_us",
+        "p5_us",
+        "p95_us",
     ];
     let key_cols = [
-        "dataset", "framework", "n_trees", "max_depth", "group_dist", "method",
+        "dataset",
+        "framework",
+        "n_trees",
+        "max_depth",
+        "group_dist",
+        "method",
     ];
     let mut csv = CsvWriter::new(&csv_path, &columns, &key_cols);
     let bcfg = block_config(config);
 
     // Discover Expedia param dirs.
-    let Ok(entries) = std::fs::read_dir(&expedia_dir) else { return };
+    let Ok(entries) = std::fs::read_dir(&expedia_dir) else {
+        return;
+    };
     let mut param_dirs: Vec<_> = entries
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_ok_and(|ft| ft.is_dir()))
@@ -580,15 +805,20 @@ fn run_grid4_distributions(config: &RunConfig) {
     param_dirs.sort_by_key(std::fs::DirEntry::file_name);
 
     eprintln!("\n{}", "=".repeat(60));
-    eprintln!("Grid 4 (distributions): {} param dirs × {} dists × 2 fw",
-              param_dirs.len(), GROUP_DISTRIBUTIONS.len());
+    eprintln!(
+        "Grid 4 (distributions): {} param dirs × {} dists × 2 fw",
+        param_dirs.len(),
+        GROUP_DISTRIBUTIONS.len()
+    );
     eprintln!("{}", "=".repeat(60));
 
     let mut cell_idx = 0;
     for pd_entry in &param_dirs {
         let param_dir = pd_entry.path();
         let param_name = pd_entry.file_name().to_string_lossy().to_string();
-        let Some((nt, md, _)) = grid::parse_param_dir(&param_name) else { continue };
+        let Some((nt, md, _)) = grid::parse_param_dir(&param_name) else {
+            continue;
+        };
 
         for &dist_name in GROUP_DISTRIBUTIONS {
             // Empirical reuses the parent directory's data.
@@ -598,19 +828,26 @@ fn run_grid4_distributions(config: &RunConfig) {
                 param_dir.join(dist_name)
             };
             let go_path = dist_data_dir.join("group_offsets.bin");
-            if !go_path.exists() { continue; }
+            if !go_path.exists() {
+                continue;
+            }
 
             // Compute mean group size from offsets.
             let offsets = crate::load_group_offsets(&go_path);
             let n_groups = offsets.len() - 1;
-            if n_groups == 0 { continue; }
-            let mean_gs: f64 = offsets.windows(2)
+            if n_groups == 0 {
+                continue;
+            }
+            let mean_gs: f64 = offsets
+                .windows(2)
                 .map(|w| (w[1] - w[0]) as f64)
-                .sum::<f64>() / n_groups as f64;
+                .sum::<f64>()
+                / n_groups as f64;
 
             for framework in &["lightgbm", "xgboost"] {
                 let fw_dir = param_dir.join(framework);
-                let Some(cd) = CellData::load(&dist_data_dir, &fw_dir, &ParseConfig::default()) else {
+                let Some(cd) = CellData::load(&dist_data_dir, &fw_dir, &ParseConfig::default())
+                else {
                     continue;
                 };
                 cell_idx += 1;
@@ -624,19 +861,35 @@ fn run_grid4_distributions(config: &RunConfig) {
                 let gs_s = format!("{mean_gs:.1}");
                 let ng_s = n_groups.to_string();
                 for (m, t) in methods.iter().zip(&timings) {
-                    eprintln!("    {}: {:.1}µs/obs (blocks={})", m.name, t.median_us, t.actual_blocks);
+                    eprintln!(
+                        "    {}: {:.1}µs/obs (blocks={})",
+                        m.name, t.median_us, t.actual_blocks
+                    );
                     csv.write_row(&[
-                        "expedia", framework, arch, &nt_s, &md_s,
-                        dist_name, &gs_s, &ng_s,
-                        &m.name, &t.n_obs.to_string(), &t.actual_blocks.to_string(),
-                        &format!("{:.6}", t.median_us), &format!("{:.6}", t.p5_us),
+                        "expedia",
+                        framework,
+                        arch,
+                        &nt_s,
+                        &md_s,
+                        dist_name,
+                        &gs_s,
+                        &ng_s,
+                        &m.name,
+                        &t.n_obs.to_string(),
+                        &t.actual_blocks.to_string(),
+                        &format!("{:.6}", t.median_us),
+                        &format!("{:.6}", t.p5_us),
                         &format!("{:.6}", t.p95_us),
                     ]);
                 }
             }
         }
     }
-    eprintln!("\nGrid 4 done: {} rows → {}", csv.n_rows(), csv.path().display());
+    eprintln!(
+        "\nGrid 4 done: {} rows → {}",
+        csv.n_rows(),
+        csv.path().display()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -652,18 +905,19 @@ struct ScenCell {
 
 /// Core 3x3 `{1,4,8} x {4,16,128}` first, then the remaining 7 cells.
 fn scen_cell_order(cells: &[ScenCell]) -> Vec<&ScenCell> {
-    let core: std::collections::HashSet<(usize, usize)> =
-        [1, 4, 8].iter().flat_map(|&k| [4, 16, 128].iter().map(move |&g| (k, g))).collect();
-    let mut indexed: Vec<(bool, &ScenCell)> = cells.iter()
+    let core: std::collections::HashSet<(usize, usize)> = [1, 4, 8]
+        .iter()
+        .flat_map(|&k| [4, 16, 128].iter().map(move |&g| (k, g)))
+        .collect();
+    let mut indexed: Vec<(bool, &ScenCell)> = cells
+        .iter()
         .map(|c| (core.contains(&(c.k, c.g)), c))
         .collect();
     // Core cells {k=1,4,8}x{G=4,16,128} first in fixed (k, G) ascending order,
     // then the remaining cells in fixed (k, G) ascending order. Deterministic
     // run-to-run and independent of filesystem read_dir order, so CSV row order
     // is reproducible across machines.
-    indexed.sort_by(|(core_a, a), (core_b, b)| {
-        (!*core_a, a.k, a.g).cmp(&(!*core_b, b.k, b.g))
-    });
+    indexed.sort_by(|(core_a, a), (core_b, b)| (!*core_a, a.k, a.g).cmp(&(!*core_b, b.k, b.g)));
     indexed.into_iter().map(|(_, c)| c).collect()
 }
 
@@ -675,7 +929,7 @@ fn scen_cell_order(cells: &[ScenCell]) -> Vec<&ScenCell> {
 /// timed here, regardless of `external-bench` flags or artifacts on disk.
 /// `collect_methods` is intentionally not used so flags/artifacts cannot leak
 /// other methods into the scenario timing CSV.
-fn scen_collect_methods<'a>(cell_data: &'a CellData) -> Vec<BenchMethod<'a>> {
+fn scen_collect_methods(cell_data: &CellData) -> Vec<BenchMethod<'_>> {
     let data_ref = cell_data.data_ref();
     let n_rows = cell_data.n_rows;
     let forest = &cell_data.forest;
@@ -689,7 +943,9 @@ fn scen_collect_methods<'a>(cell_data: &'a CellData) -> Vec<BenchMethod<'a>> {
         BenchMethod {
             name: "treewalker_fullwalk".to_string(),
             predict_group: Box::new(move |s, e| {
-                forest.borrow().predict_full(data_ref, &mut tw_base_results, s, e);
+                forest
+                    .borrow()
+                    .predict_full(data_ref, &mut tw_base_results, s, e);
             }),
         },
         // Optimized TreeWalker: partial evaluation exploiting constant features.
@@ -697,7 +953,9 @@ fn scen_collect_methods<'a>(cell_data: &'a CellData) -> Vec<BenchMethod<'a>> {
         BenchMethod {
             name: "treewalker".to_string(),
             predict_group: Box::new(move |s, e| {
-                forest.borrow_mut().predict(data_ref, &mut tw_full_results, s, e);
+                forest
+                    .borrow_mut()
+                    .predict(data_ref, &mut tw_full_results, s, e);
             }),
         },
     ]
@@ -717,7 +975,10 @@ fn run_grid_scen(config: &RunConfig) {
     let model_dir = scen_root.join("lightgbm");
     let cells_root = scen_root.join("cells");
     if !model_dir.exists() || !cells_root.exists() {
-        eprintln!("Scen: no scenario_credit/ under {}, skipping", config.artifacts_dir.display());
+        eprintln!(
+            "Scen: no scenario_credit/ under {}, skipping",
+            config.artifacts_dir.display()
+        );
         return;
     }
 
@@ -725,33 +986,71 @@ fn run_grid_scen(config: &RunConfig) {
     let mut cells: Vec<ScenCell> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&cells_root) {
         for e in entries.flatten() {
-            if !e.file_type().is_ok_and(|ft| ft.is_dir()) { continue; }
+            if !e.file_type().is_ok_and(|ft| ft.is_dir()) {
+                continue;
+            }
             let name = e.file_name().to_string_lossy().to_string();
             if let Some((k, g)) = grid::parse_scen_cell(&name) {
-                cells.push(ScenCell { k, g, dir: e.path() });
+                cells.push(ScenCell {
+                    k,
+                    g,
+                    dir: e.path(),
+                });
             }
         }
     }
     if cells.is_empty() {
-        eprintln!("Scen: no k{{K}}_G{{G}} cells under {}, skipping", cells_root.display());
+        eprintln!(
+            "Scen: no k{{K}}_G{{G}} cells under {}, skipping",
+            cells_root.display()
+        );
         return;
     }
     let ordered = scen_cell_order(&cells);
 
-    let results_path = config.output_dir.join(format!("scenario_credit_results_{arch}.csv"));
-    let stats_path = config.output_dir.join(format!("scenario_credit_stats_{arch}.csv"));
+    let results_path = config
+        .output_dir
+        .join(format!("scenario_credit_results_{arch}.csv"));
+    let stats_path = config
+        .output_dir
+        .join(format!("scenario_credit_stats_{arch}.csv"));
 
     let res_cols = [
-        "dataset", "framework", "arch", "k", "G", "n_trees", "max_depth",
-        "n_groups", "method", "n_obs", "iters", "median_us", "p5_us", "p95_us",
+        "dataset",
+        "framework",
+        "arch",
+        "k",
+        "G",
+        "n_trees",
+        "max_depth",
+        "n_groups",
+        "method",
+        "n_obs",
+        "iters",
+        "median_us",
+        "p5_us",
+        "p95_us",
     ];
     let res_keys = ["k", "G", "method"];
     let mut res_csv = CsvWriter::new(&results_path, &res_cols, &res_keys);
 
     let stat_cols = [
-        "dataset", "framework", "arch", "k", "G", "n_trees", "max_depth",
-        "evaluator", "n_obs", "constant_steps", "varying_splits", "unsplit_skips",
-        "recursive_calls", "leaf_hits", "partition_row_evals", "precompute_row_evals",
+        "dataset",
+        "framework",
+        "arch",
+        "k",
+        "G",
+        "n_trees",
+        "max_depth",
+        "evaluator",
+        "n_obs",
+        "constant_steps",
+        "varying_splits",
+        "unsplit_skips",
+        "recursive_calls",
+        "leaf_hits",
+        "partition_row_evals",
+        "precompute_row_evals",
     ];
     let stat_keys = ["k", "G", "evaluator"];
     let mut stat_csv = CsvWriter::new(&stats_path, &stat_cols, &stat_keys);
@@ -793,12 +1092,24 @@ fn run_grid_scen(config: &RunConfig) {
         let md_s = "8".to_string();
         let ng_s = n_groups.to_string();
         for (m, t) in methods.iter().zip(&timings) {
-            eprintln!("    {}: {:.2}\u{00b5}s/obs (blocks={})", m.name, t.median_us, t.actual_blocks);
+            eprintln!(
+                "    {}: {:.2}\u{00b5}s/obs (blocks={})",
+                m.name, t.median_us, t.actual_blocks
+            );
             res_csv.write_row(&[
-                "scenario_credit", "lightgbm", arch,
-                &k_s, &g_s, &nt_s, &md_s, &ng_s,
-                &m.name, &t.n_obs.to_string(), &t.actual_blocks.to_string(),
-                &format!("{:.6}", t.median_us), &format!("{:.6}", t.p5_us),
+                "scenario_credit",
+                "lightgbm",
+                arch,
+                &k_s,
+                &g_s,
+                &nt_s,
+                &md_s,
+                &ng_s,
+                &m.name,
+                &t.n_obs.to_string(),
+                &t.actual_blocks.to_string(),
+                &format!("{:.6}", t.median_us),
+                &format!("{:.6}", t.p5_us),
                 &format!("{:.6}", t.p95_us),
             ]);
         }
@@ -807,31 +1118,60 @@ fn run_grid_scen(config: &RunConfig) {
         // summed over all groups — mirrors grid3_stats.
         for (evaluator, ablation) in [
             ("precompute", AblationMode::default()),
-            ("trace", AblationMode { disable_varying_precompute: true, ..Default::default() }),
+            (
+                "trace",
+                AblationMode {
+                    disable_varying_precompute: true,
+                    ..Default::default()
+                },
+            ),
         ] {
             cd.forest.borrow_mut().config.ablation = ablation;
             let mut total = PredictStats::default();
             let mut results = vec![0.0f64; cd.n_rows];
             for &(s, e) in &cd.bounds {
-                total += cd.forest.borrow_mut().predict_with_stats(&cd.data, &mut results, s, e);
+                total += cd
+                    .forest
+                    .borrow_mut()
+                    .predict_with_stats(&cd.data, &mut results, s, e);
             }
             stat_csv.write_row(&[
-                "scenario_credit", "lightgbm", arch,
-                &k_s, &g_s, &nt_s, &md_s, evaluator, &ng_s,
-                &total.constant_steps.to_string(), &total.varying_splits.to_string(),
-                &total.unsplit_skips.to_string(), &total.recursive_calls.to_string(),
-                &total.leaf_hits.to_string(), &total.partition_row_evals.to_string(),
+                "scenario_credit",
+                "lightgbm",
+                arch,
+                &k_s,
+                &g_s,
+                &nt_s,
+                &md_s,
+                evaluator,
+                &ng_s,
+                &total.constant_steps.to_string(),
+                &total.varying_splits.to_string(),
+                &total.unsplit_skips.to_string(),
+                &total.recursive_calls.to_string(),
+                &total.leaf_hits.to_string(),
+                &total.partition_row_evals.to_string(),
                 &total.precompute_row_evals.to_string(),
             ]);
-            eprintln!("    stats/{evaluator}: C={} V={} leaf={} recurse={} part={} precomp={}",
-                total.constant_steps, total.varying_splits, total.leaf_hits,
-                total.recursive_calls, total.partition_row_evals, total.precompute_row_evals);
+            eprintln!(
+                "    stats/{evaluator}: C={} V={} leaf={} recurse={} part={} precomp={}",
+                total.constant_steps,
+                total.varying_splits,
+                total.leaf_hits,
+                total.recursive_calls,
+                total.partition_row_evals,
+                total.precompute_row_evals
+            );
         }
         // Reset ablation so the next cell starts clean.
         cd.forest.borrow_mut().config.ablation = AblationMode::default();
     }
 
-    eprintln!("\nScen done: {} result rows, {} stat rows", res_csv.n_rows(), stat_csv.n_rows());
+    eprintln!(
+        "\nScen done: {} result rows, {} stat rows",
+        res_csv.n_rows(),
+        stat_csv.n_rows()
+    );
 }
 
 /// Inline correctness check for one scenario cell.
@@ -840,6 +1180,7 @@ fn run_grid_scen(config: &RunConfig) {
 /// TreeWalker's per-row sigmoid output at `TOL_F64 = 1e-14`. Returns false (and
 /// logs) on mismatch or missing reference.
 fn validate_scen_cell(cd: &CellData, cell_dir: &Path) -> bool {
+    const TOL: f64 = 1e-14;
     let ref_path = cell_dir.join("reference.bin");
     if !ref_path.exists() {
         // FAIL-CLOSED gate: a missing GTIL reference is a correctness hazard,
@@ -850,10 +1191,16 @@ fn validate_scen_cell(cd: &CellData, cell_dir: &Path) -> bool {
     }
     let (ref_data, ref_n, ref_cols) = match crate::try_load_raw_f64(&ref_path) {
         Ok(v) => v,
-        Err(e) => { eprintln!("  reference load error: {e}"); return false; }
+        Err(e) => {
+            eprintln!("  reference load error: {e}");
+            return false;
+        }
     };
     if ref_cols != 1 || ref_n != cd.n_rows {
-        eprintln!("  reference shape mismatch: cols={ref_cols} n={ref_n} vs n_rows={}", cd.n_rows);
+        eprintln!(
+            "  reference shape mismatch: cols={ref_cols} n={ref_n} vs n_rows={}",
+            cd.n_rows
+        );
         return false;
     }
     let mut results = vec![0.0f64; cd.n_rows];
@@ -864,9 +1211,10 @@ fn validate_scen_cell(cd: &CellData, cell_dir: &Path) -> bool {
     let mut max_delta = 0.0f64;
     for r in 0..cd.n_rows {
         let d = (results[r] - ref_data[r]).abs();
-        if d > max_delta { max_delta = d; }
+        if d > max_delta {
+            max_delta = d;
+        }
     }
-    const TOL: f64 = 1e-14;
     if max_delta <= TOL {
         eprintln!("  CORRECTNESS PASS max_delta={max_delta:.2e} (tol={TOL:.0e})");
         true
@@ -891,11 +1239,23 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(AblationMode, ParseConfig, Strin
     // Runtime combos: bits 0-2 = precompute, unsplit, monotonic
     for rt_bits in 0..bits_range {
         let (dp, du, dm, dt, dpg, db) = if is_full_cross {
-            (rt_bits & 1 != 0, rt_bits & 2 != 0, rt_bits & 4 != 0,
-             rt_bits & 8 != 0, rt_bits & 16 != 0, rt_bits & 32 != 0)
+            (
+                rt_bits & 1 != 0,
+                rt_bits & 2 != 0,
+                rt_bits & 4 != 0,
+                rt_bits & 8 != 0,
+                rt_bits & 16 != 0,
+                rt_bits & 32 != 0,
+            )
         } else {
-            (rt_bits & 1 != 0, rt_bits & 2 != 0, rt_bits & 4 != 0,
-             false, false, false)
+            (
+                rt_bits & 1 != 0,
+                rt_bits & 2 != 0,
+                rt_bits & 4 != 0,
+                false,
+                false,
+                false,
+            )
         };
         let am = AblationMode {
             disable_varying_precompute: dp,
@@ -909,9 +1269,15 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(AblationMode, ParseConfig, Strin
             disable_bitset_intern: db,
             disable_predicate_dedup: false,
         };
-        let label = format!("dp={},du={},dm={},dt={},dpg={},db={}",
-            u8::from(dp), u8::from(du), u8::from(dm),
-            u8::from(dt), u8::from(dpg), u8::from(db));
+        let label = format!(
+            "dp={},du={},dm={},dt={},dpg={},db={}",
+            u8::from(dp),
+            u8::from(du),
+            u8::from(dm),
+            u8::from(dt),
+            u8::from(dpg),
+            u8::from(db)
+        );
         combos.push((am, pc, label));
     }
 
@@ -926,8 +1292,12 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(AblationMode, ParseConfig, Strin
                 disable_bitset_intern: db,
                 disable_predicate_dedup: false,
             };
-            let label = format!("dp=0,du=0,dm=0,dt={},dpg={},db={}",
-                u8::from(dt), u8::from(dpg), u8::from(db));
+            let label = format!(
+                "dp=0,du=0,dm=0,dt={},dpg={},db={}",
+                u8::from(dt),
+                u8::from(dpg),
+                u8::from(db)
+            );
             combos.push((am, pc, label));
         }
     }
@@ -963,9 +1333,13 @@ mod tests {
 
     #[test]
     fn test_discover_cells() {
-        let artifacts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../paper/experiments/artifacts");
-        if !artifacts.exists() { return; }
-        let cells = grid::discover_cells(&artifacts, grid::Grid::All, Some(&["expedia".to_string()]));
+        let artifacts =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../paper/experiments/artifacts");
+        if !artifacts.exists() {
+            return;
+        }
+        let cells =
+            grid::discover_cells(&artifacts, grid::Grid::All, Some(&["expedia".to_string()]));
         if cells.is_empty() {
             eprintln!("No cells found (walker_config.json may be absent locally)");
             return;
@@ -979,12 +1353,15 @@ mod tests {
 
     #[test]
     fn test_run_single_cell() {
-        let artifacts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../paper/experiments/artifacts");
-        if !artifacts.exists() { return; }
+        let artifacts =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../paper/experiments/artifacts");
+        if !artifacts.exists() {
+            return;
+        }
         let cells = grid::discover_cells(&artifacts, grid::Grid::All, None);
-        let cell = cells.iter().find(|c| {
-            c.framework == "lightgbm" && c.param_dir.join("test_data.bin").exists()
-        });
+        let cell = cells
+            .iter()
+            .find(|c| c.framework == "lightgbm" && c.param_dir.join("test_data.bin").exists());
         let Some(cell) = cell else {
             eprintln!("No testable cell found locally (need test_data.bin)");
             return;
@@ -997,8 +1374,12 @@ mod tests {
             output_dir: PathBuf::from("/tmp"),
             grid: grid::Grid::All,
             datasets_filter: None,
-            warmup: 1, max_iters: 3, min_iters: 3,
-            max_time_secs: Some(5.0), seed: 42, collect_stats: false,
+            warmup: 1,
+            max_iters: 3,
+            min_iters: 3,
+            max_time_secs: Some(5.0),
+            seed: 42,
+            collect_stats: false,
             #[cfg(feature = "external-bench")]
             lgb_lib: None,
             #[cfg(feature = "external-bench")]
@@ -1008,7 +1389,10 @@ mod tests {
         let bcfg = block_config(&config);
         let timings = bench_blocked(&cd.bounds, &mut methods, &bcfg);
 
-        assert!(!timings.is_empty(), "should have at least TreeWalker results");
+        assert!(
+            !timings.is_empty(),
+            "should have at least TreeWalker results"
+        );
         for (m, t) in methods.iter().zip(&timings) {
             eprintln!("  {}: {:.1}µs/obs", m.name, t.median_us);
             assert!(t.median_us > 0.0);

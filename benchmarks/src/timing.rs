@@ -109,9 +109,16 @@ pub fn bench_blocked(
     let n_obs = group_boundaries.len();
 
     if n_methods == 0 || n_obs == 0 {
-        return methods.iter().map(|_| TimingResult {
-            median_us: 0.0, p5_us: 0.0, p95_us: 0.0, n_obs, actual_blocks: 0,
-        }).collect();
+        return methods
+            .iter()
+            .map(|_| TimingResult {
+                median_us: 0.0,
+                p5_us: 0.0,
+                p95_us: 0.0,
+                n_obs,
+                actual_blocks: 0,
+            })
+            .collect();
     }
 
     let batches = split_into_batches(group_boundaries, cfg.n_batches);
@@ -127,7 +134,11 @@ pub fn bench_blocked(
 
     eprintln!(
         "  Block protocol: {} methods, {} batches, {} pool groups, {}-{} blocks",
-        n_methods, batches.len(), n_obs, cfg.min_blocks, cfg.max_blocks,
+        n_methods,
+        batches.len(),
+        n_obs,
+        cfg.min_blocks,
+        cfg.max_blocks,
     );
 
     // Per-method, per-block median: one median per block.
@@ -142,9 +153,7 @@ pub fn bench_blocked(
         let batch = &batches[block_id % batches.len()];
 
         // Cyclic rotation of method order to cancel positional bias.
-        let method_order: Vec<usize> = (0..n_methods)
-            .map(|i| (i + block_id) % n_methods)
-            .collect();
+        let method_order: Vec<usize> = (0..n_methods).map(|i| (i + block_id) % n_methods).collect();
 
         for &mi in &method_order {
             let m = &mut methods[mi];
@@ -170,7 +179,9 @@ pub fn bench_blocked(
         {
             eprintln!(
                 "  Block {}/{}: time budget reached ({:.1}s)",
-                block_id + 1, cfg.max_blocks, wall.elapsed().as_secs_f64(),
+                block_id + 1,
+                cfg.max_blocks,
+                wall.elapsed().as_secs_f64(),
             );
             break;
         }
@@ -179,23 +190,29 @@ pub fn bench_blocked(
         {
             eprintln!(
                 "  Block {}/{}: all methods stable (CV < {:.0}%)",
-                block_id + 1, cfg.max_blocks, cfg.precision_target_pct,
+                block_id + 1,
+                cfg.max_blocks,
+                cfg.precision_target_pct,
             );
             break;
         }
     }
 
     // Summarize: for each method, compute median/p5/p95 over block medians.
-    methods.iter().enumerate().map(|(i, _)| {
-        let medians = &mut per_method_block_medians[i];
-        let actual_blocks = medians.len();
-        medians.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        TimingResult {
-            median_us: percentile(medians, 50.0),
-            p5_us: percentile(medians, 5.0),
-            p95_us: percentile(medians, 95.0),
-            n_obs,
-            actual_blocks,
-        }
-    }).collect()
+    methods
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let medians = &mut per_method_block_medians[i];
+            let actual_blocks = medians.len();
+            medians.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            TimingResult {
+                median_us: percentile(medians, 50.0),
+                p5_us: percentile(medians, 5.0),
+                p95_us: percentile(medians, 95.0),
+                n_obs,
+                actual_blocks,
+            }
+        })
+        .collect()
 }

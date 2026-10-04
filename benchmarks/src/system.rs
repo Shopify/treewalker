@@ -9,8 +9,12 @@ pub fn get_rss_kb() -> usize {
         if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
             for line in status.lines() {
                 if let Some(rest) = line.strip_prefix("VmRSS:") {
-                    return rest.trim().trim_end_matches(" kB").trim()
-                        .parse().unwrap_or(0);
+                    return rest
+                        .trim()
+                        .trim_end_matches(" kB")
+                        .trim()
+                        .parse()
+                        .unwrap_or(0);
                 }
             }
         }
@@ -27,5 +31,7 @@ pub fn get_rss_kb() -> usize {
         0
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    { 0 }
+    {
+        0
+    }
 }
