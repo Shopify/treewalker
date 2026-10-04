@@ -1,5 +1,5 @@
 //! Public import contract, independent Treelite/GTIL fixtures, and malformed input guards.
-#![allow(clippy::float_cmp)] // Exact hand-computable expectations.
+#![expect(clippy::float_cmp, reason = "exact hand-computable expectations")]
 use serde::Deserialize;
 use simd_json::{OwnedValue as Value, prelude::*};
 use std::{io::Cursor, path::PathBuf};

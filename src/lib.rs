@@ -46,6 +46,8 @@
 //! leaves to float64. See the bundled `docs/treelite-loading.md` for the
 //! full compatibility boundary, memory limits and conversion examples.
 
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 mod error;
 pub use error::LoadError;
 pub mod config;

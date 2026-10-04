@@ -1315,7 +1315,10 @@ fn main() {
 /// inner loop calls `score_fast` once per row, so QuickScorer pays the real
 /// per-group cost including loop and function-call overhead.
 #[cfg(feature = "quickscorer-bench")]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one CLI invocation's paths and timing settings"
+)]
 fn run_quickscorer_bench(
     qs_model_path: &std::path::Path,
     model_path: &std::path::Path,
@@ -1420,8 +1423,10 @@ fn run_quickscorer_bench(
 }
 
 /// Build group iteration from forest config and optional offsets file.
-// Allow: the assert_eq! inside the Some branch makes map_or_else less readable.
-#[allow(clippy::option_if_let_else)]
+#[expect(
+    clippy::option_if_let_else,
+    reason = "the assert_eq! inside the Some branch makes map_or_else less readable"
+)]
 fn build_groups(forest: &Forest, n_rows: usize, group_offsets_path: Option<&PathBuf>) -> Groups {
     if let Some(gpath) = group_offsets_path {
         let offsets = load_group_offsets(gpath);
