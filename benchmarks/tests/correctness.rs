@@ -105,7 +105,7 @@ fn all_configs() -> Vec<TestConfig> {
                     eprintln!("{dataset}/{param}/{fw}: no model or predictions; skipped");
                     continue;
                 }
-                let forest = Forest::load(&model, param_dir.join("walker_config.json"));
+                let forest = Forest::load(&model, param_dir.join("walker_config.json")).unwrap();
                 let tol = match forest.threshold_type() {
                     ThresholdType::F64 => TOL_F64,
                     ThresholdType::F32 => TOL_F32,
@@ -138,11 +138,22 @@ fn load_forest(param_dir: &Path, framework: &str) -> Forest {
         model_file(param_dir, framework),
         param_dir.join("walker_config.json"),
     )
+    .unwrap()
 }
 
 fn load_forest_at_width(param_dir: &Path, framework: &str, width: usize) -> Forest {
-    let mut config = WalkerConfig::from_file(param_dir.join("walker_config.json"));
-    config.max_group_width = width;
+    let file = WalkerConfig::from_file(param_dir.join("walker_config.json")).unwrap();
+    let nf = file.n_features();
+    let features = |role: fn(&WalkerConfig, usize) -> bool| {
+        (0..nf).filter(|&f| role(&file, f)).collect::<Vec<_>>()
+    };
+    let config = WalkerConfig::builder(nf)
+        .max_group_width(width)
+        .varying(features(WalkerConfig::is_varying))
+        .increasing(features(WalkerConfig::is_increasing))
+        .decreasing(features(WalkerConfig::is_decreasing))
+        .build()
+        .unwrap();
     let path = model_file(param_dir, framework);
     let format = if path.extension().is_some_and(|e| e == "bin") {
         treewalker_gbdt::ModelFormat::TreeliteBinaryV4
@@ -153,7 +164,7 @@ fn load_forest_at_width(param_dir: &Path, framework: &str, width: usize) -> Fore
         std::fs::File::open(path).unwrap(),
         format,
         config,
-        &treewalker_gbdt::ParseConfig::default(),
+        &treewalker_gbdt::LoadOptions::default(),
     )
     .unwrap()
 }
@@ -214,7 +225,7 @@ fn predict_all(
     if let Some(offs) = offsets {
         predictor.predict_groups(data, offs, &mut results);
     } else {
-        predictor.predict_fixed(data, forest.config().max_group_width, &mut results);
+        predictor.predict_fixed(data, forest.config().max_group_width(), &mut results);
     }
     results
 }
@@ -241,16 +252,16 @@ fn honors_monotonic_contract(
     n_rows: usize,
     offsets: Option<&[usize]>,
 ) -> bool {
-    let nf = config.n_features;
+    let nf = config.n_features();
     let mut ok = true;
-    for_each_group(config.max_group_width, n_rows, offsets, |s, e| {
-        for f in (0..nf).filter(|&f| config.is_mono_inc(f) || config.is_mono_dec(f)) {
+    for_each_group(config.max_group_width(), n_rows, offsets, |s, e| {
+        for f in (0..nf).filter(|&f| config.is_increasing(f) || config.is_decreasing(f)) {
             let values: Vec<f64> = (s..e)
                 .map(|r| data[r * nf + f])
                 .filter(|v| !v.is_nan())
                 .collect();
             ok &= values.windows(2).all(|w| {
-                if config.is_mono_inc(f) {
+                if config.is_increasing(f) {
                     w[0] <= w[1]
                 } else {
                     w[0] >= w[1]
@@ -322,7 +333,7 @@ fn test_single_row() {
         let forest = load_forest(&cfg.param_dir, cfg.framework);
         let (data, _) = load_test_data(&cfg.param_dir);
         let reference = load_reference(&cfg.param_dir, cfg.framework);
-        let nf = forest.config().n_features;
+        let nf = forest.config().n_features();
 
         let mut single = vec![0.0f64; 1];
         forest.predict_full_walk(&data[0..nf], &mut single);
@@ -341,14 +352,19 @@ fn first_config() -> TestConfig {
         .into_iter()
         .find(|c| {
             c.group_offsets.is_none()
-                && WalkerConfig::from_file(c.param_dir.join("walker_config.json")).max_group_width
+                && WalkerConfig::from_file(c.param_dir.join("walker_config.json"))
+                    .unwrap()
+                    .max_group_width()
                     > 1
         })
         .unwrap()
 }
 
 fn assert_partial_matches_full_on_obs(forest: &Forest, data: &[f64], obs: usize) {
-    let (nf, h) = (forest.config().n_features, forest.config().max_group_width);
+    let (nf, h) = (
+        forest.config().n_features(),
+        forest.config().max_group_width(),
+    );
     let rows = &data[obs * h * nf..(obs + 1) * h * nf];
 
     let mut full = vec![0.0f64; h];
@@ -368,8 +384,8 @@ fn test_all_nan_tv_features() {
     let cfg = first_config();
     let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _) = load_test_data(&cfg.param_dir);
-    let nf = forest.config().n_features;
-    let h = forest.config().max_group_width;
+    let nf = forest.config().n_features();
+    let h = forest.config().max_group_width();
 
     for r in 0..h {
         for f in 0..nf {
@@ -386,12 +402,12 @@ fn test_monotonic_columns_with_ties() {
     let cfg = first_config();
     let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _) = load_test_data(&cfg.param_dir);
-    let nf = forest.config().n_features;
-    let h = forest.config().max_group_width;
+    let nf = forest.config().n_features();
+    let h = forest.config().max_group_width();
 
     for r in 0..h {
         for f in 0..nf {
-            if forest.config().is_mono_inc(f) || forest.config().is_mono_dec(f) {
+            if forest.config().is_increasing(f) || forest.config().is_decreasing(f) {
                 data[r * nf + f] = 5.0;
             }
         }
@@ -404,12 +420,12 @@ fn test_all_nan_monotonic_features() {
     let cfg = first_config();
     let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _) = load_test_data(&cfg.param_dir);
-    let nf = forest.config().n_features;
-    let h = forest.config().max_group_width;
+    let nf = forest.config().n_features();
+    let h = forest.config().max_group_width();
 
     for r in 0..h {
         for f in 0..nf {
-            if forest.config().is_mono_inc(f) || forest.config().is_mono_dec(f) {
+            if forest.config().is_increasing(f) || forest.config().is_decreasing(f) {
                 data[r * nf + f] = f64::NAN;
             }
         }
@@ -422,8 +438,8 @@ fn test_extreme_feature_values() {
     let cfg = first_config();
     let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _) = load_test_data(&cfg.param_dir);
-    let nf = forest.config().n_features;
-    let h = forest.config().max_group_width;
+    let nf = forest.config().n_features();
+    let h = forest.config().max_group_width();
 
     for &val in &[f64::MIN, f64::MAX, 0.0, -0.0, 1e300, -1e300] {
         for r in 0..h {
@@ -494,7 +510,10 @@ fn test_ablation_all_configs() {
         let forest = load_forest(&cfg.param_dir, cfg.framework);
         let reference = predict_all(&forest, &data, n_rows, offsets);
         let monotonic = honors_monotonic_contract(forest.config(), &data, n_rows, offsets);
-        let (nf, width) = (forest.config().n_features, forest.config().max_group_width);
+        let (nf, width) = (
+            forest.config().n_features(),
+            forest.config().max_group_width(),
+        );
         for &(mode, ablation) in ablations {
             // Without precompute, monotonic features are partitioned by prefix/suffix
             // scans that are only correct when the data honor the declared contract.
@@ -520,34 +539,34 @@ fn test_ablation_all_configs() {
 // --- Parse config correctness ---
 
 #[test]
-fn test_parse_configs() {
-    use treewalker_gbdt::ParseConfig;
+fn test_optionss() {
+    use treewalker_gbdt::LoadOptions;
 
-    let parse_configs: &[(&str, ParseConfig)] = &[
+    let optionss: &[(&str, LoadOptions)] = &[
         (
             "no_tree_ordering",
-            ParseConfig {
+            LoadOptions {
                 disable_tree_ordering: true,
                 ..Default::default()
             },
         ),
         (
             "no_bitset_intern",
-            ParseConfig {
+            LoadOptions {
                 disable_bitset_intern: true,
                 ..Default::default()
             },
         ),
         (
             "no_prefix_grouping",
-            ParseConfig {
+            LoadOptions {
                 prefix_depth: 0,
                 ..Default::default()
             },
         ),
         (
             "all_parse_disabled",
-            ParseConfig {
+            LoadOptions {
                 disable_tree_ordering: true,
                 disable_bitset_intern: true,
                 prefix_depth: 0,
@@ -563,12 +582,13 @@ fn test_parse_configs() {
         let offsets = cfg.group_offsets.as_deref();
         let reference_forest = load_forest(&cfg.param_dir, cfg.framework);
         let reference = predict_all(&reference_forest, &data, n_rows, offsets);
-        for &(mode, ref pc) in parse_configs {
-            let forest = Forest::load_with_config(
+        for &(mode, ref pc) in optionss {
+            let forest = Forest::load_with(
                 model_file(&cfg.param_dir, cfg.framework),
                 cfg.param_dir.join("walker_config.json"),
                 pc,
-            );
+            )
+            .unwrap();
             let partial = predict_all(&forest, &data, n_rows, offsets);
             let label = format!("{}/{mode}", cfg.label);
             if reference_forest.exact_sums() {
@@ -607,10 +627,7 @@ fn test_binary_matches_json() {
             continue;
         }
 
-        let forest_json = match Forest::try_load(
-            &json_path,
-            cfg.param_dir.join("walker_config.json"),
-        ) {
+        let forest_json = match Forest::load(&json_path, cfg.param_dir.join("walker_config.json")) {
             Ok(forest) => forest,
             Err(e) => {
                 let empty = empty_thresholds(&json_path);
@@ -627,7 +644,7 @@ fn test_binary_matches_json() {
                 continue;
             }
         };
-        let forest_bin = Forest::load(&bin_path, cfg.param_dir.join("walker_config.json"));
+        let forest_bin = Forest::load(&bin_path, cfg.param_dir.join("walker_config.json")).unwrap();
 
         assert_eq!(
             forest_json.trees().len(),
@@ -681,8 +698,8 @@ fn test_cat_out_of_range_partial_matches_full() {
 
     let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _n_rows) = load_test_data(&cfg.param_dir);
-    let nf = forest.config().n_features;
-    let h = forest.config().max_group_width;
+    let nf = forest.config().n_features();
+    let h = forest.config().max_group_width();
 
     // Find a categorical feature by scanning nodes.
     let cat_feature = forest
@@ -724,7 +741,7 @@ fn test_width_32_boundary() {
     // Load a real model with max_group_width set to the u32 boundary.
     let base_cfg = first_config();
     let forest = load_forest_at_width(&base_cfg.param_dir, base_cfg.framework, 32);
-    let nf = forest.config().n_features;
+    let nf = forest.config().n_features();
 
     // Build synthetic test data: 32 rows × n_features.
     // Use the first observation's constant features, vary the TV features linearly.
@@ -734,9 +751,9 @@ fn test_width_32_boundary() {
         for f in 0..nf {
             if forest.config().is_varying(f) {
                 // Linearly spaced values for varying features
-                if forest.config().is_mono_inc(f) {
+                if forest.config().is_increasing(f) {
                     data[row * nf + f] = row as f64;
-                } else if forest.config().is_mono_dec(f) {
+                } else if forest.config().is_decreasing(f) {
                     data[row * nf + f] = 31.0 - row as f64;
                 } else {
                     data[row * nf + f] = (row as f64) * 0.1;
@@ -785,7 +802,10 @@ fn test_node_visit_stats() {
     let cfg = first_config();
     let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (data, n_rows) = load_test_data(&cfg.param_dir);
-    let (nf, h) = (forest.config().n_features, forest.config().max_group_width);
+    let (nf, h) = (
+        forest.config().n_features(),
+        forest.config().max_group_width(),
+    );
 
     let mut results = vec![0.0f64; n_rows];
     let mut total = WorkCounters::default();
@@ -815,11 +835,11 @@ fn test_sweep_matches_bruteforce() {
     for cfg in &all_configs() {
         let forest = load_forest(&cfg.param_dir, cfg.framework);
         let (data, n_rows) = load_test_data(&cfg.param_dir);
-        let nf = forest.config().n_features;
+        let nf = forest.config().n_features();
 
         let mut n_obs_tested = 0usize;
         let mut n_obs_skipped_wide = 0usize;
-        let gw = forest.config().max_group_width;
+        let gw = forest.config().max_group_width();
         for_each_group(gw, n_rows, cfg.group_offsets.as_deref(), |start, end| {
             let n = end - start;
             if n > SWEEP_HELPER_WIDTH {
@@ -881,9 +901,10 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
 
     let forest = load_forest_at_width(&first_cfg.param_dir, first_cfg.framework, target_width);
     let (orig_data, orig_n_rows) = load_test_data(&first_cfg.param_dir);
-    let nf = forest.config().n_features;
-    let orig_gw =
-        WalkerConfig::from_file(first_cfg.param_dir.join("walker_config.json")).max_group_width;
+    let nf = forest.config().n_features();
+    let orig_gw = WalkerConfig::from_file(first_cfg.param_dir.join("walker_config.json"))
+        .unwrap()
+        .max_group_width();
 
     // Build synthetic groups: take the first 10 original groups' constant
     // features, expand each to `target_width` rows by cycling varying features

@@ -5,7 +5,7 @@ use super::common::{
 };
 use super::validation::{self, MAX_TREES, Metadata, ParsedModel};
 use crate::forest::{ThresholdType, Tree};
-use crate::{LoadError, ParseConfig, WalkerConfig};
+use crate::{LoadError, LoadOptions, WalkerConfig};
 use rustc_hash::FxHashMap;
 use std::io::{BufReader, Read};
 
@@ -194,7 +194,7 @@ struct TreeBufs {
 pub(super) fn parse(
     reader: impl Read,
     config: &WalkerConfig,
-    parse: &ParseConfig,
+    options: &LoadOptions,
 ) -> Result<ParsedModel, LoadError> {
     let mut r = Reader {
         input: BufReader::with_capacity(128 * 1024, reader),
@@ -276,7 +276,7 @@ pub(super) fn parse(
     let mut ctx = ParseContext {
         nodes: &mut nodes,
         bitsets: &mut bitsets,
-        bitset_intern: if parse.disable_bitset_intern {
+        bitset_intern: if options.disable_bitset_intern {
             None
         } else {
             Some(&mut intern)
@@ -451,7 +451,7 @@ fn decode_node(
         });
     }
     let feature = b.split_index[i];
-    if feature < 0 || feature as usize >= ctx.config.n_features {
+    if feature < 0 || feature as usize >= ctx.config.n_features() {
         return Err(LoadError::MalformedModel(format!(
             "split_index={feature} out of range"
         )));

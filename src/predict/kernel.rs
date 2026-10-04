@@ -229,7 +229,7 @@ impl Model {
         out_left_masks: &mut [M],
     ) {
         debug_assert_eq!(out_left_masks.len(), self.varying_predicates.len());
-        let nf = self.config.n_features;
+        let nf = self.config.n_features();
         let column = &mut column[..rows.len() / nf];
 
         for range in &self.feature_ranges {
@@ -324,7 +324,11 @@ mod tests {
                 postprocessor: crate::parser::Postprocessor::Sigmoid(1.0),
             },
             trees: Vec::new(),
-            config: WalkerConfig::try_new(64, 32, &(0..64).collect::<Vec<_>>(), &[], &[]).unwrap(),
+            config: WalkerConfig::builder(64)
+                .max_group_width(32)
+                .all_varying()
+                .build()
+                .unwrap(),
             nodes: Vec::new(),
             bitsets: Vec::new(),
             varying_predicates: preds,
@@ -349,7 +353,7 @@ mod tests {
         cols: &[[f64; 32]; 64],
         n_rows: usize,
     ) -> Vec<u32> {
-        let rows = rows_from_columns(cols, n_rows, forest.config.n_features);
+        let rows = rows_from_columns(cols, n_rows, forest.config.n_features());
         let mut out = vec![0u32; forest.varying_predicates.len()];
         let (mut column, mut order) = (vec![0.0; n_rows], vec![(0.0, 0); n_rows]);
         forest.precompute_varying_masks::<F32, u32>(&rows, &mut column, &mut order, &mut out);

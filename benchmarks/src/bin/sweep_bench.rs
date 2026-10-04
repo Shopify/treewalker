@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use treewalker_bench::get_rss_kb;
 use treewalker_gbdt::research::{Ablation, ResearchPredictor, WorkCounters};
-use treewalker_gbdt::{Forest, ParseConfig};
+use treewalker_gbdt::{Forest, LoadOptions};
 
 /// A loaded forest and the research predictor that times one mode, with the mode's
 /// runtime ablation flags.
@@ -53,7 +53,7 @@ impl ModeForest {
 
     /// Predict the group of rows `start..end` of `data` into `results[start..end]`.
     fn predict(&mut self, data: &[f64], results: &mut [f64], start: usize, end: usize) {
-        let nf = self.forest.config().n_features;
+        let nf = self.forest.config().n_features();
         self.predictor
             .predict_group(&data[start * nf..end * nf], &mut results[start..end]);
     }
@@ -66,7 +66,7 @@ impl ModeForest {
         start: usize,
         end: usize,
     ) -> WorkCounters {
-        let nf = self.forest.config().n_features;
+        let nf = self.forest.config().n_features();
         self.predictor
             .predict_group_counted(&data[start * nf..end * nf], &mut results[start..end])
     }
@@ -74,7 +74,7 @@ impl ModeForest {
 
 /// The full walk over the rows `start..end` of `data` into `results[start..end]`.
 fn predict_full(forest: &Forest, data: &[f64], results: &mut [f64], start: usize, end: usize) {
-    let nf = forest.config().n_features;
+    let nf = forest.config().n_features();
     forest.predict_full_walk(&data[start * nf..end * nf], &mut results[start..end]);
 }
 
@@ -212,7 +212,7 @@ fn bench<F: FnMut()>(
 /// Collect work counters across all observations.
 fn collect_stats(forest: &mut ModeForest, data: &[f64], groups: &Groups) -> WorkCounters {
     let n_obs = groups.n_obs();
-    let mut results = vec![0.0f64; data.len() / forest.forest.config().n_features];
+    let mut results = vec![0.0f64; data.len() / forest.forest.config().n_features()];
     let mut total = WorkCounters::default();
 
     for s in 0..n_obs {
@@ -513,8 +513,8 @@ impl TuningFlags {
         }
     }
 
-    const fn to_parse_config(&self) -> ParseConfig {
-        ParseConfig {
+    const fn to_options(&self) -> LoadOptions {
+        LoadOptions {
             disable_tree_ordering: self.tree_ordering,
             disable_bitset_intern: self.bitset_intern,
             prefix_depth: self.prefix_depth,
@@ -728,14 +728,14 @@ fn run_block_mode(
     }
 }
 
-/// Parse a comma-separated mode spec into (name, Ablation, ParseConfig) triples.
+/// Parse a comma-separated mode spec into (name, Ablation, LoadOptions) triples.
 ///
 /// Modes prefixed with "p:" use non-default parse configs; others share the
 /// default forest.  Recognized names:
 ///   baseline, no_unsplit, no_precompute, no_monotonic, no_sweep, all_disabled,
 ///   full (full-walk baseline),
 ///   p:no_tree_ordering, p:no_bitset_intern, p:no_prefix_grouping
-fn parse_mode_specs(spec: &str) -> Vec<(String, Ablation, ParseConfig)> {
+fn parse_mode_specs(spec: &str) -> Vec<(String, Ablation, LoadOptions)> {
     let mut modes = Vec::new();
     for name in spec.split(',') {
         let name = name.trim();
@@ -743,20 +743,20 @@ fn parse_mode_specs(spec: &str) -> Vec<(String, Ablation, ParseConfig)> {
             continue;
         }
         let (ablation, parse) = match name {
-            "baseline" | "full" => (Ablation::default(), ParseConfig::default()),
+            "baseline" | "full" => (Ablation::default(), LoadOptions::default()),
             "no_unsplit" => (
                 Ablation {
                     disable_unsplit: true,
                     ..Default::default()
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "no_precompute" => (
                 Ablation {
                     disable_varying_precompute: true,
                     ..Default::default()
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "no_monotonic" => (
                 Ablation {
@@ -764,14 +764,14 @@ fn parse_mode_specs(spec: &str) -> Vec<(String, Ablation, ParseConfig)> {
                     disable_varying_precompute: true,
                     ..Default::default()
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "no_sweep" => (
                 Ablation {
                     disable_predicate_sweep: true,
                     ..Default::default()
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "all_disabled" => (
                 Ablation {
@@ -781,25 +781,25 @@ fn parse_mode_specs(spec: &str) -> Vec<(String, Ablation, ParseConfig)> {
                     disable_predicate_sweep: true,
                     disable_exact_sums: false,
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "p:no_tree_ordering" => (
                 Ablation::default(),
-                ParseConfig {
+                LoadOptions {
                     disable_tree_ordering: true,
                     ..Default::default()
                 },
             ),
             "p:no_bitset_intern" => (
                 Ablation::default(),
-                ParseConfig {
+                LoadOptions {
                     disable_bitset_intern: true,
                     ..Default::default()
                 },
             ),
             "p:no_prefix_grouping" => (
                 Ablation::default(),
-                ParseConfig {
+                LoadOptions {
                     prefix_depth: 0,
                     ..Default::default()
                 },
@@ -1073,7 +1073,7 @@ fn main() {
         let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
 
         // Build groups (needed for index → row mapping).
-        let temp_forest = Forest::load(&model_path, &config_path);
+        let temp_forest = Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}"));
         let groups = build_groups(&temp_forest, n_rows, group_offsets_path.as_ref());
         let n_total_groups = groups.n_obs();
         drop(temp_forest);
@@ -1093,11 +1093,12 @@ fn main() {
             },
         );
 
-        // Build forests: group by ParseConfig to avoid redundant parses.
+        // Build forests: group by LoadOptions to avoid redundant parses.
         let mut modes: Vec<BlockMode> = Vec::with_capacity(mode_specs.len());
-        for (name, ablation, parse_config) in &mode_specs {
+        for (name, ablation, options) in &mode_specs {
             // The full-walk mode uses only the forest; handled specially.
-            let f = Forest::load_with_config(&model_path, &config_path, parse_config);
+            let f = Forest::load_with(&model_path, &config_path, options)
+                .unwrap_or_else(|e| panic!("{e}"));
             modes.push(BlockMode {
                 name: name.clone(),
                 forest: ModeForest::new(f, *ablation),
@@ -1138,10 +1139,11 @@ fn main() {
         // Composable single-config mode from --disable-* flags.
         let mode_name = compose_mode_name(&tuning);
         let ablation = tuning.to_ablation();
-        let parse_config = tuning.to_parse_config();
+        let options = tuning.to_options();
 
         let parse_start = Instant::now();
-        let forest = Forest::load_with_config(&model_path, &config_path, &parse_config);
+        let forest = Forest::load_with(&model_path, &config_path, &options)
+            .unwrap_or_else(|e| panic!("{e}"));
         let parse_time_us = parse_start.elapsed().as_nanos() as f64 / 1000.0;
         let mut forest = ModeForest::new(forest, ablation);
 
@@ -1151,8 +1153,8 @@ fn main() {
         eprintln!(
             "Loaded: {} trees, {} features, group_width={}, {} observations{}",
             forest.forest.trees().len(),
-            forest.forest.config().n_features,
-            forest.forest.config().max_group_width,
+            forest.forest.config().n_features(),
+            forest.forest.config().max_group_width(),
             groups.n_obs(),
             if group_offsets_path.is_some() {
                 " (variable groups)"
@@ -1183,7 +1185,7 @@ fn main() {
     } else {
         // Legacy mode: --mode filter or all 9 modes.
         let parse_start = Instant::now();
-        let forest = Forest::load(&model_path, &config_path);
+        let forest = Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}"));
         let default_parse_time_us = parse_start.elapsed().as_nanos() as f64 / 1000.0;
 
         let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
@@ -1192,8 +1194,8 @@ fn main() {
         eprintln!(
             "Loaded: {} trees, {} features, group_width={}, {} observations{}",
             forest.trees().len(),
-            forest.config().n_features,
-            forest.config().max_group_width,
+            forest.config().n_features(),
+            forest.config().max_group_width(),
             groups.n_obs(),
             if group_offsets_path.is_some() {
                 " (variable groups)"
@@ -1243,24 +1245,24 @@ fn main() {
             ),
         ];
 
-        let parse_modes: &[(&str, ParseConfig)] = &[
+        let parse_modes: &[(&str, LoadOptions)] = &[
             (
                 "no_tree_ordering",
-                ParseConfig {
+                LoadOptions {
                     disable_tree_ordering: true,
                     ..Default::default()
                 },
             ),
             (
                 "no_bitset_intern",
-                ParseConfig {
+                LoadOptions {
                     disable_bitset_intern: true,
                     ..Default::default()
                 },
             ),
             (
                 "no_prefix_grouping",
-                ParseConfig {
+                LoadOptions {
                     prefix_depth: 0,
                     ..Default::default()
                 },
@@ -1280,7 +1282,8 @@ fn main() {
                 actual_iters: 0,
             }
         } else {
-            let full_forest = Forest::load(&model_path, &config_path);
+            let full_forest =
+                Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}"));
             bench_full_baseline(&full_forest, &data, &groups, &ctl)
         };
 
@@ -1290,7 +1293,10 @@ fn main() {
             if !should_run(name) {
                 continue;
             }
-            let mut f = ModeForest::new(Forest::load(&model_path, &config_path), ablation);
+            let mut f = ModeForest::new(
+                Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}")),
+                ablation,
+            );
             json_results.push(run_one_mode(name, &mut f, &full, &data, &groups, &ctl));
         }
 
@@ -1300,7 +1306,7 @@ fn main() {
             }
             let pt_start = Instant::now();
             let mut f = ModeForest::new(
-                Forest::load_with_config(&model_path, &config_path, pc),
+                Forest::load_with(&model_path, &config_path, pc).unwrap_or_else(|e| panic!("{e}")),
                 Ablation::default(),
             );
             let pt_us = pt_start.elapsed().as_nanos() as f64 / 1000.0;
@@ -1369,7 +1375,7 @@ fn run_quickscorer_bench(
     let (data, n_rows, n_cols) = treewalker_bench::load_raw_f64(&data_path);
 
     // Build groups so we iterate per-observation, not per-row.
-    let forest = Forest::load(model_path, config_path);
+    let forest = Forest::load(model_path, config_path).unwrap_or_else(|e| panic!("{e}"));
     let groups = build_groups(&forest, n_rows, group_offsets_path);
     let n_obs = groups.n_obs();
     drop(forest);
@@ -1473,7 +1479,7 @@ fn build_groups(forest: &Forest, n_rows: usize, group_offsets_path: Option<&Path
         );
         Groups::Variable { offsets }
     } else {
-        let pl = forest.config().max_group_width;
+        let pl = forest.config().max_group_width();
         assert_eq!(
             n_rows % pl,
             0,
@@ -1553,7 +1559,7 @@ fn run_validate_mode(args: &[String]) {
     let config_path = data_dir.join("walker_config.json");
     let data_path = data_dir.join("test_data.bin");
 
-    let forest = Forest::load(&model_path, &config_path);
+    let forest = Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}"));
     let (data, n_rows, n_cols) = treewalker_bench::load_raw_f64(&data_path);
     let groups = build_groups(&forest, n_rows, group_offsets_path.as_ref());
     let n_obs = groups.n_obs();

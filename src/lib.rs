@@ -27,9 +27,9 @@
 //! use treewalker_gbdt::{Forest, LoadError};
 //!
 //! # fn main() -> Result<(), LoadError> {
-//! let forest = Forest::try_load("model.bin", "walker_config.json")?;
+//! let forest = Forest::load("model.bin", "walker_config.json")?;
 //! let mut predictor = forest.predictor(); // reuse it: one per worker
-//! let rows = vec![0.0; forest.config().n_features]; // one row, trained column order
+//! let rows = vec![0.0; forest.config().n_features()]; // one row, trained column order
 //! let mut output = [0.0];
 //! predictor.predict_group(&rows, &mut output);
 //! # Ok(())
@@ -59,7 +59,7 @@ mod predict;
 #[cfg(feature = "research")]
 pub mod research;
 
-pub use config::{ParseConfig, WalkerConfig};
+pub use config::{LoadOptions, WalkerConfig, WalkerConfigBuilder};
 pub use error::LoadError;
 pub use forest::Forest;
 pub use parser::ModelFormat;

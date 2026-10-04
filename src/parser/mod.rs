@@ -43,7 +43,7 @@ pub(crate) use validation::{Output, ParsedModel, Postprocessor, validate_json_de
 use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;
 
-use crate::config::{ParseConfig, WalkerConfig};
+use crate::config::{LoadOptions, WalkerConfig};
 use crate::forest::{FeatureRange, Node, PrefixGroup, Threshold, Tree, VaryingPredicate};
 
 // ---------------------------------------------------------------------------
@@ -77,21 +77,20 @@ pub(crate) fn parse_reader(
     reader: impl Read,
     format: ModelFormat,
     config: &WalkerConfig,
-    parse_config: &ParseConfig,
+    options: &LoadOptions,
 ) -> Result<ParsedModel, LoadError> {
-    config.validate()?;
-    if parse_config.prefix_depth > validation::MAX_DEPTH {
+    if options.prefix_depth > validation::MAX_DEPTH {
         return Err(LoadError::Limit(format!(
             "prefix_depth {} exceeds {}",
-            parse_config.prefix_depth,
+            options.prefix_depth,
             validation::MAX_DEPTH
         )));
     }
     let mut parsed = match format {
-        ModelFormat::TreeliteBinaryV4 => binary::parse(reader, config, parse_config)?,
-        ModelFormat::TreeliteJson => json::parse(reader, config, parse_config)?,
+        ModelFormat::TreeliteBinaryV4 => binary::parse(reader, config, options)?,
+        ModelFormat::TreeliteJson => json::parse(reader, config, options)?,
     };
-    if !parse_config.disable_tree_ordering {
+    if !options.disable_tree_ordering {
         (parsed.trees, parsed.nodes, parsed.bitsets) =
             auto_order_trees(parsed.trees, parsed.nodes, parsed.bitsets);
     }
@@ -489,7 +488,7 @@ fn auto_order_trees(
 ///
 /// Builds new pools in sorted order and drops the old ones. Peak memory is
 /// 2× the nodes pool during the copy. For models where this matters (>100MB),
-/// the tree ordering can be disabled with `ParseConfig::disable_tree_ordering`.
+/// the tree ordering can be disabled with `LoadOptions::disable_tree_ordering`.
 fn repack_pools_in_tree_order(
     order: &[usize],
     trees: &[Tree],
