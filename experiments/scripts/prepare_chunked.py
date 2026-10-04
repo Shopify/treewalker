@@ -52,8 +52,7 @@ Output:
   experiments/data/chunked_g_summary.md  (10-line summary, max % delta vs G=128)
 
 Usage:
-  DYLD_LIBRARY_PATH=/opt/homebrew/opt/libomp/lib \
-    uv run python3 experiments/scripts/prepare_chunked.py --stage all
+  uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage all
   (stages: prepare, correctness, timing, all. --cells 128,256,1024,512 by default)
 
 No Rust edits, no engine changes, no new dependencies.
