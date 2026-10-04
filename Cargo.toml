@@ -1,10 +1,15 @@
 [workspace]
 members = ["benchmarks"]
+resolver = "3"
+
+[workspace.package]
+rust-version = "1.97"
 
 [package]
 name = "treewalker-gbdt"
 version = "1.0.0"
 edition = "2024"
+rust-version.workspace = true
 description = "Grouped tree-ensemble inference via recursive partial evaluation"
 license = "MIT"
 repository = "https://github.com/Shopify/treewalker"

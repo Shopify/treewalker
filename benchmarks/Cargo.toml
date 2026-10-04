@@ -2,6 +2,7 @@
 name = "treewalker-bench"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 description = "TreeWalker benchmark harness and artifact correctness tests"
 license = "MIT"
 publish = false
