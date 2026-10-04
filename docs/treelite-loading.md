@@ -77,7 +77,7 @@ should construct a `Forest`.
 | Types | Matching float64 thresholds/leaves, or matching float32 thresholds/leaves |
 | Numeric operators | float64 `<` and `<=`; float32 `<` |
 | Categories | Nonnegative category IDs up to 8159; membership in either child direction |
-| Features / grouped rows | 1–64 features; configured maximum 1–128 rows |
+| Features / grouped rows | 1–64 features; any positive maximum group width |
 
 Multiclass/multiple targets, vector leaves (including singleton vectors), other
 postprocessors/operators/type combinations, nonfinite leaves/base scores,

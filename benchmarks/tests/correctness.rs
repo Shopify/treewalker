@@ -8,8 +8,10 @@ use treewalker_gbdt::forest::{Forest, ThresholdType};
 // Tolerances
 // ---------------------------------------------------------------------------
 
-/// F64 models (LightGBM): GTIL reference is exact. Only FP accumulation noise.
-const TOL_F64: f64 = 1e-14;
+/// F64 models (LightGBM). GTIL adds leaves in f64 in tree order, so its rounding
+/// grows with the partial sums: on the 1,008-step FLCHAIN panel, where margins reach
+/// ±500, it is up to 1.1e-14 from the correctly rounded sum that `predict` returns.
+const TOL_F64: f64 = 1e-13;
 
 /// F32 models (XGBoost): f32 leaf accumulation noise between TW (f64 sum) and
 /// native XGBoost (f32 sum). Split decisions are identical (f32 comparison).
@@ -929,7 +931,7 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
     let total_rows = n_synthetic_groups * target_width;
     assert_eq!(synth_data.len(), total_rows * nf);
 
-    // Predict with partial eval (exercises u64/u128 mask path).
+    // Predict with partial eval (exercises the mask width chosen for target_width).
     let mut results_partial = vec![0.0f64; total_rows];
     for g in 0..n_synthetic_groups {
         let start = g * target_width;
@@ -957,21 +959,37 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
 }
 
 #[test]
-fn test_wide_group_48_u64() {
+fn test_wide_group_48() {
     test_wide_group_partial_matches_full(48);
 }
 
 #[test]
-fn test_wide_group_64_u64() {
+fn test_wide_group_64() {
     test_wide_group_partial_matches_full(64);
 }
 
 #[test]
-fn test_wide_group_96_u128() {
+fn test_wide_group_96() {
     test_wide_group_partial_matches_full(96);
 }
 
 #[test]
-fn test_wide_group_128_u128() {
+fn test_wide_group_128() {
     test_wide_group_partial_matches_full(128);
+}
+
+#[test]
+fn test_wide_group_200() {
+    test_wide_group_partial_matches_full(200);
+}
+
+#[test]
+fn test_wide_group_1000() {
+    test_wide_group_partial_matches_full(1000);
+}
+
+/// Wider than one 1,024-row piece.
+#[test]
+fn test_wide_group_2500() {
+    test_wide_group_partial_matches_full(2500);
 }

@@ -65,7 +65,8 @@ validated `WalkerConfig`. The existing panic-based loaders remain available.
 The supported subset includes scalar regression, ranking and binary
 classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base
 scores. Binary Treelite v4 is recommended; native XGBoost JSON must first be
-converted through Treelite. Limits are 64 features and 128 rows per group.
+converted through Treelite. Inputs have up to 64 features; groups can have any
+number of rows.
 See [Treelite loading](docs/treelite-loading.md) for export examples, the exact
 output and precision policy, errors, limits, and the caller's grouping contract.
 
@@ -204,9 +205,10 @@ only on the released CSVs.
 Predictions are the correctly rounded sums of the leaf values: leaves are added as
 exact fixed-point integers and rounded once, so tree order, layout and ablation
 modes cannot change a prediction. LightGBM (f64) predictions match treelite GTIL
-within 1e-14; XGBoost (f32) predictions match native XGBoost within 1e-5
-(`benchmarks/tests/correctness.rs`). The full walk adds leaves in f64 in tree order
-and agrees within 1e-14.
+within 1e-13; XGBoost (f32) predictions match native XGBoost within 1e-5
+(`benchmarks/tests/correctness.rs`). GTIL and the full walk add leaves in f64 in tree
+order, and their rounding grows with the partial sums: on a 1,008-step survival
+panel, where margins reach ±500, GTIL is up to 1.1e-14 from the correctly rounded sum.
 
 ## Citation
 
