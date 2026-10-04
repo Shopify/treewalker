@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build paper/experiments/data/expedia.parquet from the Kaggle training file.
+"""Build experiments/data/expedia.parquet from the Kaggle training file.
 
 The Expedia data ("Personalize Expedia Hotel Searches - ICDM 2013",
 https://www.kaggle.com/competitions/expedia-personalized-sort) may not be
@@ -9,7 +9,7 @@ redistributed. Accept the competition rules on Kaggle, download data.zip, e.g.
 
 and convert it (from the repository root):
 
-    uv run python3 paper/experiments/scripts/fetch_expedia.py --train-csv data.zip
+    uv run python3 experiments/scripts/fetch_expedia.py --train-csv data.zip
 
 PATH may be train.csv or Kaggle's data.zip. The zip uses Deflate64, which
 Python's zipfile cannot read, so the script extracts it with the system
@@ -18,7 +18,7 @@ that prepare.py uses, stores them with the dtypes the paper's runs used, and
 checks a content fingerprint of the result against the file behind the
 paper (9,917,530 rows, 399,344 search sessions).
 
-    uv run python3 paper/experiments/scripts/fetch_expedia.py --check-only
+    uv run python3 experiments/scripts/fetch_expedia.py --check-only
 
 verifies an existing parquet without rebuilding it.
 """
@@ -35,8 +35,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-ROOT = Path(__file__).resolve().parents[3]
-OUT = ROOT / "paper" / "experiments" / "data" / "expedia.parquet"
+ROOT = Path(__file__).resolve().parents[2]
+OUT = ROOT / "experiments" / "data" / "expedia.parquet"
 
 # Column order and dtypes of the parquet the paper was run on.
 SCHEMA: dict[str, pl.DataType] = {

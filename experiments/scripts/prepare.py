@@ -10,11 +10,11 @@ Granular idempotency: each artifact is checked independently. If a model exists
 but treelite .bin is missing, only the .bin is regenerated — nothing is retrained.
 
 Usage:
-    uv run python3 paper/experiments/scripts/prepare.py
-    uv run python3 paper/experiments/scripts/prepare.py --datasets support
-    uv run python3 paper/experiments/scripts/prepare.py --datasets expedia --prepare-groups
-    uv run python3 paper/experiments/scripts/prepare.py --grid all --prepare-groups
-    uv run python3 paper/experiments/scripts/prepare.py --dry-run
+    uv run python3 experiments/scripts/prepare.py
+    uv run python3 experiments/scripts/prepare.py --datasets support
+    uv run python3 experiments/scripts/prepare.py --datasets expedia --prepare-groups
+    uv run python3 experiments/scripts/prepare.py --grid all --prepare-groups
+    uv run python3 experiments/scripts/prepare.py --dry-run
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ def load_ctr_data(
 
     data_path = Path(spec.parquet_path)
     if not data_path.is_absolute():
-        data_path = Path(__file__).resolve().parent.parent.parent.parent / data_path
+        data_path = Path(__file__).resolve().parent.parent.parent / data_path
 
     if not data_path.exists():
         raise FileNotFoundError(f"{data_path} not found")

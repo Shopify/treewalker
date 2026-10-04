@@ -22,7 +22,7 @@ variable "bench_suite" {
 }
 
 variable "expedia_parquet" {
-  description = "Path to expedia.parquet built by paper/experiments/scripts/fetch_expedia.py; required for bench_suite = \"paper\" (default: ../paper/experiments/data/expedia.parquet)"
+  description = "Path to expedia.parquet built by experiments/scripts/fetch_expedia.py; required for bench_suite = \"paper\" (default: ../experiments/data/expedia.parquet)"
   type        = string
   default     = ""
 }

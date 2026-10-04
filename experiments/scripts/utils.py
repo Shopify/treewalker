@@ -140,7 +140,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 RUN_DIR = SCRIPT_DIR.parent
 DATA_DIR = RUN_DIR / "data"
 ARTIFACTS_DIR = RUN_DIR / "artifacts"
-PROJECT_ROOT = RUN_DIR.parent.parent
+PROJECT_ROOT = RUN_DIR.parent
 
 # ---------------------------------------------------------------------------
 # Sweep parameters
@@ -272,7 +272,7 @@ DATASETS = [
     ),
     DatasetSpec(
         "expedia", dataset_type="ctr",
-        parquet_path="paper/experiments/data/expedia.parquet",
+        parquet_path="experiments/data/expedia.parquet",
         constant_features=[
             "site_id",
             "visitor_location_country_id",
@@ -773,7 +773,7 @@ def build_sweep_bench() -> Path:
         "RUSTFLAGS": "-C target-cpu=native",
     }
     subprocess.run(
-        ["cargo", "build", "--manifest-path", "benchmarks/Cargo.toml",
+        ["cargo", "build", "--manifest-path", "experiments/benchmarks/Cargo.toml",
          "--target-dir", "target", "--release", "--bin", "sweep_bench",
          "--features", "external-bench"],
         cwd=str(PROJECT_ROOT),

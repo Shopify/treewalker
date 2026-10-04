@@ -57,10 +57,7 @@ fn empty_thresholds(path: &Path) -> usize {
 // Config discovery — test every artifact
 // ---------------------------------------------------------------------------
 
-const ARTIFACTS_BASE: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../paper/experiments/artifacts"
-);
+const ARTIFACTS_BASE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../artifacts");
 const FRAMEWORKS: &[&str] = &["lightgbm", "xgboost"];
 
 struct TestConfig {

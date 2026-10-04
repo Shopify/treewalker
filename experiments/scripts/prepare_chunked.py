@@ -30,7 +30,7 @@ Construction (deterministic, np.random.default_rng(42)):
   Same total row count R per cell so per-row latencies are comparable.
 
 Engine cap: the binary asserts every offset group width is in 1..=128
-(load_group_offsets in benchmarks/src/bin/sweep_bench.rs), and Forest::predict asserts
+(load_group_offsets in experiments/benchmarks/src/bin/sweep_bench.rs), and Forest::predict asserts
 n <= MAX_GROUP_WIDTH (128). PredictWorkspace dispatches G32/G64/G128 by
 max_group_width; we set max_group_width=128 to reuse the G128 (u128 mask)
 workspace. max_group_width does not affect parsing or predictions (it only
@@ -38,22 +38,22 @@ selects the mask width at predict time) — confirmed by the correctness check.
 
 Correctness: one check — TreeWalker chunked predictions vs LightGBM reference
 (GTIL) within TOL_F64=1e-14. sweep_bench emits only timing, not predictions, so
-we reuse the EXISTING benchmarks/tests/correctness.rs::test_reference_match harness (no
+we reuse the EXISTING experiments/benchmarks/tests/correctness.rs::test_reference_match harness (no
 Rust edits): each chunked cell is written as a self-contained artifact dir
-under paper/experiments/artifacts/support/e2_chunked_g{G}/ with walker_config.json,
+under experiments/artifacts/support/e2_chunked_g{G}/ with walker_config.json,
 test_data.bin, group_offsets.bin, lightgbm/model_treelite.json (copied) and
 lightgbm/predictions.npy (GTIL on the custom rows, same treelite.gtil.predict
 call prepare.py uses). The test discovers these dirs and verifies
 forest.predict (per offset chunk) vs predictions.npy within 1e-14.
 
 Output:
-  paper/experiments/data/chunked_g_results_<platform>.csv
+  experiments/data/chunked_g_results_<platform>.csv
     columns: logical_G, n_chunks, rows, tw_median_us_per_row, p5, p95, delta_vs_128_pct
-  paper/experiments/data/chunked_g_summary.md  (10-line summary, max % delta vs G=128)
+  experiments/data/chunked_g_summary.md  (10-line summary, max % delta vs G=128)
 
 Usage:
   DYLD_LIBRARY_PATH=/opt/homebrew/opt/libomp/lib \
-    uv run python3 paper/experiments/scripts/prepare_chunked.py --stage all
+    uv run python3 experiments/scripts/prepare_chunked.py --stage all
   (stages: prepare, correctness, timing, all. --cells 128,256,1024,512 by default)
 
 No Rust edits, no engine changes, no new dependencies.
@@ -233,11 +233,11 @@ def cell_is_complete(cell_dir: Path) -> tuple[bool, list[Path]]:
 
 
 # ---------------------------------------------------------------------------
-# Correctness — reuse the existing benchmarks/tests/correctness.rs harness
+# Correctness — reuse the existing experiments/benchmarks/tests/correctness.rs harness
 # ---------------------------------------------------------------------------
 
 def run_correctness(cells: list[int]) -> bool:
-    """Run benchmarks/tests/correctness.rs::test_reference_match via cargo test, fail-closed.
+    """Run experiments/benchmarks/tests/correctness.rs::test_reference_match via cargo test, fail-closed.
 
     The harness discovers every artifact dir (including our e2_chunked_g{G}
     dirs) and checks TreeWalker per-offset-group predictions vs predictions.npy
@@ -252,7 +252,7 @@ def run_correctness(cells: list[int]) -> bool:
         **os.environ,
         "PATH": f"{Path.home() / '.cargo/bin'}:{os.environ.get('PATH', '')}",
     }
-    cmd = ["cargo", "test", "--manifest-path", "benchmarks/Cargo.toml",
+    cmd = ["cargo", "test", "--manifest-path", "experiments/benchmarks/Cargo.toml",
             "--target-dir", "target", "--release", "--features", "research",
             "--test", "correctness", "test_reference_match", "--", "--nocapture"]
     print(f"\n[correctness] {' '.join(cmd)}", file=sys.stderr)
@@ -485,7 +485,7 @@ def main():
     missing = [str(p) for p in required if not p.exists()]
     if missing:
         print("E2 ERROR: reference SUPPORT artifacts missing. Run prepare.py first, e.g.\n"
-              "  uv run python3 paper/experiments/scripts/prepare.py "
+              "  uv run python3 experiments/scripts/prepare.py "
               "--datasets support --combos 500,8,16 --skip-compiled\n"
               "Missing:", file=sys.stderr)
         for m in missing:
