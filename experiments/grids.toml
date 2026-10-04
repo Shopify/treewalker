@@ -1,0 +1,87 @@
+# The benchmark grids. `treewalker-exp prepare --suite NAME` prepares a
+# suite's cells. A model is one (dataset, framework, T, L, horizon); a
+# workload says how its test rows are grouped; a cell is a workload on one
+# model. Both frameworks are trained for every model.
+
+schema = 1
+
+[defaults]
+seed = 42
+test_frac = 0.2
+frameworks = ["lightgbm", "xgboost"]
+expedia_max_sessions = 50_000
+
+# --- workloads ---------------------------------------------------------------
+
+# Survival panels: one model per (T, L, horizon), each test patient over the
+# full horizon. SUPPORT tops out at 104 steps.
+[workloads.panel]
+generator = "panel-v1"
+datasets = ["support", "flchain"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+horizon = [1, 2, 4, 8, 16, 32, 64, 128]
+
+# Expedia: one click-probability model per (T, L), used to rank every test
+# session. It is not trained with a ranking objective.
+[workloads.ranking]
+generator = "ranking-sessions-v1"
+datasets = ["expedia"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+
+# The released credit scenario cells (LightGBM only, in their released layout
+# under artifacts/scenario_credit).
+[workloads.whatif-v1]
+generator = "whatif-v1"
+datasets = ["credit"]
+frameworks = ["lightgbm"]
+n_trees = [500]
+max_depth = [8]
+k = [1, 2, 4, 8]
+G = [4, 16, 64, 128]
+
+# --- suites --------------------------------------------------------------------
+
+[suites.factorial]
+description = "Every workload on every model, timed with every method."
+workloads = ["panel", "ranking"]
+
+# Ablations at the anchors (T, L, G): the survival panels at horizon G, and
+# Expedia's sessions at the anchor's (T, L).
+[suites.ablation]
+description = "Runtime and parse-time ablations at the anchors."
+anchors = [
+    [50, 4, 1],
+    [500, 8, 4],
+    [500, 8, 16],
+    [1000, 16, 32],
+    [500, 4, 16],
+    [500, 8, 64],
+    [500, 8, 128],
+]
+panel_datasets = ["support", "flchain"]
+ranking_datasets = ["expedia"]
+runtime_variants = [
+    [],
+    ["disable_varying_precompute"],
+    ["disable_varying_precompute", "disable_monotonic"],
+    ["disable_unsplit"],
+    ["disable_unsplit", "disable_varying_precompute"],
+    ["disable_predicate_sweep"],
+    ["disable_exact_sums"],
+]
+# LoadOptions, one at a time everywhere; all 8 combinations of the first
+# three at the interaction anchors. disable_prefix_grouping is prefix_depth 0.
+# Disabling dedup keeps bitset interning on.
+parse_flags = [
+    "disable_tree_ordering",
+    "disable_prefix_grouping",
+    "disable_bitset_intern",
+    "disable_predicate_dedup",
+]
+interaction_anchors = [[500, 8, 16], [1000, 16, 32]]
+
+[suites.scenario-v1]
+description = "The released credit scenario cells (whatif-v1)."
+workloads = ["whatif-v1"]

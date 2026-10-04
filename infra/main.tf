@@ -28,7 +28,7 @@ locals {
 }
 
 # The Expedia data cannot be redistributed; the factorial grid needs the
-# parquet built locally by fetch_expedia.py, uploaded for the trainer.
+# parquet built locally by treewalker-exp fetch-expedia, uploaded for the trainer.
 resource "google_storage_bucket_object" "expedia" {
   count  = var.bench_suite == "paper" ? 1 : 0
   name   = "inputs/expedia.parquet"
@@ -38,7 +38,7 @@ resource "google_storage_bucket_object" "expedia" {
   lifecycle {
     precondition {
       condition     = fileexists(local.expedia_parquet)
-      error_message = "bench_suite = \"paper\" needs expedia.parquet; build it with experiments/scripts/fetch_expedia.py."
+      error_message = "bench_suite = \"paper\" needs expedia.parquet; build it with uv run treewalker-exp fetch-expedia."
     }
   }
 }

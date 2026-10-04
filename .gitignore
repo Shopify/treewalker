@@ -8,6 +8,7 @@ __pycache__/
 experiments/artifacts/
 experiments/figures/
 experiments/data/expedia.parquet
+experiments/data/raw/
 experiments/data/*_summary.md
 experiments/data/*.log
 

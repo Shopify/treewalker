@@ -6,7 +6,7 @@ the value recomputed from experiments/data/. A check passes if the
 printed value equals the recomputed one rounded half up, or truncated to the
 printed precision (the paper truncates in a few places). Numbers that need model
 artifacts (f32/f64 precision audits, E1 zero-value statistics) are covered by
-audit_f32.py, the correctness tests, and prepare_scenario.py instead.
+audit_f32.py, the correctness tests, and treewalker-exp prepare instead.
 
     uv run python3 experiments/scripts/paper_numbers.py
 """

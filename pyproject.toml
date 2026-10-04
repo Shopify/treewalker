@@ -1,6 +1,7 @@
 [project]
-name = "treewalker"
-version = "1.0.0"
+name = "treewalker-exp"
+version = "2.0.0"
+description = "Data preparation, baselines and benchmark orchestration for the TreeWalker paper."
 requires-python = ">=3.14"
 dependencies = [
     "lightgbm>=4.6.0",
@@ -12,16 +13,59 @@ dependencies = [
     "treelite>=4.7.0",
     "xgboost>=3.2.0",
     "pyarrow>=23.0.1",
+    "typer>=0.27.2",
+    "pooch>=1.9.0",
 ]
 
-[project.optional-dependencies]
-# Compiled baselines — require platform-specific C++ toolchains.
-# Install separately: uv pip install tl2cgen lleaves
+[project.scripts]
+treewalker-exp = "treewalker_exp.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+    "mypy>=2.4.0",
+]
+# Compiled baselines. tl2cgen has no aarch64 Linux wheel, so there it builds
+# from source: CXX=infra/scripts/cxx-cstdint uv sync --group baselines.
+# lleaves is not here: it lives in the script lock of experiments/compile.py.
 baselines = [
     "tl2cgen>=1.0.0",
-    "lleaves @ git+https://github.com/siboehm/lleaves.git@v1.4.1",
 ]
 
+[build-system]
+requires = ["uv_build>=0.9.30,<0.13"]
+build-backend = "uv_build"
+
 [tool.uv]
-# This is a scripts-only project — no package to install.
-package = false
+# A repository tool, installed into the project environment, never published.
+package = true
+
+# The locks resolve against PyPI. A project index takes priority over any
+# index in the user's uv configuration, so `uv sync --locked` and `uv lock`
+# leave uv.lock unchanged wherever they run.
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
+[tool.uv.build-backend]
+module-name = "treewalker_exp"
+module-root = "experiments"
+
+[tool.pytest.ini_options]
+testpaths = ["experiments/tests"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["experiments"]
+include = ["experiments/treewalker_exp/**/*.py", "experiments/tests/**/*.py", "experiments/compile.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.14"
+files = ["experiments/treewalker_exp"]
+ignore_missing_imports = true
+check_untyped_defs = true

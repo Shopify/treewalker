@@ -76,7 +76,7 @@ fn all_configs() -> Vec<TestConfig> {
     let mut configs = Vec::new();
 
     let mut datasets: Vec<_> = std::fs::read_dir(&base)
-        .expect("artifacts dir missing — run prepare.py")
+        .expect("artifacts dir missing — run treewalker-exp prepare")
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_ok_and(|ft| ft.is_dir()))
         .map(|e| e.file_name().to_string_lossy().into_owned())
@@ -121,7 +121,7 @@ fn all_configs() -> Vec<TestConfig> {
 
     assert!(
         !configs.is_empty(),
-        "No artifact configs found. Run prepare.py first."
+        "No artifact configs found. Run treewalker-exp prepare first."
     );
     configs
 }
@@ -665,7 +665,7 @@ fn test_binary_matches_json() {
     eprintln!("test_binary_matches_json: {tested} configs tested");
     assert!(
         tested > 0,
-        "No .bin files found — run prepare.py or generate test binaries"
+        "No .bin files found — run treewalker-exp prepare or generate test binaries"
     );
 }
 
@@ -894,7 +894,7 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
     let first_cfg = all_configs()
         .into_iter()
         .next()
-        .expect("No configs found — run prepare.py");
+        .expect("No configs found — run treewalker-exp prepare");
 
     let forest = load_forest_at_width(&first_cfg.param_dir, first_cfg.framework, target_width);
     let (orig_data, orig_n_rows) = load_test_data(&first_cfg.param_dir);
