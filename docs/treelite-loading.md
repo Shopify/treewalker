@@ -24,11 +24,13 @@ models with the appropriate Treelite frontend first.
 use treewalker_gbdt::{Forest, LoadError};
 
 fn main() -> Result<(), LoadError> {
-    let mut forest = Forest::try_load("model.bin", "walker_config.json")?;
-    // Row-major data in the model's original feature order.
-    let data = vec![0.0; forest.config.n_features];
+    let forest = Forest::load("model.bin", "walker_config.json")?;
+    // One predictor per worker; it owns the scratch space and is reused.
+    let mut predictor = forest.predictor();
+    // Row-major data in the model's original feature order: one group of one row.
+    let data = vec![0.0; forest.config().n_features()];
     let mut output = [0.0];
-    forest.predict(&data, &mut output, 0, 1);
+    predictor.predict_group(&data, &mut output);
     Ok(())
 }
 ```
@@ -37,31 +39,29 @@ For memory, streams, custom filenames, or programmatic grouping, select the
 format explicitly:
 
 ```rust,no_run
-use treewalker_gbdt::{Forest, LoadError, ModelFormat, ParseConfig, WalkerConfig};
+use treewalker_gbdt::{Forest, LoadError, LoadOptions, ModelFormat, WalkerConfig};
 
 fn load(bytes: &[u8]) -> Result<Forest, LoadError> {
-    let config = WalkerConfig::try_new(4, 14, &[1, 2, 3], &[3], &[1])?;
-    Forest::from_bytes(bytes, ModelFormat::TreeliteBinaryV4, config,
-        &ParseConfig::default())
+    let config = WalkerConfig::builder(4)
+        .max_group_width(14)
+        .varying([2])
+        .increasing([3])
+        .decreasing([1])
+        .build()?;
+    Forest::from_bytes(bytes, ModelFormat::TreeliteBinaryV4, config, &LoadOptions::default())
 }
 ```
 
 `Forest::from_reader` accepts any `std::io::Read` with the same remaining
-arguments. `try_load_with_config` additionally accepts a `ParseConfig`.
+arguments, and `Forest::load_with` takes `LoadOptions` with the two paths.
 Path-based loading recognizes exactly `.bin` and `.json`; other extensions
 return an error pointing to explicit format selection.
 
-The existing `Forest::load`, `load_with_config`, and `WalkerConfig::from_file`
-remain compatibility wrappers that panic on errors. Prefer the fallible APIs.
-`LoadError` distinguishes `Io`, `MalformedModel`, `MalformedConfig`,
-`Unsupported`, and `Limit`, and implements `Display` and `std::error::Error`.
-For example, an exported multiclass model returns `LoadError::Unsupported`
-with its task or output dimensions instead of producing a scalar prediction.
-
-The legacy `parser::parse_model` tuple cannot represent output metadata. It
-retains the historical distributed leaf bias for summed alpha=1 sigmoid
-models, and panics for other output modes with a migration message. New callers
-should construct a `Forest`.
+Every loader returns `Result`. `LoadError` distinguishes `Io`,
+`MalformedModel`, `MalformedConfig`, `Unsupported`, and `Limit`, implements
+`Display` and `std::error::Error`, and is non-exhaustive. For example, an
+exported multiclass model returns `LoadError::Unsupported` with its task or
+output dimensions instead of producing a scalar prediction.
 
 ## Supported subset
 
@@ -100,14 +100,15 @@ output   = 1 / (1 + exp(-alpha * margin))    # sigmoid
 The base score is stored on the forest, rather than distributed across leaves.
 This can change the last few rounding bits from older TreeWalker versions.
 
-`predict` and `predict_with_stats` compute `tree_sum` exactly: every leaf value is
+Prediction computes `tree_sum` exactly: every leaf value is
 an integer multiple of 2^-e for one scale e per model, the scaled leaves add as
 128-bit integers, and the sum is rounded to float64 once. The result is the float64
 nearest to the true sum and does not depend on tree order, node layout or group
 width. This needs the scaled sums to fit in 126 bits; a model with a non-finite leaf
 or leaf exponents too far apart adds in float64 in tree order instead, which
-`Forest::exact_sums` reports. `predict_full` always adds in float64 in tree order,
-so it can differ from `predict` in the last bits.
+`Forest::exact_sums` reports. The research feature's `predict_full_walk` and the
+`disable_exact_sums` ablation always add in float64 in tree order, so they can
+differ from production prediction in the last bits.
 
 Float64 numerical inputs compare in float64. `<` thresholds are normalized to
 `<= next_down(threshold)`, including signed zero and positive infinity. Float64
@@ -139,11 +140,14 @@ The five-field wire schema is unchanged:
 }
 ```
 
-`WalkerConfig::try_from_json`, `try_from_file`, and `try_new` share validation.
-Indexes must be in range and unique within each list. Increasing/decreasing
-sets must be disjoint subsets of varying features. The complement of the
-varying set is constant. All-varying/no-monotonic configurations are valid.
-Manually constructed public configurations are revalidated during forest load.
+`WalkerConfig::from_json` and `from_file` validate through the same
+`WalkerConfig::builder`. Indexes must be in range and unique within each list,
+and the increasing and decreasing sets must be disjoint. Monotonic features are
+varying whether or not `varying_features` lists them. The complement of the
+varying set is constant, so the builder requires `varying(..)` or
+`all_varying()`: an empty `varying([])` declares every feature constant.
+All-varying and no-monotonic configurations are valid. The configuration's
+fields are private, so a loaded forest's classification cannot change.
 
 The caller preserves row order and the trained model's column order, and
 ensures declared constant features agree within each group and declared
@@ -154,12 +158,14 @@ every input group to verify the caller's equality/monotonicity promises.
 Application-specific requirements for what constitutes a complete group belong
 to the producer/caller.
 
-`predict` and `predict_with_stats` require a nonempty range that fits the
-configured maximum and its workspace. `predict_full` can process longer ranges
-independently. Invalid ranges, short buffers, or overflowing dimensions panic
-before traversal. Post-load changes to feature count, classification masks,
-or maximum group width also panic before prediction: reload with the desired
-configuration. Runtime ablation changes remain supported.
+A `Predictor` takes row-major input with `n_features` values per row and writes
+one output per row. `predict_group` predicts one group, `predict_groups` the
+groups between consecutive offsets (starting at 0, ending at the row count,
+strictly increasing), and `predict_fixed` consecutive groups of one width, the
+last of which may be shorter. Every group has at most `max_group_width` rows;
+empty input is a no-op. A call whose input length is not a multiple of
+`n_features`, whose output length differs from the row count, or whose grouping
+is invalid panics before writing any output.
 
 ## Bounded import
 
@@ -189,7 +195,7 @@ readers validate tree topology iteratively before layout: unique node IDs,
 valid children, reachability, cycles and shared-child rejection. Optional
 statistics may be absent; present field arrays must have consistent lengths.
 Tree ordering may temporarily duplicate node/bitset pools; disabling it with
-`ParseConfig::disable_tree_ordering` reduces peak import memory.
+`LoadOptions::disable_tree_ordering` reduces peak import memory.
 
 ## Verification and regeneration
 
@@ -197,7 +203,7 @@ Tree ordering may temporarily duplicate node/bitset pools; disabling it with
 pairs, GTIL references, and a native sklearn random-forest reference. It needs
 no Python, private models, network, or experiment artifacts. Tests cover all
 workspace widths, numeric boundaries, missing and out-of-range categories,
-aggregation order, loader variants, structural mutation, malformed topology,
+aggregation order, loader variants, predictor call contracts, malformed topology,
 truncated binary fields, size overflow declarations, and unsupported exports.
 
 Optional fixture generation is documented in

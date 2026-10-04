@@ -31,8 +31,8 @@ found [under the neurips2026 tag](https://github.com/Shopify/treewalker/releases
 ## Building and packaging the library
 
 The root crate, `treewalker-gbdt`, contains the inference library. Rust imports
-use `treewalker_gbdt`, for example `use treewalker_gbdt::forest::Forest;`.
-These commands build, test, and package it without the benchmark dependencies:
+use `treewalker_gbdt`, for example `use treewalker_gbdt::Forest;`. These commands
+build, test, and package it without the benchmark dependencies:
 
 ```bash
 cargo build
@@ -40,13 +40,18 @@ cargo test --release
 cargo package
 ```
 
+`cargo test` also runs the research API's tests: the crate's dev-dependency on
+itself turns the `research` feature on. Version 2.0 changed the API; the
+[changelog](CHANGELOG.md) maps every 1.x call to its replacement.
+
 The package includes the Rust library sources, loading documentation, README,
 license, and small independent compatibility fixtures with their optional Python
 generators. Benchmark sources, result data, experiment scripts, Terraform files,
 and the repository's native CPU build settings are excluded.
 
-The benchmark crate has its own manifest and lockfile. Build it explicitly;
-`--target-dir target` preserves the binary path used by the experiment scripts:
+The benchmark crate, `treewalker-bench`, is a workspace member with its own
+manifest and the shared `Cargo.lock`. Build it explicitly; `--target-dir target`
+preserves the binary path used by the experiment scripts:
 
 ```bash
 cargo build --manifest-path benchmarks/Cargo.toml --target-dir target \
@@ -56,11 +61,33 @@ cargo build --manifest-path benchmarks/Cargo.toml --target-dir target \
 The `external-bench` feature enables the C FFI baselines and QuickScorer.
 `quickscorer-bench` enables the legacy CLI's QuickScorer baseline.
 
-## Loading models
+## Using the library
 
-Use `Forest::try_load("model.bin", "walker_config.json")` for fallible loading.
-`Forest::from_reader` and `from_bytes` accept an explicit `ModelFormat` and a
-validated `WalkerConfig`. The existing panic-based loaders remain available.
+Load a model once and predict through a `Predictor`, one per worker thread.
+`Forest` is a cheap handle to the immutable model that can be cloned and
+shared; a predictor owns the scratch space for the widest group, so its calls
+never allocate.
+
+```rust,no_run
+use treewalker_gbdt::{Forest, LoadError};
+
+fn main() -> Result<(), LoadError> {
+    let forest = Forest::load("model.bin", "walker_config.json")?;
+    let mut predictor = forest.predictor();
+    // Two entities with 3 and 2 rows, row-major, in the model's trained column order.
+    let data = vec![0.0; 5 * forest.config().n_features()];
+    let mut out = vec![0.0; 5];
+    predictor.predict_groups(&data, &[0, 3, 5], &mut out);
+    Ok(())
+}
+```
+
+`predict_group` predicts one group and `predict_fixed` consecutive groups of one
+width. `Forest::from_reader` and `from_bytes` accept an explicit `ModelFormat`
+and a `WalkerConfig`; build one in code with
+`WalkerConfig::builder(n_features).max_group_width(w).varying([..]).build()?`.
+The builder requires the varying features, so a forgotten list is an error
+rather than every feature silently treated as constant.
 
 The supported subset includes scalar regression, ranking and binary
 classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base
@@ -167,7 +194,7 @@ uv run python3 paper/experiments/scripts/fetch_expedia.py --train-csv PATH/data.
 uv run python3 paper/experiments/scripts/prepare.py --grid all --prepare-groups --skip-compiled
 uv run python3 paper/experiments/scripts/prepare.py --grid all --compile-only   # tl2cgen, lleaves, sweep_bench
 cargo test --manifest-path benchmarks/Cargo.toml --target-dir target \
-  --release --features test-helpers
+  --release --features research
 
 taskset -c 0 ./target/release/sweep_bench paper/experiments/artifacts --grid all \
   --output-dir paper/experiments/data --warmup 3 --iters 21 --min-iters 11 \
@@ -202,13 +229,21 @@ only on the released CSVs.
 
 ## Correctness
 
-Predictions are the correctly rounded sums of the leaf values: leaves are added as
-exact fixed-point integers and rounded once, so tree order, layout and ablation
-modes cannot change a prediction. LightGBM (f64) predictions match treelite GTIL
-within 1e-13; XGBoost (f32) predictions match native XGBoost within 1e-5
-(`benchmarks/tests/correctness.rs`). GTIL and the full walk add leaves in f64 in tree
-order, and their rounding grows with the partial sums: on a 1,008-step survival
-panel, where margins reach ±500, GTIL is up to 1.1e-14 from the correctly rounded sum.
+A prediction has three stages: `tree_sum`, the sum of the row's leaf values;
+`raw_margin`, `tree_sum / divisor + base_score`; and the output, after the
+identity or the sigmoid. When `Forest::exact_sums()` is true, as it is for the
+12 models of the cells measured below, the leaves are added as exact fixed-point
+integers and rounded once: `tree_sum` is the `f64` nearest to the true sum, and tree
+order, layout and every ablation except `disable_exact_sums` leave it unchanged.
+The margin and the link are ordinary rounded `f64` operations.
+
+LightGBM (f64) predictions match Treelite GTIL within 1e-13, and XGBoost (f32)
+predictions match native XGBoost within 1e-5 (`benchmarks/tests/correctness.rs`).
+GTIL and the full walk add leaves in `f64` in tree order, so they differ from the
+exact sum by their rounding, which grows with the partial sums. Measured on
+2026-10-04, the full walk's outputs differ by at most 2.2e-15 on the FLCHAIN and
+SUPPORT LightGBM cells at horizons 16 and 128, 7.2e-16 on Expedia and 1.1e-14 on
+FLCHAIN at horizon 1,024; the XGBoost models' outputs are bit-identical.
 
 ## Citation
 
