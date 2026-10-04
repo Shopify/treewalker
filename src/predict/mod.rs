@@ -17,6 +17,8 @@ mod ablation;
 mod counters;
 mod kernel;
 
+#[cfg(feature = "research")]
+pub use counters::COUNTERS_VERSION;
 pub use counters::WorkCounters;
 
 use std::sync::Arc;
@@ -482,9 +484,11 @@ impl Model {
         let use_precompute = !ablation.disable_varying_precompute;
         let pred_left_masks: &[M] = if use_precompute {
             if ablation.disable_predicate_sweep {
-                self.precompute_bruteforce_generic::<F32, M>(rows, masks);
+                self.precompute_bruteforce_generic::<F32, M, STATS>(rows, masks, counters);
             } else {
-                self.precompute_varying_masks::<F32, M>(rows, column, order, masks);
+                self.precompute_varying_masks::<F32, M, STATS>(
+                    rows, column, order, masks, counters,
+                );
             }
             masks
         } else {
@@ -500,21 +504,6 @@ impl Model {
             results[start..end].fill(0.0);
         }
         let all_mask: M = M::from_width(n);
-
-        if STATS && use_precompute {
-            let n_u64 = n as u64;
-            let num_advances: u64 = self
-                .feature_ranges
-                .iter()
-                .map(|r| if r.num_start < r.num_end { n_u64 } else { 0 })
-                .sum();
-            let cat_evals: u64 = self
-                .feature_ranges
-                .iter()
-                .map(|r| u64::from(r.cat_end - r.cat_start) * n_u64)
-                .sum();
-            counters.precompute_row_evals += num_advances + cat_evals;
-        }
 
         let mut ctx = EvalCtx::<M> {
             base: 0,

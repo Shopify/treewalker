@@ -131,6 +131,15 @@ impl Model {
                 if STATS {
                     ctx.counters.leaf_hits += 1;
                 }
+                if STATS {
+                    ctx.counters.leaf_adds += if ctx.scale.is_some() {
+                        let mut runs = 0;
+                        row_mask.for_each_run(|_, _| runs += 2);
+                        runs
+                    } else {
+                        u64::from(row_mask.count_ones())
+                    };
+                }
                 if let Some(e) = ctx.scale {
                     let x = crate::exact::to_fixed(node.value, e);
                     let diff = &mut *ctx.diff;
@@ -163,16 +172,21 @@ impl Model {
             } else {
                 let (rows, nf, feat) = (ctx.rows, ctx.n_features, node.feature as usize);
                 let col = |r: usize| rows[r * nf + feat];
+                let c = &mut *ctx.counters;
                 let result = if node.is_categorical() {
-                    self.partition_per_row::<F32, M>(node, rows, nf, row_mask)
+                    self.partition_per_row::<F32, M, STATS>(node, rows, nf, row_mask, c)
                 } else if use_mono {
                     match node.varying_type() {
-                        SPLIT_MONO_INC => Self::partition_mono_inc::<F32, M>(node, col, row_mask),
-                        SPLIT_MONO_DEC => Self::partition_mono_dec::<F32, M>(node, col, row_mask),
-                        _ => Self::partition_non_mono::<F32, M>(node, col, row_mask),
+                        SPLIT_MONO_INC => {
+                            Self::partition_mono_inc::<F32, M, STATS>(node, col, row_mask, c)
+                        }
+                        SPLIT_MONO_DEC => {
+                            Self::partition_mono_dec::<F32, M, STATS>(node, col, row_mask, c)
+                        }
+                        _ => Self::partition_non_mono::<F32, M, STATS>(node, col, row_mask, c),
                     }
                 } else {
-                    Self::partition_non_mono::<F32, M>(node, col, row_mask)
+                    Self::partition_non_mono::<F32, M, STATS>(node, col, row_mask, c)
                 };
                 if STATS {
                     ctx.counters.partition_row_evals += u64::from(row_mask.count_ones());
@@ -219,14 +233,16 @@ impl Model {
     // -----------------------------------------------------------------------
 
     /// Left masks of every varying predicate for one piece: per feature, sort the
-    /// rows by value once and sweep the feature's sorted thresholds.
+    /// rows by value once and sweep the feature's sorted thresholds. With `STATS`,
+    /// the work is added to `counters`.
     #[inline]
-    pub(crate) fn precompute_varying_masks<const F32: bool, M: RowMask>(
+    pub(crate) fn precompute_varying_masks<const F32: bool, M: RowMask, const STATS: bool>(
         &self,
         rows: &[f64],
         column: &mut [f64],
         order: &mut [(f64, u16)],
         out_left_masks: &mut [M],
+        counters: &mut WorkCounters,
     ) {
         debug_assert_eq!(out_left_masks.len(), self.varying_predicates.len());
         let nf = self.config.n_features();
@@ -251,7 +267,22 @@ impl Model {
                 }
 
                 let sorted = &mut order[..n_non_nan];
-                if F32 {
+                if STATS {
+                    counters.precompute_row_evals += column.len() as u64;
+                    let compares = &mut counters.precompute_sort_compares;
+                    if F32 {
+                        sorted.sort_unstable_by(|a, b| {
+                            *compares += 1;
+                            (a.0 as f32).total_cmp(&(b.0 as f32))
+                        });
+                    } else {
+                        sorted.sort_unstable_by(|a, b| {
+                            *compares += 1;
+                            a.0.total_cmp(&b.0)
+                        });
+                    }
+                    counters.precompute_mask_writes += u64::from(range.num_end - range.num_start);
+                } else if F32 {
                     sorted.sort_unstable_by(|a, b| (a.0 as f32).total_cmp(&(b.0 as f32)));
                 } else {
                     sorted.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
@@ -275,6 +306,9 @@ impl Model {
                     while row_ptr < n_non_nan {
                         // SAFETY: row_ptr < n_non_nan, the length of sorted.
                         let (val, r) = unsafe { *sorted.get_unchecked(row_ptr) };
+                        if STATS {
+                            counters.precompute_sweep_compares += 1;
+                        }
                         if threshold_go_left::<F32>(val, threshold) {
                             non_nan_left = non_nan_left.set_bit(usize::from(r));
                             row_ptr += 1;
@@ -289,6 +323,11 @@ impl Model {
             let cat_preds =
                 &self.varying_predicates[range.cat_start as usize..range.cat_end as usize];
             let cat_masks = &mut out_left_masks[range.cat_start as usize..range.cat_end as usize];
+            if STATS {
+                let n_cat = u64::from(range.cat_end - range.cat_start);
+                counters.precompute_row_evals += n_cat * column.len() as u64;
+                counters.precompute_mask_writes += n_cat;
+            }
             for (out, pred) in cat_masks.iter_mut().zip(cat_preds.iter()) {
                 let mut left_mask = M::ZERO;
                 for (r, &val) in column.iter().enumerate() {
@@ -356,7 +395,13 @@ mod tests {
         let rows = rows_from_columns(cols, n_rows, forest.config.n_features());
         let mut out = vec![0u32; forest.varying_predicates.len()];
         let (mut column, mut order) = (vec![0.0; n_rows], vec![(0.0, 0); n_rows]);
-        forest.precompute_varying_masks::<F32, u32>(&rows, &mut column, &mut order, &mut out);
+        forest.precompute_varying_masks::<F32, u32, false>(
+            &rows,
+            &mut column,
+            &mut order,
+            &mut out,
+            &mut super::WorkCounters::default(),
+        );
         out
     }
 

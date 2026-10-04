@@ -30,7 +30,7 @@ use crate::forest::{Forest, Model};
 use crate::predict::{Groups, Predictor};
 
 pub use crate::forest::{Node, ThresholdType, Tree};
-pub use crate::predict::{Ablation, WorkCounters};
+pub use crate::predict::{Ablation, COUNTERS_VERSION, WorkCounters};
 
 /// The three stages of a prediction, one value per row.
 ///
@@ -239,23 +239,28 @@ impl Model {
         let n = rows.len() / self.config.n_features();
         let mut out = vec![0u32; self.varying_predicates.len()];
         let (mut column, mut order) = (vec![0.0; n], vec![(0.0, 0); n]);
+        let mut unused = WorkCounters::default();
+        let c = &mut unused;
         match (self.threshold_type, sweep) {
-            (ThresholdType::F64, true) => {
-                self.precompute_varying_masks::<false, u32>(
-                    rows,
-                    &mut column,
-                    &mut order,
-                    &mut out,
-                );
-            }
-            (ThresholdType::F32, true) => {
-                self.precompute_varying_masks::<true, u32>(rows, &mut column, &mut order, &mut out);
-            }
+            (ThresholdType::F64, true) => self.precompute_varying_masks::<false, u32, false>(
+                rows,
+                &mut column,
+                &mut order,
+                &mut out,
+                c,
+            ),
+            (ThresholdType::F32, true) => self.precompute_varying_masks::<true, u32, false>(
+                rows,
+                &mut column,
+                &mut order,
+                &mut out,
+                c,
+            ),
             (ThresholdType::F64, false) => {
-                self.precompute_bruteforce_generic::<false, u32>(rows, &mut out);
+                self.precompute_bruteforce_generic::<false, u32, false>(rows, &mut out, c);
             }
             (ThresholdType::F32, false) => {
-                self.precompute_bruteforce_generic::<true, u32>(rows, &mut out);
+                self.precompute_bruteforce_generic::<true, u32, false>(rows, &mut out, c);
             }
         }
         out
