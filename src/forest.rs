@@ -33,7 +33,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::config::{ParseConfig, WalkerConfig};
+use crate::config::{LoadOptions, WalkerConfig};
 use crate::parser;
 use crate::{LoadError, ModelFormat};
 use std::io::{Cursor, Read};
@@ -388,44 +388,27 @@ impl std::fmt::Debug for Forest {
 }
 
 impl Forest {
-    /// Compatibility wrapper; panics on I/O, malformed or unsupported models.
-    /// Prefer [`Self::try_load`].
-    pub fn load(model_path: impl AsRef<Path>, config_path: impl AsRef<Path>) -> Self {
-        Self::try_load(model_path, config_path).unwrap_or_else(|e| panic!("{e}"))
-    }
-
-    /// Compatibility wrapper; panics on load errors. Prefer [`Self::try_load_with_config`].
-    pub fn load_with_config(
-        model_path: impl AsRef<Path>,
-        config_path: impl AsRef<Path>,
-        parse_config: &ParseConfig,
-    ) -> Self {
-        Self::try_load_with_config(model_path, config_path, parse_config)
-            .unwrap_or_else(|e| panic!("{e}"))
-    }
-
-    /// Load a supported Treelite `.bin` or `.json` model and grouping configuration.
-    pub fn try_load(
+    /// Load a supported Treelite `.bin` or `.json` model and its grouping
+    /// configuration file, with the default [`LoadOptions`].
+    ///
+    /// The model format follows the file extension. Unsupported model semantics, such
+    /// as multiclass output, return [`LoadError::Unsupported`].
+    pub fn load(
         model_path: impl AsRef<Path>,
         config_path: impl AsRef<Path>,
     ) -> Result<Self, LoadError> {
-        Self::try_load_with_config(model_path, config_path, &ParseConfig::default())
+        Self::load_with(model_path, config_path, &LoadOptions::default())
     }
 
-    /// Load model/configuration files with explicit parse-time optimization options.
-    pub fn try_load_with_config(
+    /// As [`Self::load`], with explicit load options.
+    pub fn load_with(
         model_path: impl AsRef<Path>,
         config_path: impl AsRef<Path>,
-        parse_config: &ParseConfig,
+        options: &LoadOptions,
     ) -> Result<Self, LoadError> {
-        let config = WalkerConfig::try_from_file(config_path)?;
+        let config = WalkerConfig::from_file(config_path)?;
         let format = ModelFormat::from_path(model_path.as_ref())?;
-        Self::from_reader(
-            std::fs::File::open(model_path)?,
-            format,
-            config,
-            parse_config,
-        )
+        Self::from_reader(std::fs::File::open(model_path)?, format, config, options)
     }
 
     /// Load a model from memory with explicit format and validated grouping metadata.
@@ -433,9 +416,9 @@ impl Forest {
         bytes: &[u8],
         format: ModelFormat,
         config: WalkerConfig,
-        parse_config: &ParseConfig,
+        options: &LoadOptions,
     ) -> Result<Self, LoadError> {
-        Self::from_reader(Cursor::new(bytes), format, config, parse_config)
+        Self::from_reader(Cursor::new(bytes), format, config, options)
     }
 
     /// Load a model from a reader. Binary decoding streams with reusable tree buffers;
@@ -445,7 +428,7 @@ impl Forest {
         reader: impl Read,
         format: ModelFormat,
         config: WalkerConfig,
-        parse_config: &ParseConfig,
+        options: &LoadOptions,
     ) -> Result<Self, LoadError> {
         let parser::ParsedModel {
             trees,
@@ -453,18 +436,18 @@ impl Forest {
             bitsets,
             threshold_type,
             output,
-        } = parser::parse_reader(reader, format, &config, parse_config)?;
-        let mut varying_predicates = if parse_config.disable_predicate_dedup {
+        } = parser::parse_reader(reader, format, &config, options)?;
+        let mut varying_predicates = if options.disable_predicate_dedup {
             parser::build_varying_predicates_no_dedup(&mut nodes)?
         } else {
             parser::build_varying_predicates(&mut nodes)?
         };
         parser::sort_varying_predicates(&mut varying_predicates, &mut nodes);
         let feature_ranges = parser::build_feature_ranges(&varying_predicates);
-        let (prefix_groups, prefix_depth) = if parse_config.prefix_depth > 0 {
+        let (prefix_groups, prefix_depth) = if options.prefix_depth > 0 {
             let (groups, _ungrouped) =
-                parser::build_prefix_groups(&trees, &nodes, &config, parse_config.prefix_depth);
-            (groups, parse_config.prefix_depth)
+                parser::build_prefix_groups(&trees, &nodes, &config, options.prefix_depth);
+            (groups, options.prefix_depth)
         } else {
             (Vec::new(), 0)
         };

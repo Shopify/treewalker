@@ -3,7 +3,7 @@
 #![expect(clippy::float_cmp, reason = "exact hand-computable expectations")]
 use simd_json::{OwnedValue as Value, prelude::*};
 use treewalker_gbdt::research::{Ablation, Stages};
-use treewalker_gbdt::{Forest, ModelFormat, ParseConfig, WalkerConfig};
+use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
 fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(format!(
@@ -19,9 +19,13 @@ fn raw(name: &str) -> Vec<f64> {
         .collect()
 }
 fn config() -> WalkerConfig {
-    WalkerConfig::try_new(2, 128, &[0], &[], &[]).unwrap()
+    WalkerConfig::builder(2)
+        .max_group_width(128)
+        .varying([0])
+        .build()
+        .unwrap()
 }
-fn load(name: &str, parse: &ParseConfig) -> Forest {
+fn load(name: &str, parse: &LoadOptions) -> Forest {
     Forest::from_bytes(
         &fixture(name),
         ModelFormat::TreeliteBinaryV4,
@@ -71,7 +75,7 @@ fn cancellation() -> Forest {
     model["class_id"] = Value::Array(Box::new(vec![0.into(); 3]));
     model["base_scores"] = Value::Array(Box::new(vec![0.0.into()]));
     // Keep the tree order, which decides the f64 sum.
-    let parse = ParseConfig {
+    let parse = LoadOptions {
         disable_tree_ordering: true,
         ..Default::default()
     };
@@ -124,7 +128,7 @@ fn every_variant_matches_production_or_the_full_walk() {
     let data = raw("data.bin");
     let n = data.len() / 2;
     for name in MODELS {
-        let forest = load(name, &ParseConfig::default());
+        let forest = load(name, &LoadOptions::default());
         let mut production = vec![0.0; n];
         forest
             .predictor()
@@ -156,7 +160,7 @@ fn every_variant_matches_production_or_the_full_walk() {
 #[test]
 fn counters_show_each_flag() {
     let data = raw("data.bin");
-    let forest = load("sigmoid_f64.bin", &ParseConfig::default());
+    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
     // One row: every varying split leaves one side empty.
     let count = |variant: Ablation| {
         let mut r = forest.research_predictor(variant);
@@ -184,7 +188,7 @@ fn counters_show_each_flag() {
 fn stages_compose_to_the_output() {
     let data = raw("data.bin");
     for name in MODELS {
-        let forest = load(name, &ParseConfig::default());
+        let forest = load(name, &LoadOptions::default());
         let mut production = vec![0.0; 128];
         forest
             .predictor()
@@ -198,7 +202,7 @@ fn stages_compose_to_the_output() {
     }
     // average_base averages two trees and adds a base score of 3: tree sums are
     // halved, then shifted, each step rounded on its own.
-    let forest = load("average_base.bin", &ParseConfig::default());
+    let forest = load("average_base.bin", &LoadOptions::default());
     let mut stages = Stages::default();
     let mut r = forest.research_predictor(Ablation::default());
     r.predict_group_stages(&[0.0, 0.0], &mut stages);
@@ -206,7 +210,7 @@ fn stages_compose_to_the_output() {
     assert_eq!(stages.output, stages.raw_margin);
     assert_eq!(stages.output, [3.375]);
     // A sigmoid applies the link to the raw margin.
-    let forest = load("sigmoid_f64.bin", &ParseConfig::default());
+    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
     let mut r = forest.research_predictor(Ablation::default());
     r.predict_group_stages(&data[..256], &mut stages);
     for (&m, &o) in stages.raw_margin.iter().zip(&stages.output) {
@@ -218,7 +222,7 @@ fn stages_compose_to_the_output() {
 fn predicate_masks_from_the_sweep_match_the_brute_force() {
     let data = raw("data.bin");
     for name in MODELS {
-        let forest = load(name, &ParseConfig::default());
+        let forest = load(name, &LoadOptions::default());
         for rows in [1, 7, 32] {
             let group = &data[..rows * 2];
             assert_eq!(

@@ -5,11 +5,11 @@
 //! production path:
 //!
 //! ```
-//! # use treewalker_gbdt::{Forest, ModelFormat, ParseConfig, WalkerConfig};
+//! # use treewalker_gbdt::{Forest, ModelFormat, LoadOptions, WalkerConfig};
 //! use treewalker_gbdt::research::{Ablation, Stages};
 //! # let model = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/import/identity.bin")).unwrap();
-//! # let config = WalkerConfig::try_new(2, 4, &[0], &[], &[]).unwrap();
-//! # let forest = Forest::from_bytes(&model, ModelFormat::TreeliteBinaryV4, config, &ParseConfig::default()).unwrap();
+//! # let config = WalkerConfig::builder(2).max_group_width(4).varying([0]).build().unwrap();
+//! # let forest = Forest::from_bytes(&model, ModelFormat::TreeliteBinaryV4, config, &LoadOptions::default()).unwrap();
 //! let rows = [0.5, 1.0, 1.5, 1.0]; // two rows of two features
 //! let mut out = [0.0; 2];
 //!
@@ -85,7 +85,7 @@ impl Forest {
     /// If `rows.len()` is not a multiple of `n_features` or `out.len()` is not the row
     /// count.
     pub fn predict_full_walk(&self, rows: &[f64], out: &mut [f64]) {
-        let nf = self.model.config.n_features;
+        let nf = self.model.config.n_features();
         assert!(
             rows.len().is_multiple_of(nf),
             "input length {} is not a multiple of n_features {nf}",
@@ -140,7 +140,7 @@ impl Forest {
     /// If `rows.len()` is not a multiple of `n_features` or holds more than 32 rows.
     #[must_use]
     pub fn predicate_masks(&self, rows: &[f64], sweep: bool) -> Vec<u32> {
-        let nf = self.model.config.n_features;
+        let nf = self.model.config.n_features();
         assert!(
             rows.len().is_multiple_of(nf) && rows.len() / nf <= 32,
             "predicate_masks takes up to 32 rows of n_features values"
@@ -188,7 +188,7 @@ impl ResearchPredictor {
     ///
     /// As [`Predictor::predict_group`].
     pub fn predict_group_stages(&mut self, rows: &[f64], stages: &mut Stages) {
-        let n = rows.len() / self.inner.model.config.n_features;
+        let n = rows.len() / self.inner.model.config.n_features();
         stages.tree_sum.resize(n, 0.0);
         self.inner.check(rows, &stages.tree_sum, Groups::One);
         self.inner.run_unchecked::<false, true>(
@@ -218,7 +218,7 @@ impl Model {
     }
 
     fn full_walk_inner<const F32: bool>(&self, rows: &[f64], out: &mut [f64]) {
-        let nf = self.config.n_features;
+        let nf = self.config.n_features();
         let nodes = &self.nodes;
         out.fill(0.0);
         for tree in &self.trees {
@@ -236,7 +236,7 @@ impl Model {
     }
 
     fn predicate_masks(&self, rows: &[f64], sweep: bool) -> Vec<u32> {
-        let n = rows.len() / self.config.n_features;
+        let n = rows.len() / self.config.n_features();
         let mut out = vec![0u32; self.varying_predicates.len()];
         let (mut column, mut order) = (vec![0.0; n], vec![(0.0, 0); n]);
         match (self.threshold_type, sweep) {
@@ -265,19 +265,23 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::Ablation;
-    use crate::{Forest, ModelFormat, ParseConfig, WalkerConfig};
+    use crate::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
     fn forest() -> Forest {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/fixtures/import/sigmoid_f64.bin"
         );
-        let config = WalkerConfig::try_new(2, 40, &[0], &[], &[]).unwrap();
+        let config = WalkerConfig::builder(2)
+            .max_group_width(40)
+            .varying([0])
+            .build()
+            .unwrap();
         Forest::from_bytes(
             &std::fs::read(path).unwrap(),
             ModelFormat::TreeliteBinaryV4,
             config,
-            &ParseConfig::default(),
+            &LoadOptions::default(),
         )
         .unwrap()
     }

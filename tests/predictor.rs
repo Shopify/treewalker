@@ -1,7 +1,7 @@
 //! Predictor call contracts: group shapes, empty input, and the panics that reject
 //! invalid calls before any output is written.
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use treewalker_gbdt::{Forest, ModelFormat, ParseConfig, Predictor, WalkerConfig};
+use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, Predictor, WalkerConfig};
 
 /// The two-feature sigmoid fixture: feature 0 varies, feature 1 is constant.
 fn forest(max_group_width: usize) -> Forest {
@@ -9,12 +9,16 @@ fn forest(max_group_width: usize) -> Forest {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/import/sigmoid_f64.bin"
     );
-    let config = WalkerConfig::try_new(2, max_group_width, &[0], &[], &[]).unwrap();
+    let config = WalkerConfig::builder(2)
+        .max_group_width(max_group_width)
+        .varying([0])
+        .build()
+        .unwrap();
     Forest::from_bytes(
         &std::fs::read(path).unwrap(),
         ModelFormat::TreeliteBinaryV4,
         config,
-        &ParseConfig::default(),
+        &LoadOptions::default(),
     )
     .unwrap()
 }

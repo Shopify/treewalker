@@ -13,7 +13,7 @@ impl Model {
         out_left_masks: &mut [M],
     ) {
         debug_assert_eq!(out_left_masks.len(), self.varying_predicates.len());
-        let nf = self.config.n_features;
+        let nf = self.config.n_features();
         for (out, pred) in out_left_masks
             .iter_mut()
             .zip(self.varying_predicates.iter())

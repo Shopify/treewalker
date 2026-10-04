@@ -92,7 +92,7 @@ impl Predictor {
 impl Workspace {
     fn new(model: &Model) -> Self {
         let np = model.varying_predicates.len();
-        let rows = model.config.max_group_width.min(MAX_PIECE_ROWS);
+        let rows = model.config.max_group_width().min(MAX_PIECE_ROWS);
         let masks = match rows {
             0..=16 => Masks::U16(vec![0; np]),
             17..=32 => Masks::U32(vec![0; np]),
@@ -211,7 +211,7 @@ pub struct Predictor {
 impl std::fmt::Debug for Predictor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Predictor")
-            .field("max_group_width", &self.model.config.max_group_width)
+            .field("max_group_width", &self.model.config.max_group_width())
             .finish_non_exhaustive()
     }
 }
@@ -289,7 +289,7 @@ impl Predictor {
     /// Panic unless the call's input matches the model and the grouping is valid.
     pub(crate) fn check(&self, data: &[f64], out: &[f64], groups: Groups<'_>) {
         let config = &self.model.config;
-        let (nf, max_width) = (config.n_features, config.max_group_width);
+        let (nf, max_width) = (config.n_features(), config.max_group_width());
         assert!(
             data.len().is_multiple_of(nf),
             "input length {} is not a multiple of n_features {nf}",
@@ -469,7 +469,7 @@ impl Model {
             diff,
         } = buffers;
         debug_assert!(n <= M::WIDTH && n < diff.len());
-        let nf = self.config.n_features;
+        let nf = self.config.n_features();
         // SAFETY: Predictor::check asserts that data holds n_features values per
         // output row, and groups give start < end <= results.len().
         let const_features = unsafe { data.get_unchecked(start * nf..(start + 1) * nf) };

@@ -24,7 +24,7 @@ pub use system::get_rss_kb;
 use std::path::{Path, PathBuf};
 
 use treewalker_gbdt::research::{Ablation, WorkCounters};
-use treewalker_gbdt::{Forest, ParseConfig};
+use treewalker_gbdt::{Forest, LoadOptions};
 
 use self::csv::CsvWriter;
 use self::grid::GridCell;
@@ -79,7 +79,7 @@ struct CellData {
 
 impl CellData {
     /// Load test data, model, and group boundaries. Returns `None` if files are missing.
-    fn load(data_dir: &Path, fw_dir: &Path, parse_config: &ParseConfig) -> Option<Self> {
+    fn load(data_dir: &Path, fw_dir: &Path, options: &LoadOptions) -> Option<Self> {
         let data_path = data_dir.join("test_data.bin");
         if !data_path.exists() {
             return None;
@@ -108,7 +108,8 @@ impl CellData {
 
         let model_bytes = std::fs::metadata(&model_path).map_or(0, |m| m.len());
         let t0 = std::time::Instant::now();
-        let forest = Forest::load_with_config(&model_path, &config_path, parse_config);
+        let forest =
+            Forest::load_with(&model_path, &config_path, options).unwrap_or_else(|e| panic!("{e}"));
         let parse_time_us = t0.elapsed().as_nanos() as f64 / 1000.0;
 
         let bounds = build_group_boundaries(&forest, n_rows, data_dir);
@@ -137,7 +138,7 @@ fn build_group_boundaries(forest: &Forest, n_rows: usize, data_dir: &Path) -> Ve
             .map(|i| (offsets[i], offsets[i + 1]))
             .collect()
     } else {
-        let gw = forest.config().max_group_width;
+        let gw = forest.config().max_group_width();
         assert_eq!(
             n_rows % gw,
             0,
@@ -202,7 +203,7 @@ fn collect_methods<'a>(
         if framework == "lightgbm"
             && let Some(ref lgb_lib) = config.lgb_lib
         {
-            let max_gw = forest.config().max_group_width;
+            let max_gw = forest.config().max_group_width();
             if let Some(mut m) = external::LightGBMBench::load(
                 lgb_lib,
                 &fw_dir.join("model_native.txt"),
@@ -328,7 +329,7 @@ fn run_grid1(config: &RunConfig) {
     for (i, cell) in cells.iter().enumerate() {
         eprintln!("\n[{}/{}] {}", i + 1, cells.len(), cell.label());
 
-        let Some(cd) = CellData::load(&cell.param_dir, &cell.fw_dir, &ParseConfig::default())
+        let Some(cd) = CellData::load(&cell.param_dir, &cell.fw_dir, &LoadOptions::default())
         else {
             eprintln!("  skipping (missing files)");
             continue;
@@ -378,7 +379,7 @@ fn run_grid1(config: &RunConfig) {
             if let Some(scd) = CellData::load(
                 &sentinel_cell.param_dir,
                 &sentinel_cell.fw_dir,
-                &ParseConfig::default(),
+                &LoadOptions::default(),
             ) && let Some(st) = {
                 let mut smethods = collect_methods(
                     &scd,
@@ -483,7 +484,7 @@ fn run_grid3_ablation(config: &RunConfig) {
             },
         );
 
-        // Group combos by ParseConfig to minimize forest reloads.
+        // Group combos by LoadOptions to minimize forest reloads.
         let mut by_parse: std::collections::BTreeMap<(bool, bool, bool), Vec<(Ablation, String)>> =
             std::collections::BTreeMap::new();
         for (am, pc, label) in &combos {
@@ -496,7 +497,7 @@ fn run_grid3_ablation(config: &RunConfig) {
         }
 
         for (pkey, runtime_combos) in &by_parse {
-            let pc = ParseConfig {
+            let pc = LoadOptions {
                 disable_tree_ordering: pkey.0,
                 prefix_depth: if pkey.1 { 0 } else { 2 },
                 disable_bitset_intern: pkey.2,
@@ -634,7 +635,7 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
         let is_prime = b_prime.contains(&(cell.nt, cell.md, cell.horizon));
         let combos = ablation_combos(is_prime);
 
-        // Group by ParseConfig.
+        // Group by LoadOptions.
         let mut by_parse: std::collections::BTreeMap<(bool, bool, bool), Vec<(Ablation, String)>> =
             std::collections::BTreeMap::new();
         for (am, pc, label) in &combos {
@@ -647,7 +648,7 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
         }
 
         for (pkey, runtime_combos) in &by_parse {
-            let pc = ParseConfig {
+            let pc = LoadOptions {
                 disable_tree_ordering: pkey.0,
                 prefix_depth: if pkey.1 { 0 } else { 2 },
                 disable_bitset_intern: pkey.2,
@@ -807,7 +808,7 @@ fn run_grid4_distributions(config: &RunConfig) {
 
             for framework in &["lightgbm", "xgboost"] {
                 let fw_dir = param_dir.join(framework);
-                let Some(cd) = CellData::load(&dist_data_dir, &fw_dir, &ParseConfig::default())
+                let Some(cd) = CellData::load(&dist_data_dir, &fw_dir, &LoadOptions::default())
                 else {
                     continue;
                 };
@@ -1041,7 +1042,7 @@ fn run_grid_scen(config: &RunConfig) {
         let label = format!("scenario_credit/k{}_G{}", cell.k, cell.g);
         eprintln!("\n[{}/{}] {}", i + 1, ordered.len(), label);
 
-        let Some(cd) = CellData::load(&cell.dir, &model_dir, &ParseConfig::default()) else {
+        let Some(cd) = CellData::load(&cell.dir, &model_dir, &LoadOptions::default()) else {
             eprintln!("  skipping (missing files)");
             continue;
         };
@@ -1194,11 +1195,11 @@ fn validate_scen_cell(cd: &CellData, cell_dir: &Path) -> bool {
 // Ablation combo generation
 // ---------------------------------------------------------------------------
 
-/// Generate ablation combos as `(Ablation, ParseConfig, label)` tuples.
+/// Generate ablation combos as `(Ablation, LoadOptions, label)` tuples.
 ///
 /// `is_full_cross=true`: 2^6 = 64 combos (all runtime × all parse).
 /// `is_full_cross=false`: within-group powerset (8 runtime + 7 parse = 15).
-fn ablation_combos(is_full_cross: bool) -> Vec<(Ablation, ParseConfig, String)> {
+fn ablation_combos(is_full_cross: bool) -> Vec<(Ablation, LoadOptions, String)> {
     let mut combos = Vec::new();
     let bits_range = if is_full_cross { 64 } else { 8 };
 
@@ -1229,7 +1230,7 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(Ablation, ParseConfig, String)> 
             disable_monotonic: dm,
             ..Default::default()
         };
-        let pc = ParseConfig {
+        let pc = LoadOptions {
             disable_tree_ordering: dt,
             prefix_depth: if dpg { 0 } else { 2 },
             disable_bitset_intern: db,
@@ -1252,7 +1253,7 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(Ablation, ParseConfig, String)> 
         for pt_bits in 1..8u8 {
             let (dt, dpg, db) = (pt_bits & 1 != 0, pt_bits & 2 != 0, pt_bits & 4 != 0);
             let am = Ablation::default();
-            let pc = ParseConfig {
+            let pc = LoadOptions {
                 disable_tree_ordering: dt,
                 prefix_depth: if dpg { 0 } else { 2 },
                 disable_bitset_intern: db,
@@ -1334,7 +1335,7 @@ mod tests {
         };
         eprintln!("Testing cell: {}", cell.label());
 
-        let cd = CellData::load(&cell.param_dir, &cell.fw_dir, &ParseConfig::default()).unwrap();
+        let cd = CellData::load(&cell.param_dir, &cell.fw_dir, &LoadOptions::default()).unwrap();
         let config = RunConfig {
             artifacts_dir: artifacts,
             output_dir: PathBuf::from("/tmp"),
