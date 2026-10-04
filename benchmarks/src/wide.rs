@@ -13,10 +13,12 @@ struct CellConfig {
     mono_dec_features: Vec<usize>,
 }
 
-/// Load an artifact cell's forest with `max_group_width` clamped to 128, the library's
-/// limit for `predict`. Returns the forest and the cell's actual group width; callers
-/// chunk wider groups or use a kernel without the 128-row limit (the experimental
-/// run-list kernel). `max_group_width` does not affect parsing or layout.
+/// Load an artifact cell's forest with `max_group_width` clamped to 128.
+///
+/// 128 is the library's limit for `predict`. Returns the forest and the cell's actual
+/// group width; callers chunk wider groups or use a kernel without the 128-row limit
+/// (the experimental run-list kernel). `max_group_width` does not affect parsing or
+/// layout.
 pub fn load_forest_any_width(
     model: &Path,
     config: &Path,

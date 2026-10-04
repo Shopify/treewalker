@@ -221,7 +221,9 @@ pub struct LightGBMBench {
 
 impl LightGBMBench {
     /// Output of the most recent `predict_group` call.
-    pub fn last_output(&self, n: usize) -> &[f64] { &self.result_buf[..n] }
+    pub fn last_output(&self, n: usize) -> &[f64] {
+        &self.result_buf[..n]
+    }
 
     /// Load LightGBM from a shared library and a model file.
     ///
@@ -369,7 +371,9 @@ pub struct XGBoostBench {
 impl XGBoostBench {
     /// Output of the most recent `predict_group` call (valid until the next call).
     pub fn last_output(&self) -> Vec<f32> {
-        if self.last_out.is_null() { return Vec::new(); }
+        if self.last_out.is_null() {
+            return Vec::new();
+        }
         unsafe { std::slice::from_raw_parts(self.last_out, self.last_n).to_vec() }
     }
 }

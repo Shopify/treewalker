@@ -100,7 +100,7 @@ fn main() {
         for &(s, e) in &groups {
             if variant == "base" {
                 for c in (s..e).step_by(128) {
-                    f.predict(&data, &mut res, c, (c + 128).min(e))
+                    f.predict(&data, &mut res, c, (c + 128).min(e));
                 }
             } else if variant.starts_with("runs") {
                 assert!(f.predict_runs(&mut rws, &data, &mut res, s, e, ee));
@@ -110,7 +110,7 @@ fn main() {
                     ..flags
                 };
                 for c in (s..e).step_by(128) {
-                    f.predict_opt(&mut ws, &data, &mut res, c, (c + 128).min(e), &fl)
+                    f.predict_opt(&mut ws, &data, &mut res, c, (c + 128).min(e), &fl);
                 }
             }
             acc += res[s];

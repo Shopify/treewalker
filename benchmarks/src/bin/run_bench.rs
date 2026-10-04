@@ -24,6 +24,7 @@ fn chunks(s: usize, e: usize) -> impl Iterator<Item = (usize, usize)> {
     (s..e).step_by(128).map(move |c| (c, (c + 128).min(e)))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     r: &mut R,
     fa: &mut Forest,
@@ -37,18 +38,18 @@ fn run(
     match r {
         R::Base => {
             for (a, b) in chunks(s, e) {
-                fa.predict(data, res, a, b)
+                fa.predict(data, res, a, b);
             }
         }
         R::Opt(f, ws) => {
             for (a, b) in chunks(s, e) {
-                fb.predict_opt(ws, data, res, a, b, f)
+                fb.predict_opt(ws, data, res, a, b, f);
             }
         }
         R::Runs(rws, f, ws) => {
             if !fb.predict_runs(rws, data, res, s, e, ee) {
                 for (a, b) in chunks(s, e) {
-                    fb.predict_opt(ws, data, res, a, b, f)
+                    fb.predict_opt(ws, data, res, a, b, f);
                 }
             }
         }
@@ -68,19 +69,20 @@ fn quantile(v: &mut [f64], q: f64) -> f64 {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let pos = q * (v.len() - 1) as f64;
     let (lo, hi) = (pos.floor() as usize, pos.ceil() as usize);
-    v[lo] + (v[hi] - v[lo]) * (pos - lo as f64)
+    (v[hi] - v[lo]).mul_add(pos - lo as f64, v[lo])
 }
 struct Lcg(u64);
 impl Lcg {
-    fn next(&mut self) -> u64 {
+    const fn next(&mut self) -> u64 {
         self.0 = self
             .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         self.0 >> 33
     }
 }
 
+#[allow(clippy::many_single_char_names)]
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     let (md, dd) = (PathBuf::from(&a[1]), PathBuf::from(&a[2]));
@@ -99,9 +101,9 @@ fn main() {
                 sched = a[i + 1]
                     .split(',')
                     .filter(|t| !t.is_empty())
-                    .fold(0, |m, t| m | 1u128 << t.parse::<u32>().unwrap())
+                    .fold(0, |m, t| m | 1u128 << t.parse::<u32>().unwrap());
             }
-            "--variants" => names = a[i + 1].clone(),
+            "--variants" => names.clone_from(&a[i + 1]),
             o => panic!("unknown arg {o}"),
         }
         i += 2;
@@ -265,7 +267,7 @@ fn main() {
 
     // Exactness: every variant on every measured group.
     let mut outs: Vec<Vec<f64>> = Vec::new();
-    for (_, r) in vars.iter_mut() {
+    for (_, r) in &mut vars {
         let mut res = vec![0.0f64; n_rows];
         for &(s, e) in &groups {
             run(r, &mut fa, &fb, &data, &mut res, s, e, ee);
@@ -314,7 +316,7 @@ fn main() {
         .collect();
     let nv = vars.len();
     let mut res = vec![0.0f64; n_rows];
-    for (_, r) in vars.iter_mut() {
+    for (_, r) in &mut vars {
         for &(s, e) in &mbs[0] {
             run(r, &mut fa, &fb, &data, &mut res, s, e, ee);
         }

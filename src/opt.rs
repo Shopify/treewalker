@@ -629,6 +629,8 @@ impl Forest {
         let base = cx.base;
         loop {
             while unsafe { nodes.get_unchecked(base + idx) }.is_walkable() {
+                // x86_64 only; elsewhere PF compiles to nothing.
+                #[cfg(target_arch = "x86_64")]
                 if PF {
                     // Software prefetch of the out-of-line children of the next two
                     // heavy-path nodes, so a taken jump finds its line already requested.
@@ -638,7 +640,6 @@ impl Forest {
                         let tgt = nodes
                             .as_ptr()
                             .wrapping_add(base + (ahead.skip as u16 as usize));
-                        #[cfg(target_arch = "x86_64")]
                         unsafe {
                             std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(
                                 tgt.cast(),

@@ -37,6 +37,7 @@ struct Variant {
     runner: Runner,
 }
 
+#[allow(clippy::many_single_char_names)]
 fn run(
     v: &mut Variant,
     forests: &mut [Forest],
@@ -97,20 +98,21 @@ fn quantile(v: &mut [f64], q: f64) -> f64 {
     let pos = q * (v.len() - 1) as f64;
     let lo = pos.floor() as usize;
     let hi = pos.ceil() as usize;
-    v[lo] + (v[hi] - v[lo]) * (pos - lo as f64)
+    (v[hi] - v[lo]).mul_add(pos - lo as f64, v[lo])
 }
 
 struct Lcg(u64);
 impl Lcg {
-    fn next(&mut self) -> u64 {
+    const fn next(&mut self) -> u64 {
         self.0 = self
             .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         self.0 >> 33
     }
 }
 
+#[allow(clippy::many_single_char_names)]
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let model_dir = PathBuf::from(&args[1]);
@@ -455,7 +457,7 @@ fn main() {
     // 11: hot-first layout + child hints + flip transform + huge pages
     layout::install(
         Some(layout::Mode::HotFirst {
-            visits: hv_all.clone(),
+            visits: hv_all,
             min_visits,
         }),
         false,
@@ -918,7 +920,7 @@ fn main() {
     let mut exact: Vec<(f64, usize)> = Vec::new();
     let mut tmp = vec![0.0f64; n_rows];
     let mut exact_outputs: Vec<(String, Vec<f64>)> = Vec::new();
-    for v in variants.iter_mut() {
+    for v in &mut variants {
         if v.name == "precomp" {
             exact.push((f64::NAN, 0));
             continue;
@@ -981,7 +983,7 @@ fn main() {
         .collect();
     let nv = variants.len();
     let mut res = vec![0.0f64; n_rows];
-    for v in variants.iter_mut() {
+    for v in &mut variants {
         for &(s, e) in &minibatches[0] {
             run(v, &mut forests, &data, &mut res, s, e, n_cols);
         }
