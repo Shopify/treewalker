@@ -105,7 +105,7 @@ blocks.
 
 ## Reproducing the tables and figures
 
-This needs only Python (3.12+) and [uv](https://docs.astral.sh/uv/), not the
+This needs only Python 3.14 (`.python-version`) and [uv](https://docs.astral.sh/uv/), not the
 benchmark machines. From the repository root:
 
 ```bash
@@ -138,8 +138,9 @@ The paper's measurements ran on two Google Compute Engine VMs in
 performance governor, ASLR off, pinned to one core with `taskset -c 0`.
 LightGBM 4.6.0 and XGBoost 3.2.0 were built from source with `-march=native`,
 TreeWalker with `-C target-cpu=native` (`.cargo/config.toml`). The factorial
-grid used Rust 1.94.1 (`rust-toolchain.toml`); the scenario and chunked runs
-used Rust 1.97.1. `infra/scripts/startup.sh` is the full machine recipe.
+grid used Rust 1.94.1; the scenario and chunked runs used Rust 1.97.1, the
+version now pinned in `rust-toolchain.toml`. `infra/scripts/startup.sh` is the
+full machine recipe.
 
 ### On GCE with Terraform
 

@@ -500,7 +500,7 @@ fn auto_order_trees(
         .map(|(i, tree)| (tree_path_summary(tree, &nodes), i))
         .collect();
 
-    indexed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    indexed.sort_unstable_by_key(|a| a.0);
 
     let order: Vec<usize> = indexed.iter().map(|&(_, idx)| idx).collect();
 

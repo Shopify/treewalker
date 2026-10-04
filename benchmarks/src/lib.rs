@@ -917,7 +917,7 @@ fn scen_cell_order(cells: &[ScenCell]) -> Vec<&ScenCell> {
     // then the remaining cells in fixed (k, G) ascending order. Deterministic
     // run-to-run and independent of filesystem read_dir order, so CSV row order
     // is reproducible across machines.
-    indexed.sort_by(|(core_a, a), (core_b, b)| (!*core_a, a.k, a.g).cmp(&(!*core_b, b.k, b.g)));
+    indexed.sort_by_key(|(core_a, a)| (!*core_a, a.k, a.g));
     indexed.into_iter().map(|(_, c)| c).collect()
 }
 
