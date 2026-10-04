@@ -284,12 +284,13 @@ impl Predictor {
         variant: Ablation,
         counters: Option<&mut WorkCounters>,
     ) {
-        self.check(data, out, groups);
+        self.check(data, out.len(), groups);
         self.run_unchecked::<STATS, ABLATE>(data, out, groups, variant, counters, true);
     }
 
-    /// Panic unless the call's input matches the model and the grouping is valid.
-    pub(crate) fn check(&self, data: &[f64], out: &[f64], groups: Groups<'_>) {
+    /// Panic unless the call's input and output lengths match the model and the
+    /// grouping is valid.
+    pub(crate) fn check(&self, data: &[f64], out_len: usize, groups: Groups<'_>) {
         let config = &self.model.config;
         let (nf, max_width) = (config.n_features(), config.max_group_width());
         assert!(
@@ -299,9 +300,8 @@ impl Predictor {
         );
         let n_rows = data.len() / nf;
         assert!(
-            out.len() == n_rows,
-            "output length {} differs from the row count {n_rows}",
-            out.len()
+            out_len == n_rows,
+            "output length {out_len} differs from the row count {n_rows}"
         );
         match groups {
             Groups::One => assert!(

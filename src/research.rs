@@ -189,8 +189,8 @@ impl ResearchPredictor {
     /// As [`Predictor::predict_group`].
     pub fn predict_group_stages(&mut self, rows: &[f64], stages: &mut Stages) {
         let n = rows.len() / self.inner.model.config.n_features();
+        self.inner.check(rows, n, Groups::One);
         stages.tree_sum.resize(n, 0.0);
-        self.inner.check(rows, &stages.tree_sum, Groups::One);
         self.inner.run_unchecked::<false, true>(
             rows,
             &mut stages.tree_sum,
