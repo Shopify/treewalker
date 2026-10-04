@@ -152,11 +152,11 @@ pub const SPLIT_NON_MONO: u8 = 3;
 /// and tree 200 both split on "feature 14 ≤ 3.5 with default_left=true", they
 /// share the same `VaryingPredicate` and the same `varying_pred_id`. This means the
 /// precompute pass evaluates ~5K unique predicates instead of ~50K total varying nodes.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum VaryingPredicate {
     Num {
         feature: u16,
-        threshold: f64,
+        threshold: Threshold,
         default_left: bool,
     },
     CatInline {
@@ -172,92 +172,24 @@ pub(crate) enum VaryingPredicate {
     },
 }
 
-// Manual Hash/Eq using f64::to_bits() so VaryingPredicate can serve as its own HashMap key,
-// eliminating the need for a separate key type.
-impl std::hash::Hash for VaryingPredicate {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(self).hash(state);
-        match *self {
-            Self::Num {
-                feature,
-                threshold,
-                default_left,
-            } => {
-                feature.hash(state);
-                threshold.to_bits().hash(state);
-                default_left.hash(state);
-            }
-            Self::CatInline {
-                feature,
-                default_left,
-                word,
-            } => {
-                feature.hash(state);
-                default_left.hash(state);
-                word.hash(state);
-            }
-            Self::CatPool {
-                feature,
-                default_left,
-                offset,
-                n_words,
-            } => {
-                feature.hash(state);
-                default_left.hash(state);
-                offset.hash(state);
-                n_words.hash(state);
-            }
-        }
-    }
-}
+/// A split threshold compared and hashed by its bits, so `-0.0` and `0.0` are distinct
+/// predicates and [`VaryingPredicate`] can derive `Eq` and `Hash` to key the dedup map.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Threshold(pub f64);
 
-impl PartialEq for VaryingPredicate {
+impl PartialEq for Threshold {
     fn eq(&self, other: &Self) -> bool {
-        match (*self, *other) {
-            (
-                Self::Num {
-                    feature: f1,
-                    threshold: t1,
-                    default_left: d1,
-                },
-                Self::Num {
-                    feature: f2,
-                    threshold: t2,
-                    default_left: d2,
-                },
-            ) => f1 == f2 && t1.to_bits() == t2.to_bits() && d1 == d2,
-            (
-                Self::CatInline {
-                    feature: f1,
-                    default_left: d1,
-                    word: w1,
-                },
-                Self::CatInline {
-                    feature: f2,
-                    default_left: d2,
-                    word: w2,
-                },
-            ) => f1 == f2 && d1 == d2 && w1 == w2,
-            (
-                Self::CatPool {
-                    feature: f1,
-                    default_left: d1,
-                    offset: o1,
-                    n_words: n1,
-                },
-                Self::CatPool {
-                    feature: f2,
-                    default_left: d2,
-                    offset: o2,
-                    n_words: n2,
-                },
-            ) => f1 == f2 && d1 == d2 && o1 == o2 && n1 == n2,
-            _ => false,
-        }
+        self.0.to_bits() == other.0.to_bits()
     }
 }
 
-impl Eq for VaryingPredicate {}
+impl Eq for Threshold {}
+
+impl std::hash::Hash for Threshold {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
 
 impl VaryingPredicate {
     /// Feature index this predicate splits on.
@@ -275,7 +207,7 @@ impl VaryingPredicate {
     pub(crate) fn goes_left<const F32: bool>(&self, val: f64, bitsets: &[u8]) -> bool {
         match *self {
             Self::Num {
-                threshold,
+                threshold: Threshold(threshold),
                 default_left,
                 ..
             } => {
@@ -318,6 +250,8 @@ impl VaryingPredicate {
                         return false;
                     }
                     let byte_offset = offset as usize + word_idx * 4;
+                    // SAFETY: the parser writes n_words × 4 bytes at `offset` in the
+                    // pool, and word_idx < n_words.
                     let word = unsafe {
                         bitsets
                             .as_ptr()
@@ -366,7 +300,6 @@ pub enum ThresholdType {
 /// - `F32=false` (LightGBM): `val <= threshold` (thresholds adjusted by `next_down` at parse time)
 /// - `F32=true` (XGBoost): `(val as f32) < (threshold as f32)` (f32 comparison, thresholds as-is)
 #[inline]
-#[allow(clippy::cast_possible_truncation)]
 pub(crate) fn threshold_go_left<const F32: bool>(val: f64, threshold: f64) -> bool {
     if F32 {
         (val as f32) < (threshold as f32)
@@ -527,6 +460,8 @@ impl Forest {
             trees.len(),
         );
 
+        // SAFETY: malloc_trim takes no pointers; it only returns free heap pages to
+        // the system.
         #[cfg(target_os = "linux")]
         unsafe {
             libc::malloc_trim(0);
@@ -595,11 +530,11 @@ impl Forest {
     /// the packed u32 words start at `node.value` (byte offset) in `self.bitsets`.
     ///
     /// Out-of-range categories return false (non-membership). The parser normalizes
-    /// membership-right splits by swapping children and missing routing. The last
-    /// argument is retained for source compatibility; only NaN uses missing routing.
+    /// membership-right splits by swapping children and missing routing, and only
+    /// NaN uses missing routing, which the caller handles.
     #[inline]
     #[must_use]
-    pub const fn cat_test(&self, node: &Node, category: i32, _default_left: bool) -> bool {
+    pub const fn cat_test(&self, node: &Node, category: i32) -> bool {
         if category < 0 {
             return false;
         }

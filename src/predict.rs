@@ -158,7 +158,7 @@ impl Forest {
         assert!(end <= results.len(), "prediction output is too short");
     }
 
-    #[allow(clippy::float_cmp)] // Exact fast-path identities.
+    #[expect(clippy::float_cmp, reason = "exact fast-path identities")]
     fn finalize(&self, values: &mut [f64]) {
         let out = self.output;
         if out.divisor != 1.0 || out.base_score != 0.0 {
@@ -293,7 +293,10 @@ impl Forest {
 
     /// Predict a group in pieces of at most `M::WIDTH` rows. The pieces share the
     /// group's constant features; each row's prediction does not depend on the split.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the group, its workspace and its variant"
+    )]
     fn predict_pieces<const F32: bool, M: RowMask, const STATS: bool>(
         &self,
         data: &[f64],
@@ -328,7 +331,10 @@ impl Forest {
     // Core predict — one function, runtime ablation/stats
     // -----------------------------------------------------------------------
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the group, its workspace and its variant"
+    )]
     fn predict_core<const F32: bool, M: RowMask, const STATS: bool>(
         &self,
         data: &[f64],
@@ -349,7 +355,9 @@ impl Forest {
         } = buffers;
         debug_assert!(n <= M::WIDTH && n < diff.len());
         let nf = self.config.n_features;
+        // SAFETY: check_input asserts that data holds end * nf values, and start < end.
         let const_features = unsafe { data.get_unchecked(start * nf..(start + 1) * nf) };
+        // SAFETY: as above.
         let rows = unsafe { data.get_unchecked(start * nf..end * nf) };
         // `predict` runs every optimization; ablation exists only with STATS.
         let ablation = if STATS {
@@ -490,6 +498,8 @@ impl Forest {
         let nodes = &self.nodes;
         let mut bail_level = k;
         for j in 0..k {
+            // SAFETY: prefix groups hold only trees whose first k heavy-path nodes are
+            // constant splits, so rep_base + j with j < k lies in the representative tree.
             let node = unsafe { nodes.get_unchecked(rep_base + j) };
             if STATS && let Some(s) = stats {
                 s.constant_steps += 1;
@@ -505,6 +515,7 @@ impl Forest {
                 k as u16
             } else {
                 let tree_base = self.trees[tree_idx as usize].node_start as usize;
+                // SAFETY: as above, for this tree, with bail_level < k.
                 unsafe { nodes.get_unchecked(tree_base + bail_level) }.skip as u16
             };
             prefix_starts[tree_idx as usize] = start_idx;
@@ -533,12 +544,14 @@ impl Forest {
 
     #[inline]
     fn eval_split<const F32: bool>(&self, node: &Node, features: &[f64]) -> bool {
+        // SAFETY: the parser rejects split features >= n_features, and every caller
+        // passes one row of n_features values.
         let val = unsafe { *features.get_unchecked(node.feature as usize) };
         if val.is_nan() {
             node.default_left()
         } else if node.is_categorical() {
             let val = if F32 { f64::from(val as f32) } else { val };
-            val >= 0.0 && self.cat_test(node, val as i32, node.default_left())
+            val >= 0.0 && self.cat_test(node, val as i32)
         } else {
             threshold_go_left::<F32>(val, node.value)
         }
@@ -570,6 +583,8 @@ impl Forest {
 
         loop {
             // Constant walk — single bit test per node.
+            // SAFETY: base is a tree's node_start and idx a tree-local index reached by
+            // fall-through or skip; validation keeps both inside the tree.
             while unsafe { nodes.get_unchecked(base + idx) }.is_walkable() {
                 if STATS && let Some(ref mut s) = ctx.stats {
                     s.constant_steps += 1;
@@ -577,6 +592,7 @@ impl Forest {
                 idx = self.step::<F32>(nodes, base + idx, idx, ctx.const_features);
             }
 
+            // SAFETY: as above.
             let node = unsafe { nodes.get_unchecked(base + idx) };
 
             // Leaf (walked past all constant nodes, could be leaf or varying).
@@ -585,9 +601,9 @@ impl Forest {
                     s.leaf_hits += 1;
                 }
                 if let Some(e) = ctx.scale {
-                    // diff has n + 1 entries; runs lie within rows 0..n.
                     let x = crate::exact::to_fixed(node.value, e);
                     let diff = &mut *ctx.diff;
+                    // SAFETY: diff has n + 1 entries, and runs lie within rows 0..n.
                     row_mask.for_each_run(|a, b| unsafe {
                         *diff.get_unchecked_mut(a) += x;
                         *diff.get_unchecked_mut(b) -= x;
@@ -595,6 +611,8 @@ impl Forest {
                 } else {
                     let val = node.value;
                     let results = &mut ctx.results[ctx.start..];
+                    // SAFETY: set bits are rows of this piece, below n, and check_input
+                    // asserts that results holds the piece's rows from start on.
                     row_mask.for_each_bit(|r| unsafe { *results.get_unchecked_mut(r) += val });
                 }
                 return;
@@ -607,6 +625,8 @@ impl Forest {
 
             let (left_mask, right_mask) = if use_precompute {
                 let pred_id = node.varying_pred_id as usize;
+                // SAFETY: a varying node's varying_pred_id indexes varying_predicates,
+                // and the mask table holds one mask per predicate.
                 let pred_left_mask = unsafe { *ctx.pred_left_masks.get_unchecked(pred_id) };
                 (row_mask & pred_left_mask, row_mask & !pred_left_mask)
             } else {
@@ -701,7 +721,6 @@ impl Forest {
 
                 let sorted = &mut order[..n_non_nan];
                 if F32 {
-                    #[allow(clippy::cast_possible_truncation)]
                     sorted.sort_unstable_by(|a, b| (a.0 as f32).total_cmp(&(b.0 as f32)));
                 } else {
                     sorted.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
@@ -719,10 +738,11 @@ impl Forest {
                             threshold,
                             default_left,
                             ..
-                        } => (*threshold, *default_left),
+                        } => (threshold.0, *default_left),
                         _ => unreachable!(),
                     };
                     while row_ptr < n_non_nan {
+                        // SAFETY: row_ptr < n_non_nan, the length of sorted.
                         let (val, r) = unsafe { *sorted.get_unchecked(row_ptr) };
                         if threshold_go_left::<F32>(val, threshold) {
                             non_nan_left = non_nan_left.set_bit(usize::from(r));
@@ -785,12 +805,14 @@ impl Forest {
         n_rows: usize,
         f32_mode: bool,
     ) -> Vec<u32> {
+        assert!(n_rows <= 32, "test helpers take at most 32 rows");
         let mut out = vec![0u32; self.varying_predicates.len()];
         for (i, pred) in self.varying_predicates.iter().enumerate() {
             let f = pred.feature() as usize;
             let col = &varying_cols[f];
             let mut left_mask = 0u32;
             for r in 0..n_rows {
+                // SAFETY: n_rows <= 32, the column length, as asserted above.
                 let val = unsafe { *col.get_unchecked(r) };
                 let goes_left = if f32_mode {
                     pred.goes_left::<true>(val, &self.bitsets)
@@ -1129,7 +1151,7 @@ mod tests {
     fn num_pred(feature: u16, threshold: f64, default_left: bool) -> VaryingPredicate {
         VaryingPredicate::Num {
             feature,
-            threshold,
+            threshold: crate::forest::Threshold(threshold),
             default_left,
         }
     }

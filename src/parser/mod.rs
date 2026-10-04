@@ -44,7 +44,9 @@ use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;
 
 use crate::config::{ParseConfig, WalkerConfig};
-use crate::forest::{FeatureRange, Node, PrefixGroup, ThresholdType, Tree, VaryingPredicate};
+use crate::forest::{
+    FeatureRange, Node, PrefixGroup, Threshold, ThresholdType, Tree, VaryingPredicate,
+};
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -75,7 +77,10 @@ impl ModelFormat {
 /// This preserves historical leaf-bias distribution. Panics for other output
 /// semantics, malformed inputs or unsupported models. Prefer [`crate::Forest`]'s
 /// fallible loaders, which retain output metadata and support identity/averaging.
-#[allow(clippy::float_cmp)] // Exact output mode, not an approximate numerical comparison.
+#[expect(
+    clippy::float_cmp,
+    reason = "exact output mode, not an approximate numerical comparison"
+)]
 pub fn parse_model(
     path: impl AsRef<Path>,
     config: &WalkerConfig,
@@ -180,7 +185,7 @@ pub(crate) fn build_varying_predicates(
         } else {
             VaryingPredicate::Num {
                 feature,
-                threshold: node.value,
+                threshold: Threshold(node.value),
                 default_left,
             }
         };
@@ -241,7 +246,7 @@ pub(crate) fn build_varying_predicates_no_dedup(
         } else {
             VaryingPredicate::Num {
                 feature,
-                threshold: node.value,
+                threshold: Threshold(node.value),
                 default_left,
             }
         };
@@ -298,7 +303,7 @@ pub(crate) fn sort_varying_predicates(predicates: &mut Vec<VaryingPredicate>, no
                     (
                         VaryingPredicate::Num { threshold: ta, .. },
                         VaryingPredicate::Num { threshold: tb, .. },
-                    ) => ta.total_cmp(tb),
+                    ) => ta.0.total_cmp(&tb.0),
                     _ => std::cmp::Ordering::Equal,
                 }
             })

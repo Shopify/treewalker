@@ -108,7 +108,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)] // Exact results.
+    #[expect(clippy::float_cmp, reason = "exact results")]
     fn sums_are_correctly_rounded() {
         // Sequential f64 addition loses the 1.0 and doubles the residual.
         assert_eq!(exact_sum(&[1e16, 1.0, -1e16]), 1.0);
