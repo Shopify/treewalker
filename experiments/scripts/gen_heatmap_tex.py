@@ -10,8 +10,6 @@ based on background luminance for readability.
 Usage:
     uv run python3 experiments/scripts/gen_heatmap_tex.py
 """
-from __future__ import annotations
-
 from pathlib import Path
 
 import polars as pl

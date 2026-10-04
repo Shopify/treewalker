@@ -7,8 +7,6 @@ All figures use plotnine with a shared theme and redundant encoding
 Usage:
     uv run python3 experiments/scripts/plot.py
 """
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

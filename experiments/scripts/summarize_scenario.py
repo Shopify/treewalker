@@ -45,8 +45,6 @@ benchmark hosts, e.g. GCE core-pinned runs, so committed CSVs are not mislabeled
 as a local macOS run).
 """
 
-from __future__ import annotations
-
 import argparse
 import csv
 import platform

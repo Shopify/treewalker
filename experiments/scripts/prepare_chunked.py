@@ -59,8 +59,6 @@ Usage:
 No Rust edits, no engine changes, no new dependencies.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os
