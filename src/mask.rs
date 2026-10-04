@@ -56,6 +56,10 @@ pub trait RowMask:
     /// Return `self` with bit `r` set.
     #[must_use]
     fn set_bit(self, r: usize) -> Self;
+
+    /// Zero-extend to u128 (used by the experimental leaf-accumulation kernels).
+    #[cfg(feature = "experimental")]
+    fn to_u128(self) -> u128;
 }
 
 macro_rules! impl_row_mask {
@@ -94,6 +98,11 @@ macro_rules! impl_row_mask {
             fn set_bit(self, r: usize) -> Self {
                 debug_assert!(r < Self::WIDTH);
                 self | (1 << r)
+            }
+            #[cfg(feature = "experimental")]
+            #[inline]
+            fn to_u128(self) -> u128 {
+                u128::from(self)
             }
         }
     };

@@ -49,6 +49,8 @@ pub use error::LoadError;
 pub mod config;
 pub mod forest;
 pub mod mask;
+#[cfg(feature = "experimental")]
+pub mod opt;
 pub mod parser;
 pub mod predict;
 

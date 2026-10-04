@@ -225,6 +225,20 @@ pub fn reorder_and_emit(
     scratch.stack.clear();
     scratch.stack.push(root_idx);
 
+    #[cfg(feature = "experimental")]
+    if layout::hot_first_order(
+        temp,
+        root_idx,
+        &mut scratch.visit_order,
+        &mut scratch.heavy_is_left,
+    ) {
+        scratch.stack.clear();
+        assert_eq!(
+            scratch.visit_order.len(),
+            total,
+            "hot-first layout must emit every node once"
+        );
+    }
     while let Some(old_idx) = scratch.stack.pop() {
         scratch.visit_order.push(old_idx);
         let tn = &temp[old_idx];
@@ -232,7 +246,11 @@ pub fn reorder_and_emit(
             continue;
         }
         let (l, r) = (tn.left as usize, tn.right as usize);
-        if temp[l].weight >= temp[r].weight {
+        #[cfg(feature = "experimental")]
+        let heavy_left = layout::decide(old_idx, temp[l].weight, temp[r].weight);
+        #[cfg(not(feature = "experimental"))]
+        let heavy_left = temp[l].weight >= temp[r].weight;
+        if heavy_left {
             scratch.heavy_is_left[old_idx] = true;
             scratch.stack.push(r);
             scratch.stack.push(l);
@@ -277,6 +295,9 @@ pub fn reorder_and_emit(
             });
         }
     }
+
+    #[cfg(feature = "experimental")]
+    layout::record_tree(&scratch.visit_order);
 
     Ok(Tree {
         node_start,
@@ -342,4 +363,164 @@ fn validate_tree(
         )));
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Experimental layout control (opt-experiments branch)
+// ---------------------------------------------------------------------------
+
+/// Thread-local layout override used by the profile-guided-layout experiment.
+/// With no override installed, `decide` reproduces the original rule
+/// (`weight_left >= weight_right`) exactly.
+#[cfg(feature = "experimental")]
+pub mod layout {
+    use std::cell::RefCell;
+
+    #[derive(Clone)]
+    pub enum Mode {
+        /// Profile counts per tree, indexed by original (TempNode) index: (n_left, n_right).
+        Profile {
+            counts: Vec<Vec<(u64, u64)>>,
+            alpha: f64,
+        },
+        /// Left child always at idx+1 (no annotation): ablation for the in-tree layout.
+        AlwaysLeft,
+        /// BOLT-style hot/cold splitting within each tree: nodes visited during profiling
+        /// come first (fall-through child = more-visited child), never-visited subtrees
+        /// are moved to the tree's tail. Per tree, indexed by original TempNode index.
+        HotFirst {
+            visits: Vec<Vec<u64>>,
+            min_visits: u64,
+        },
+    }
+
+    struct State {
+        mode: Option<Mode>,
+        tree_id: usize,
+        record: bool,
+        /// Per parsed tree: new local index -> original TempNode index.
+        visit_orders: Vec<Vec<u32>>,
+    }
+
+    thread_local! {
+        static STATE: RefCell<State> = const { RefCell::new(State {
+            mode: None, tree_id: 0, record: false, visit_orders: Vec::new(),
+        }) };
+    }
+
+    /// Install a layout mode (or None) and reset the tree counter. Call before `Forest::load*`.
+    pub fn install(mode: Option<Mode>, record: bool) {
+        STATE.with(|s| {
+            let mut s = s.borrow_mut();
+            s.mode = mode;
+            s.tree_id = 0;
+            s.record = record;
+            s.visit_orders.clear();
+        });
+    }
+
+    /// Remove any override and return the recorded visit orders.
+    pub fn take_visit_orders() -> Vec<Vec<u32>> {
+        STATE.with(|s| {
+            let mut s = s.borrow_mut();
+            s.mode = None;
+            s.record = false;
+            std::mem::take(&mut s.visit_orders)
+        })
+    }
+
+    /// Fill `order`/`hil` with the hot-first layout when that mode is installed.
+    /// Returns false (and leaves both untouched) for every other mode.
+    pub(crate) fn hot_first_order(
+        temp: &[super::TempNode],
+        root: usize,
+        order: &mut Vec<usize>,
+        hil: &mut [bool],
+    ) -> bool {
+        STATE.with(|s| {
+            let s = s.borrow();
+            let Some(Mode::HotFirst { visits, min_visits }) = &s.mode else {
+                return false;
+            };
+            let min_visits = (*min_visits).max(1);
+            let tv = visits.get(s.tree_id);
+            let vis = |o: usize| tv.and_then(|t| t.get(o)).copied().unwrap_or(0);
+            let mut cold_roots = Vec::new();
+            let mut stack = vec![root];
+            while let Some(o) = stack.pop() {
+                order.push(o);
+                let tn = &temp[o];
+                if tn.left == -1 {
+                    continue;
+                }
+                let (l, r) = (tn.left as usize, tn.right as usize);
+                let (vl, vr) = (vis(l), vis(r));
+                let left_heavy = if vl != vr {
+                    vl > vr
+                } else {
+                    temp[l].weight >= temp[r].weight
+                };
+                hil[o] = left_heavy;
+                let (h, lt, vlt) = if left_heavy { (l, r, vr) } else { (r, l, vl) };
+                if vlt >= min_visits {
+                    stack.push(lt);
+                } else {
+                    cold_roots.push(lt);
+                }
+                stack.push(h); // popped next: heavy child lands at idx+1
+            }
+            for cr in cold_roots {
+                stack.push(cr);
+                while let Some(o) = stack.pop() {
+                    order.push(o);
+                    let tn = &temp[o];
+                    if tn.left == -1 {
+                        continue;
+                    }
+                    let (l, r) = (tn.left as usize, tn.right as usize);
+                    let left_heavy = temp[l].weight >= temp[r].weight;
+                    hil[o] = left_heavy;
+                    if left_heavy {
+                        stack.push(r);
+                        stack.push(l);
+                    } else {
+                        stack.push(l);
+                        stack.push(r);
+                    }
+                }
+            }
+            true
+        })
+    }
+
+    pub(crate) fn decide(old_idx: usize, w_left: f64, w_right: f64) -> bool {
+        STATE.with(|s| {
+            let s = s.borrow();
+            match &s.mode {
+                None | Some(Mode::HotFirst { .. }) => w_left >= w_right,
+                Some(Mode::AlwaysLeft) => true,
+                Some(Mode::Profile { counts, alpha }) => {
+                    let (nl, nr) = counts
+                        .get(s.tree_id)
+                        .and_then(|t| t.get(old_idx))
+                        .copied()
+                        .unwrap_or((0, 0));
+                    let tot = w_left + w_right;
+                    let pl = if tot > 0.0 { w_left / tot } else { 0.5 };
+                    (nl as f64 + alpha * pl) >= (nr as f64 + alpha * (1.0 - pl))
+                }
+            }
+        })
+    }
+
+    pub(crate) fn record_tree(visit_order: &[usize]) {
+        STATE.with(|s| {
+            let mut s = s.borrow_mut();
+            if s.record {
+                s.visit_orders
+                    .push(visit_order.iter().map(|&v| v as u32).collect());
+            }
+            s.tree_id += 1;
+        });
+    }
 }

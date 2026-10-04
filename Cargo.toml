@@ -12,6 +12,7 @@ include = ["src/**", "tests/**", "docs/treelite-loading.md", "docs/treelite-load
 
 [features]
 test-helpers = []  # expose internal precompute functions for artifact integration tests
+experimental = []  # research kernels (`opt` module) and layout overrides; not part of the stable API
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

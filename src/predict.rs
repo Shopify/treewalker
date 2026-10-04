@@ -134,7 +134,7 @@ impl Forest {
     }
 
     #[allow(clippy::float_cmp)] // Exact fast-path identities.
-    fn finalize(&self, values: &mut [f64]) {
+    pub(crate) fn finalize(&self, values: &mut [f64]) {
         let out = self.output;
         if out.divisor != 1.0 || out.base_score != 0.0 {
             for v in &mut *values {
@@ -501,7 +501,7 @@ impl Forest {
     // Prefix group evaluation (mask-agnostic)
     // -----------------------------------------------------------------------
 
-    fn precompute_prefix_starts<const F32: bool, const STATS: bool>(
+    pub(crate) fn precompute_prefix_starts<const F32: bool, const STATS: bool>(
         &self,
         const_features: &[f64],
         stats: &mut Option<PredictStats>,
@@ -539,7 +539,7 @@ impl Forest {
     // -----------------------------------------------------------------------
 
     #[inline]
-    fn step<const F32: bool>(
+    pub(crate) fn step<const F32: bool>(
         &self,
         nodes: &[Node],
         abs_idx: usize,
@@ -555,7 +555,7 @@ impl Forest {
     }
 
     #[inline]
-    fn eval_split<const F32: bool>(&self, node: &Node, features: &[f64]) -> bool {
+    pub(crate) fn eval_split<const F32: bool>(&self, node: &Node, features: &[f64]) -> bool {
         let val = unsafe { *features.get_unchecked(node.feature as usize) };
         if val.is_nan() {
             node.default_left()
