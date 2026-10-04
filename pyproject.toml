@@ -4,15 +4,20 @@ version = "2.0.0"
 description = "Data preparation, baselines and benchmark orchestration for the TreeWalker paper."
 requires-python = ">=3.14"
 dependencies = [
-    "lightgbm>=4.6.0",
-    "polars>=1.0",
-    "numpy>=2.0",
-    "plotnine>=0.14",
-    "h5py>=3.0",
-    "requests>=2.28",
-    "treelite>=4.7.0",
-    "xgboost>=3.2.0",
-    "pyarrow>=23.0.1",
+    "lightgbm>=4.7.0",
+    "polars>=1.44.2",
+    "numpy>=2.5.3",
+    "plotnine>=0.15.8",
+    "h5py>=3.16.0",
+    "requests>=2.34.2",
+    # Treelite and XGBoost move together: Treelite 4.7.1 is the first to load
+    # models from XGBoost 3.3 and later.
+    "treelite>=4.7.2",
+    # Linux uses the CPU-only wheel (5.8 MB): the xgboost wheel there is a
+    # CUDA build of 57.6 MB that pulls in NCCL. xgboost-cpu has no macOS wheel.
+    "xgboost>=3.4.1; sys_platform != 'linux'",
+    "xgboost-cpu>=3.4.1; sys_platform == 'linux'",
+    "pyarrow>=25.0.1",
     "typer>=0.27.2",
     "pooch>=1.9.0",
 ]
