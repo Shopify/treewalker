@@ -3,7 +3,8 @@
 //! opt_bench <model_dir> <data_dir> [--blocks N] [--batch N] [--sched i,j,k] [--alpha A]
 //!           [--variants a,b,c] [--xgb-lib PATH] [--lgb-lib PATH]
 //!
-//! Groups are fixed-width (max_group_width). Even-indexed groups are the calibration
+//! Groups come from group_offsets.bin when the data dir has one, otherwise they are
+//! fixed-width (max_group_width). Even-indexed groups are the calibration
 //! set for profile-guided layout; odd-indexed groups are used for every measurement.
 //! Each block times every variant on the same mini-batch in rotated order; the
 //! block statistic is the median per-group latency. Prints one JSON object per variant.
@@ -194,12 +195,19 @@ fn main() {
         &ParseConfig::default(),
     )); // 0 base
     let g = forests[0].config.max_group_width;
-    assert_eq!(
-        n_rows % g,
-        0,
-        "rows {n_rows} not a multiple of group width {g}"
-    );
-    let mut groups: Vec<(usize, usize)> = (0..n_rows / g).map(|k| (k * g, (k + 1) * g)).collect();
+    let offsets_path = data_dir.join("group_offsets.bin");
+    let mut groups: Vec<(usize, usize)> = if offsets_path.exists() {
+        // Variable-width groups (CTR sessions), as in sweep_bench.
+        let offsets = treewalker_bench::load_group_offsets(&offsets_path);
+        offsets.windows(2).map(|w| (w[0], w[1])).collect()
+    } else {
+        assert_eq!(
+            n_rows % g,
+            0,
+            "rows {n_rows} not a multiple of group width {g}"
+        );
+        (0..n_rows / g).map(|k| (k * g, (k + 1) * g)).collect()
+    };
     if let Some((f, q, hi)) = subset {
         // Covariate-shift experiment: keep groups whose constant feature f is above
         // (hi) or below (lo) its q-quantile across all test groups.
