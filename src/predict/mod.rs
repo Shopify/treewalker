@@ -12,6 +12,22 @@
 //! optimization on and nothing counted; and, with the `research` feature, research
 //! timed `(false, true)` and research counted `(true, true)`. With `ABLATE = false`
 //! the flags are the defaults at compile time.
+//!
+//! The helpers the research builds share with production are `#[inline(always)]`:
+//! `run`, the input check, the group loop, the piece, the threshold sweep, the prefix
+//! starts, the finalization and `Bits::set_bit`. With ordinary inlining, their extra
+//! callers changed what LLVM inlined into the production path, so compiling or using
+//! the research feature changed production code. `run_unchecked`, `sigmoid_inplace`
+//! and smaller helpers keep ordinary inlining, and the language does not guarantee
+//! the result: production code was verified instruction-identical with the feature
+//! off, compiled in and in use with rustc 1.97.1 and fat LTO, by disassembly on
+//! aarch64-apple-darwin with default and 64-byte function alignment. A compiler
+//! upgrade should repeat that check.
+
+#![expect(
+    clippy::inline_always,
+    reason = "keeps the production call path independent of the research builds"
+)]
 
 mod ablation;
 mod counters;
@@ -238,6 +254,7 @@ impl Predictor {
     ///
     /// If `rows.len()` is not a multiple of `n_features`, if `out.len()` is not the row
     /// count, or if the group has more than `max_group_width` rows.
+    #[inline]
     pub fn predict_group(&mut self, rows: &[f64], out: &mut [f64]) {
         self.run::<false, false>(rows, out, Groups::One, Ablation::default(), None);
     }
@@ -254,6 +271,7 @@ impl Predictor {
     /// count, if `offsets` is empty, does not start at 0, does not end at the row count
     /// or does not strictly increase, or if a group has more than `max_group_width`
     /// rows.
+    #[inline]
     pub fn predict_groups(&mut self, data: &[f64], offsets: &[usize], out: &mut [f64]) {
         self.run::<false, false>(
             data,
@@ -271,11 +289,13 @@ impl Predictor {
     ///
     /// If `data.len()` is not a multiple of `n_features`, if `out.len()` is not the row
     /// count, or if `width` is 0 or more than `max_group_width`.
+    #[inline]
     pub fn predict_fixed(&mut self, data: &[f64], width: usize, out: &mut [f64]) {
         self.run::<false, false>(data, out, Groups::Fixed(width), Ablation::default(), None);
     }
 
     /// Check a call's input, then run its groups.
+    #[inline(always)]
     pub(crate) fn run<const STATS: bool, const ABLATE: bool>(
         &mut self,
         data: &[f64],
@@ -290,6 +310,7 @@ impl Predictor {
 
     /// Panic unless the call's input and output lengths match the model and the
     /// grouping is valid.
+    #[inline(always)]
     pub(crate) fn check(&self, data: &[f64], out_len: usize, groups: Groups<'_>) {
         let config = &self.model.config;
         let (nf, max_width) = (config.n_features(), config.max_group_width());
@@ -379,7 +400,7 @@ impl Predictor {
 
 impl Model {
     #[expect(clippy::float_cmp, reason = "exact fast-path identities")]
-    #[inline]
+    #[inline(always)]
     pub(crate) fn apply_margin(&self, values: &mut [f64]) {
         let out = self.output;
         if out.divisor != 1.0 || out.base_score != 0.0 {
@@ -390,7 +411,7 @@ impl Model {
     }
 
     #[expect(clippy::float_cmp, reason = "exact fast-path identity")]
-    #[inline]
+    #[inline(always)]
     pub(crate) fn apply_link(&self, values: &mut [f64]) {
         match self.output.postprocessor {
             crate::parser::Postprocessor::Identity => {}
@@ -419,6 +440,7 @@ impl Model {
         clippy::too_many_arguments,
         reason = "the call, its workspace and its variant"
     )]
+    #[inline(always)]
     fn predict_groups<const F32: bool, M: RowMask, const STATS: bool, const ABLATE: bool>(
         &self,
         data: &[f64],
@@ -452,6 +474,7 @@ impl Model {
         clippy::too_many_arguments,
         reason = "the piece, its workspace and its variant"
     )]
+    #[inline(always)]
     fn predict_core<const F32: bool, M: RowMask, const STATS: bool, const ABLATE: bool>(
         &self,
         data: &[f64],

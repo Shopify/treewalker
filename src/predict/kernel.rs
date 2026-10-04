@@ -12,6 +12,7 @@ impl Model {
     // Prefix group evaluation (mask-agnostic)
     // -----------------------------------------------------------------------
 
+    #[inline(always)]
     pub(super) fn precompute_prefix_starts<const F32: bool, const STATS: bool>(
         &self,
         const_features: &[f64],
@@ -235,7 +236,7 @@ impl Model {
     /// Left masks of every varying predicate for one piece: per feature, sort the
     /// rows by value once and sweep the feature's sorted thresholds. With `STATS`,
     /// the work is added to `counters`.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn precompute_varying_masks<const F32: bool, M: RowMask, const STATS: bool>(
         &self,
         rows: &[f64],
