@@ -8,12 +8,12 @@ license.workspace = true
 publish = false
 
 [features]
-test-helpers = ["treewalker-gbdt/test-helpers"]
+research = ["treewalker-gbdt/research"]  # now only gates the slow artifact suite, correctness.rs
 quickscorer-bench = ["dep:quickscorer"]  # QuickScorer baseline in the legacy CLI
 external-bench = ["dep:libloading", "dep:quickscorer"]  # C FFI baselines + QuickScorer
 
 [dependencies]
-treewalker-gbdt = { path = ".." }
+treewalker-gbdt = { path = "..", features = ["research"] }
 serde.workspace = true
 simd-json.workspace = true
 quickscorer = { version = "=0.1.0", git = "https://github.com/leomanne/quickscorer-rs.git", rev = "8314d03b5ef2d15385f8d0cd86d8f281d11b2d49", optional = true }
@@ -38,6 +38,6 @@ path = "src/bin/sweep_bench.rs"
 [[test]]
 name = "correctness"
 path = "tests/correctness.rs"
-required-features = ["test-helpers"]
+required-features = ["research"]
 
-# Artifact tests: cargo test --manifest-path benchmarks/Cargo.toml --release --features test-helpers
+# Artifact tests: cargo test --manifest-path benchmarks/Cargo.toml --release --features research

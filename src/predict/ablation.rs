@@ -1,13 +1,13 @@
 //! Ablation-only paths: brute-force mask precompute and the per-row partitions
 //! used when precompute is disabled.
 
-use crate::forest::{Forest, Node, threshold_go_left};
+use crate::forest::{Model, Node, threshold_go_left};
 use crate::mask::RowMask;
 
-impl Forest {
+impl Model {
     /// Brute-force O(P × n) precompute — evaluates each predicate against every row.
     /// Used as the ablation baseline when `disable_predicate_sweep` is set.
-    pub(super) fn precompute_bruteforce_generic<const F32: bool, M: RowMask>(
+    pub(crate) fn precompute_bruteforce_generic<const F32: bool, M: RowMask>(
         &self,
         rows: &[f64],
         out_left_masks: &mut [M],
@@ -154,7 +154,7 @@ impl Forest {
 
 #[cfg(test)]
 mod tests {
-    use crate::forest::{Forest, Node};
+    use crate::forest::{Model, Node};
 
     fn num_node(threshold: f64, default_left: bool) -> Node {
         Node {
@@ -204,7 +204,7 @@ mod tests {
             0.0,
             0.0,
         ][..];
-        let (left, right) = Forest::partition_mono_inc::<false, u32>(&node, |r| col[r], 0b11111u32);
+        let (left, right) = Model::partition_mono_inc::<false, u32>(&node, |r| col[r], 0b11111u32);
         assert_eq!(left, 0b01011);
         assert_eq!(right, 0b10100);
     }
@@ -246,7 +246,7 @@ mod tests {
             0.0,
             0.0,
         ][..];
-        let (left, right) = Forest::partition_mono_inc::<false, u32>(&node, |r| col[r], 0b11111u32);
+        let (left, right) = Model::partition_mono_inc::<false, u32>(&node, |r| col[r], 0b11111u32);
         assert_eq!(left, 0b00011);
         assert_eq!(right, 0b11100);
     }
@@ -288,7 +288,7 @@ mod tests {
             0.0,
             0.0,
         ][..];
-        let (left, right) = Forest::partition_mono_inc::<false, u32>(&node, |r| col[r], 0b1111u32);
+        let (left, right) = Model::partition_mono_inc::<false, u32>(&node, |r| col[r], 0b1111u32);
         assert_eq!(left, 0b0111);
         assert_eq!(right, 0b1000);
     }

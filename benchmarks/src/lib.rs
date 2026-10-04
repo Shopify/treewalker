@@ -21,12 +21,10 @@ pub mod timing;
 pub use data::{load_group_offsets, load_raw_f64, try_load_raw_f64};
 pub use system::get_rss_kb;
 
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use treewalker_gbdt::PredictStats;
-use treewalker_gbdt::config::{AblationMode, ParseConfig};
-use treewalker_gbdt::forest::Forest;
+use treewalker_gbdt::research::{Ablation, WorkCounters};
+use treewalker_gbdt::{Forest, ParseConfig};
 
 use self::csv::CsvWriter;
 use self::grid::GridCell;
@@ -54,7 +52,7 @@ pub struct RunConfig {
     pub min_iters: usize,
     pub max_time_secs: Option<f64>,
     pub seed: u64,
-    /// Collect PredictStats after Grid 3 ablation (separate CSV, not in timing loop).
+    /// Collect work counters after Grid 3 ablation (separate CSV, not in timing loop).
     pub collect_stats: bool,
     #[cfg(feature = "external-bench")]
     pub lgb_lib: Option<PathBuf>,
@@ -71,7 +69,7 @@ struct CellData {
     data: Vec<f64>,
     n_rows: usize,
     n_cols: usize,
-    forest: RefCell<Forest>,
+    forest: Forest,
     bounds: Vec<(usize, usize)>,
     /// Time to parse the forest model (microseconds).
     parse_time_us: f64,
@@ -118,7 +116,7 @@ impl CellData {
             data,
             n_rows,
             n_cols,
-            forest: RefCell::new(forest),
+            forest,
             bounds,
             parse_time_us,
             model_bytes,
@@ -139,7 +137,7 @@ fn build_group_boundaries(forest: &Forest, n_rows: usize, data_dir: &Path) -> Ve
             .map(|i| (offsets[i], offsets[i + 1]))
             .collect()
     } else {
-        let gw = forest.config.max_group_width;
+        let gw = forest.config().max_group_width;
         assert_eq!(
             n_rows % gw,
             0,
@@ -171,33 +169,9 @@ fn collect_methods<'a>(
 
     // These inputs are only needed by the optional external baselines.
     #[cfg(not(feature = "external-bench"))]
-    let _ = (fw_dir, framework, config, n_cols);
+    let _ = (fw_dir, framework, config, data_ref, n_rows, n_cols, forest);
 
-    let mut tw_base_results = vec![0.0f64; n_rows];
-    let mut tw_full_results = vec![0.0f64; n_rows];
-
-    let methods: Vec<BenchMethod<'a>> = vec![
-        // Row-independent baseline: walks each row fully through every tree,
-        // no partial evaluation. Paper label: "TreeWalker (full walk)".
-        BenchMethod {
-            name: "treewalker_fullwalk".to_string(),
-            predict_group: Box::new(move |s, e| {
-                forest
-                    .borrow()
-                    .predict_full(data_ref, &mut tw_base_results, s, e);
-            }),
-        },
-        // Optimized TreeWalker: partial evaluation exploiting constant features.
-        // Paper label: "TreeWalker".
-        BenchMethod {
-            name: "treewalker".to_string(),
-            predict_group: Box::new(move |s, e| {
-                forest
-                    .borrow_mut()
-                    .predict(data_ref, &mut tw_full_results, s, e);
-            }),
-        },
-    ];
+    let methods = treewalker_methods(cell_data);
 
     #[cfg(feature = "external-bench")]
     let methods = {
@@ -228,7 +202,7 @@ fn collect_methods<'a>(
         if framework == "lightgbm"
             && let Some(ref lgb_lib) = config.lgb_lib
         {
-            let max_gw = forest.borrow().config.max_group_width;
+            let max_gw = forest.config().max_group_width;
             if let Some(mut m) = external::LightGBMBench::load(
                 lgb_lib,
                 &fw_dir.join("model_native.txt"),
@@ -510,10 +484,8 @@ fn run_grid3_ablation(config: &RunConfig) {
         );
 
         // Group combos by ParseConfig to minimize forest reloads.
-        let mut by_parse: std::collections::BTreeMap<
-            (bool, bool, bool),
-            Vec<(AblationMode, String)>,
-        > = std::collections::BTreeMap::new();
+        let mut by_parse: std::collections::BTreeMap<(bool, bool, bool), Vec<(Ablation, String)>> =
+            std::collections::BTreeMap::new();
         for (am, pc, label) in &combos {
             let key = (
                 pc.disable_tree_ordering,
@@ -534,21 +506,19 @@ fn run_grid3_ablation(config: &RunConfig) {
                 continue;
             };
             let data_ref = cd.data_ref();
-            let n_rows = cd.n_rows;
+            let (n_rows, nf) = (cd.n_rows, cd.n_cols);
 
-            // One BenchMethod per runtime combo, sharing the forest.
+            // One BenchMethod per runtime combo, each a research predictor with its
+            // flags, the unablated reference included, so ratios compare one build.
             let mut methods: Vec<BenchMethod<'_>> = Vec::new();
             let mut labels: Vec<&str> = Vec::new();
             for (ablation, label) in runtime_combos {
-                let ablation = *ablation;
                 let mut results_buf = vec![0.0f64; n_rows];
-                let forest = &cd.forest;
+                let mut predictor = cd.forest.research_predictor(*ablation);
                 methods.push(BenchMethod {
                     name: label.clone(),
                     predict_group: Box::new(move |s, e| {
-                        let mut f = forest.borrow_mut();
-                        f.config.ablation = ablation;
-                        f.predict(data_ref, &mut results_buf, s, e);
+                        predictor.predict_group(&data_ref[s * nf..e * nf], &mut results_buf[s..e]);
                     }),
                 });
                 labels.push(label);
@@ -613,7 +583,7 @@ fn run_grid3_ablation(config: &RunConfig) {
     }
 }
 
-/// Collect PredictStats for Grid 3 (separate from timing).
+/// Collect work counters for Grid 3 (separate from timing).
 fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
     let stats_path = config.output_dir.join(format!("grid3_stats_{arch}.csv"));
     let columns = [
@@ -658,17 +628,15 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
     let b_prime: std::collections::HashSet<(usize, usize, usize)> =
         grid::ABLATION_ANCHORS_B_PRIME.iter().copied().collect();
 
-    eprintln!("\nCollecting PredictStats for Grid 3...");
+    eprintln!("\nCollecting work counters for Grid 3...");
 
     for cell in cells {
         let is_prime = b_prime.contains(&(cell.nt, cell.md, cell.horizon));
         let combos = ablation_combos(is_prime);
 
         // Group by ParseConfig.
-        let mut by_parse: std::collections::BTreeMap<
-            (bool, bool, bool),
-            Vec<(AblationMode, String)>,
-        > = std::collections::BTreeMap::new();
+        let mut by_parse: std::collections::BTreeMap<(bool, bool, bool), Vec<(Ablation, String)>> =
+            std::collections::BTreeMap::new();
         for (am, pc, label) in &combos {
             let key = (
                 pc.disable_tree_ordering,
@@ -691,14 +659,7 @@ fn collect_grid3_stats(config: &RunConfig, cells: &[GridCell], arch: &str) {
             let mut results = vec![0.0f64; cd.n_rows];
 
             for (ablation, label) in runtime_combos {
-                cd.forest.borrow_mut().config.ablation = *ablation;
-                let mut total = PredictStats::default();
-                for &(s, e) in &cd.bounds {
-                    total +=
-                        cd.forest
-                            .borrow_mut()
-                            .predict_with_stats(&cd.data, &mut results, s, e);
-                }
+                let total = count_work(&cd, *ablation, &mut results);
                 let h_str = if cell.is_ctr {
                     String::new()
                 } else {
@@ -930,12 +891,18 @@ fn scen_cell_order(cells: &[ScenCell]) -> Vec<&ScenCell> {
 /// `collect_methods` is intentionally not used so flags/artifacts cannot leak
 /// other methods into the scenario timing CSV.
 fn scen_collect_methods(cell_data: &CellData) -> Vec<BenchMethod<'_>> {
+    treewalker_methods(cell_data)
+}
+
+/// TreeWalker's full walk and production partial evaluation, timed one group at a time.
+fn treewalker_methods(cell_data: &CellData) -> Vec<BenchMethod<'_>> {
     let data_ref = cell_data.data_ref();
-    let n_rows = cell_data.n_rows;
+    let (n_rows, nf) = (cell_data.n_rows, cell_data.n_cols);
     let forest = &cell_data.forest;
 
     let mut tw_base_results = vec![0.0f64; n_rows];
     let mut tw_full_results = vec![0.0f64; n_rows];
+    let mut predictor = forest.predictor();
 
     vec![
         // Row-independent baseline: walks each row fully through every tree,
@@ -943,9 +910,7 @@ fn scen_collect_methods(cell_data: &CellData) -> Vec<BenchMethod<'_>> {
         BenchMethod {
             name: "treewalker_fullwalk".to_string(),
             predict_group: Box::new(move |s, e| {
-                forest
-                    .borrow()
-                    .predict_full(data_ref, &mut tw_base_results, s, e);
+                forest.predict_full_walk(&data_ref[s * nf..e * nf], &mut tw_base_results[s..e]);
             }),
         },
         // Optimized TreeWalker: partial evaluation exploiting constant features.
@@ -953,16 +918,25 @@ fn scen_collect_methods(cell_data: &CellData) -> Vec<BenchMethod<'_>> {
         BenchMethod {
             name: "treewalker".to_string(),
             predict_group: Box::new(move |s, e| {
-                forest
-                    .borrow_mut()
-                    .predict(data_ref, &mut tw_full_results, s, e);
+                predictor.predict_group(&data_ref[s * nf..e * nf], &mut tw_full_results[s..e]);
             }),
         },
     ]
 }
 
+/// Work counters of one runtime variant, summed over every group of the cell.
+fn count_work(cd: &CellData, ablation: Ablation, results: &mut [f64]) -> WorkCounters {
+    let nf = cd.n_cols;
+    let mut predictor = cd.forest.research_predictor(ablation);
+    let mut total = WorkCounters::default();
+    for &(s, e) in &cd.bounds {
+        total += predictor.predict_group_counted(&cd.data[s * nf..e * nf], &mut results[s..e]);
+    }
+    total
+}
+
 /// Run the E1 scenario-analysis benchmark: TreeWalker + same-layout full walk
-/// over all `(k, G)` cells, with work counters (PredictStats) and an inline
+/// over all `(k, G)` cells, with work counters and an inline
 /// correctness check against the GTIL f64 reference.
 ///
 /// Layout (written by `prepare_scenario.py`):
@@ -1071,7 +1045,7 @@ fn run_grid_scen(config: &RunConfig) {
             eprintln!("  skipping (missing files)");
             continue;
         };
-        let n_trees = cd.forest.borrow().trees().len();
+        let n_trees = cd.forest.trees().len();
         let n_groups = cd.bounds.len();
 
         // Inline correctness: TreeWalker vs GTIL f64 reference (TOL_F64).
@@ -1117,24 +1091,17 @@ fn run_grid_scen(config: &RunConfig) {
         // Work counters: default (precompute) + trace (disable_varying_precompute),
         // summed over all groups — mirrors grid3_stats.
         for (evaluator, ablation) in [
-            ("precompute", AblationMode::default()),
+            ("precompute", Ablation::default()),
             (
                 "trace",
-                AblationMode {
+                Ablation {
                     disable_varying_precompute: true,
                     ..Default::default()
                 },
             ),
         ] {
-            cd.forest.borrow_mut().config.ablation = ablation;
-            let mut total = PredictStats::default();
             let mut results = vec![0.0f64; cd.n_rows];
-            for &(s, e) in &cd.bounds {
-                total += cd
-                    .forest
-                    .borrow_mut()
-                    .predict_with_stats(&cd.data, &mut results, s, e);
-            }
+            let total = count_work(&cd, ablation, &mut results);
             stat_csv.write_row(&[
                 "scenario_credit",
                 "lightgbm",
@@ -1163,8 +1130,6 @@ fn run_grid_scen(config: &RunConfig) {
                 total.precompute_row_evals
             );
         }
-        // Reset ablation so the next cell starts clean.
-        cd.forest.borrow_mut().config.ablation = AblationMode::default();
     }
 
     eprintln!(
@@ -1204,9 +1169,10 @@ fn validate_scen_cell(cd: &CellData, cell_dir: &Path) -> bool {
         return false;
     }
     let mut results = vec![0.0f64; cd.n_rows];
-    cd.forest.borrow_mut().config.ablation = AblationMode::default();
+    let mut predictor = cd.forest.predictor();
+    let nf = cd.n_cols;
     for &(s, e) in &cd.bounds {
-        cd.forest.borrow_mut().predict(&cd.data, &mut results, s, e);
+        predictor.predict_group(&cd.data[s * nf..e * nf], &mut results[s..e]);
     }
     let mut max_delta = 0.0f64;
     for r in 0..cd.n_rows {
@@ -1228,11 +1194,11 @@ fn validate_scen_cell(cd: &CellData, cell_dir: &Path) -> bool {
 // Ablation combo generation
 // ---------------------------------------------------------------------------
 
-/// Generate ablation combos as `(AblationMode, ParseConfig, label)` tuples.
+/// Generate ablation combos as `(Ablation, ParseConfig, label)` tuples.
 ///
 /// `is_full_cross=true`: 2^6 = 64 combos (all runtime × all parse).
 /// `is_full_cross=false`: within-group powerset (8 runtime + 7 parse = 15).
-fn ablation_combos(is_full_cross: bool) -> Vec<(AblationMode, ParseConfig, String)> {
+fn ablation_combos(is_full_cross: bool) -> Vec<(Ablation, ParseConfig, String)> {
     let mut combos = Vec::new();
     let bits_range = if is_full_cross { 64 } else { 8 };
 
@@ -1257,11 +1223,11 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(AblationMode, ParseConfig, Strin
                 false,
             )
         };
-        let am = AblationMode {
+        let am = Ablation {
             disable_varying_precompute: dp,
             disable_unsplit: du,
             disable_monotonic: dm,
-            disable_predicate_sweep: false,
+            ..Default::default()
         };
         let pc = ParseConfig {
             disable_tree_ordering: dt,
@@ -1285,7 +1251,7 @@ fn ablation_combos(is_full_cross: bool) -> Vec<(AblationMode, ParseConfig, Strin
     if !is_full_cross {
         for pt_bits in 1..8u8 {
             let (dt, dpg, db) = (pt_bits & 1 != 0, pt_bits & 2 != 0, pt_bits & 4 != 0);
-            let am = AblationMode::default();
+            let am = Ablation::default();
             let pc = ParseConfig {
                 disable_tree_ordering: dt,
                 prefix_depth: if dpg { 0 } else { 2 },

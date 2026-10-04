@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use treewalker_gbdt::config::WalkerConfig;
-use treewalker_gbdt::forest::{Forest, ThresholdType};
-use treewalker_gbdt::{AblationMode, LoadError};
+use treewalker_gbdt::research::{Ablation, ThresholdType};
+use treewalker_gbdt::{Forest, LoadError, WalkerConfig};
 
 // ---------------------------------------------------------------------------
 // Tolerances
@@ -205,36 +204,24 @@ fn for_each_group(
 }
 
 fn predict_all(
-    forest: &mut Forest,
-    data: &[f64],
-    n_rows: usize,
-    offsets: Option<&[usize]>,
-) -> Vec<f64> {
-    let mut results = vec![0.0f64; n_rows];
-    let h = forest.config.max_group_width;
-    if let Some(offs) = offsets {
-        for pair in offs.windows(2) {
-            forest.predict(data, &mut results, pair[0], pair[1]);
-        }
-    } else {
-        for s in 0..(n_rows / h) {
-            forest.predict(data, &mut results, s * h, (s + 1) * h);
-        }
-    }
-    results
-}
-
-fn predict_full_all(
     forest: &Forest,
     data: &[f64],
     n_rows: usize,
     offsets: Option<&[usize]>,
 ) -> Vec<f64> {
     let mut results = vec![0.0f64; n_rows];
-    let h = forest.config.max_group_width;
-    for_each_group(h, n_rows, offsets, |start, end| {
-        forest.predict_full(data, &mut results, start, end);
-    });
+    let mut predictor = forest.predictor();
+    if let Some(offs) = offsets {
+        predictor.predict_groups(data, offs, &mut results);
+    } else {
+        predictor.predict_fixed(data, forest.config().max_group_width, &mut results);
+    }
+    results
+}
+
+fn predict_full_all(forest: &Forest, data: &[f64], n_rows: usize) -> Vec<f64> {
+    let mut results = vec![0.0f64; n_rows];
+    forest.predict_full_walk(data, &mut results);
     results
 }
 
@@ -288,12 +275,12 @@ fn assert_same_bits(actual: &[f64], expected: &[f64], label: &str) {
 #[test]
 fn test_reference_match() {
     for cfg in &all_configs() {
-        let mut forest = load_forest(&cfg.param_dir, cfg.framework);
+        let forest = load_forest(&cfg.param_dir, cfg.framework);
         let (data, n_rows) = load_test_data(&cfg.param_dir);
         let reference = load_reference(&cfg.param_dir, cfg.framework);
 
-        let partial = predict_all(&mut forest, &data, n_rows, cfg.group_offsets.as_deref());
-        let full = predict_full_all(&forest, &data, n_rows, cfg.group_offsets.as_deref());
+        let partial = predict_all(&forest, &data, n_rows, cfg.group_offsets.as_deref());
+        let full = predict_full_all(&forest, &data, n_rows);
 
         let d_partial = max_diff(&partial, &reference);
         let d_full = max_diff(&full, &reference);
@@ -317,11 +304,11 @@ fn test_reference_match() {
 #[test]
 fn test_partial_matches_full() {
     for cfg in &all_configs() {
-        let mut forest = load_forest(&cfg.param_dir, cfg.framework);
+        let forest = load_forest(&cfg.param_dir, cfg.framework);
         let (data, n_rows) = load_test_data(&cfg.param_dir);
 
-        let partial = predict_all(&mut forest, &data, n_rows, cfg.group_offsets.as_deref());
-        let full = predict_full_all(&forest, &data, n_rows, cfg.group_offsets.as_deref());
+        let partial = predict_all(&forest, &data, n_rows, cfg.group_offsets.as_deref());
+        let full = predict_full_all(&forest, &data, n_rows);
 
         let d = max_diff(&partial, &full);
         eprintln!("{}: partial_vs_full={d:.2e}", cfg.label);
@@ -335,10 +322,10 @@ fn test_single_row() {
         let forest = load_forest(&cfg.param_dir, cfg.framework);
         let (data, _) = load_test_data(&cfg.param_dir);
         let reference = load_reference(&cfg.param_dir, cfg.framework);
-        let nf = forest.config.n_features;
+        let nf = forest.config().n_features;
 
         let mut single = vec![0.0f64; 1];
-        forest.predict_full(&data[0..nf], &mut single, 0, 1);
+        forest.predict_full_walk(&data[0..nf], &mut single);
 
         let d = (single[0] - reference[0]).abs();
         assert!(d < cfg.tol, "{} single row diff: {d:.2e}", cfg.label);
@@ -360,17 +347,16 @@ fn first_config() -> TestConfig {
         .unwrap()
 }
 
-fn assert_partial_matches_full_on_obs(forest: &mut Forest, data: &[f64], obs: usize) {
-    let h = forest.config.max_group_width;
-    let start = obs * h;
-    let end = start + h;
+fn assert_partial_matches_full_on_obs(forest: &Forest, data: &[f64], obs: usize) {
+    let (nf, h) = (forest.config().n_features, forest.config().max_group_width);
+    let rows = &data[obs * h * nf..(obs + 1) * h * nf];
 
-    let mut full = vec![0.0f64; end];
-    let mut partial = vec![0.0f64; end];
-    forest.predict_full(data, &mut full, start, end);
-    forest.predict(data, &mut partial, start, end);
+    let mut full = vec![0.0f64; h];
+    let mut partial = vec![0.0f64; h];
+    forest.predict_full_walk(rows, &mut full);
+    forest.predictor().predict_group(rows, &mut partial);
 
-    let d = max_diff(&full[start..end], &partial[start..end]);
+    let d = max_diff(&full, &partial);
     assert!(
         d < TOL_FULL_WALK,
         "Partial vs full max_diff={d:.2e} on observation {obs}"
@@ -380,75 +366,74 @@ fn assert_partial_matches_full_on_obs(forest: &mut Forest, data: &[f64], obs: us
 #[test]
 fn test_all_nan_tv_features() {
     let cfg = first_config();
-    let mut forest = load_forest(&cfg.param_dir, cfg.framework);
+    let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _) = load_test_data(&cfg.param_dir);
-    let nf = forest.config.n_features;
-    let h = forest.config.max_group_width;
+    let nf = forest.config().n_features;
+    let h = forest.config().max_group_width;
 
     for r in 0..h {
         for f in 0..nf {
-            if forest.config.varying_mask & (1 << f) != 0 {
+            if forest.config().is_varying(f) {
                 data[r * nf + f] = f64::NAN;
             }
         }
     }
-    assert_partial_matches_full_on_obs(&mut forest, &data, 0);
+    assert_partial_matches_full_on_obs(&forest, &data, 0);
 }
 
 #[test]
 fn test_monotonic_columns_with_ties() {
     let cfg = first_config();
-    let mut forest = load_forest(&cfg.param_dir, cfg.framework);
+    let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _) = load_test_data(&cfg.param_dir);
-    let nf = forest.config.n_features;
-    let h = forest.config.max_group_width;
+    let nf = forest.config().n_features;
+    let h = forest.config().max_group_width;
 
     for r in 0..h {
         for f in 0..nf {
-            if forest.config.is_mono_inc(f) || forest.config.is_mono_dec(f) {
+            if forest.config().is_mono_inc(f) || forest.config().is_mono_dec(f) {
                 data[r * nf + f] = 5.0;
             }
         }
     }
-    assert_partial_matches_full_on_obs(&mut forest, &data, 0);
+    assert_partial_matches_full_on_obs(&forest, &data, 0);
 }
 
 #[test]
 fn test_all_nan_monotonic_features() {
     let cfg = first_config();
-    let mut forest = load_forest(&cfg.param_dir, cfg.framework);
+    let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _) = load_test_data(&cfg.param_dir);
-    let nf = forest.config.n_features;
-    let h = forest.config.max_group_width;
+    let nf = forest.config().n_features;
+    let h = forest.config().max_group_width;
 
     for r in 0..h {
         for f in 0..nf {
-            if forest.config.is_mono_inc(f) || forest.config.is_mono_dec(f) {
+            if forest.config().is_mono_inc(f) || forest.config().is_mono_dec(f) {
                 data[r * nf + f] = f64::NAN;
             }
         }
     }
-    assert_partial_matches_full_on_obs(&mut forest, &data, 0);
+    assert_partial_matches_full_on_obs(&forest, &data, 0);
 }
 
 #[test]
 fn test_extreme_feature_values() {
     let cfg = first_config();
-    let mut forest = load_forest(&cfg.param_dir, cfg.framework);
+    let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _) = load_test_data(&cfg.param_dir);
-    let nf = forest.config.n_features;
-    let h = forest.config.max_group_width;
-    let tv_mask = forest.config.varying_mask;
+    let nf = forest.config().n_features;
+    let h = forest.config().max_group_width;
 
     for &val in &[f64::MIN, f64::MAX, 0.0, -0.0, 1e300, -1e300] {
         for r in 0..h {
             for f in 0..nf {
-                if tv_mask & (1 << f) == 0 {
+                if !forest.config().is_varying(f) {
                     data[r * nf + f] = val;
                 }
             }
         }
-        assert_partial_matches_full_on_obs(&mut forest, &data, 0);
+        assert_partial_matches_full_on_obs(&forest, &data, 0);
     }
 }
 
@@ -456,17 +441,17 @@ fn test_extreme_feature_values() {
 
 #[test]
 fn test_ablation_all_configs() {
-    let ablations: &[(&str, AblationMode)] = &[
+    let ablations: &[(&str, Ablation)] = &[
         (
             "no_unsplit",
-            AblationMode {
+            Ablation {
                 disable_unsplit: true,
                 ..Default::default()
             },
         ),
         (
             "no_varying_precompute",
-            AblationMode {
+            Ablation {
                 disable_varying_precompute: true,
                 ..Default::default()
             },
@@ -474,7 +459,7 @@ fn test_ablation_all_configs() {
         // Monotonic only has effect when precompute is also disabled.
         (
             "no_monotonic",
-            AblationMode {
+            Ablation {
                 disable_monotonic: true,
                 disable_varying_precompute: true,
                 ..Default::default()
@@ -482,7 +467,7 @@ fn test_ablation_all_configs() {
         ),
         (
             "no_mono_no_unsplit",
-            AblationMode {
+            Ablation {
                 disable_monotonic: true,
                 disable_unsplit: true,
                 disable_varying_precompute: true,
@@ -491,11 +476,12 @@ fn test_ablation_all_configs() {
         ),
         (
             "all_disabled",
-            AblationMode {
+            Ablation {
                 disable_monotonic: true,
                 disable_unsplit: true,
                 disable_varying_precompute: true,
                 disable_predicate_sweep: true,
+                disable_exact_sums: false,
             },
         ),
     ];
@@ -505,16 +491,10 @@ fn test_ablation_all_configs() {
     for cfg in &all_configs() {
         let (data, n_rows) = load_test_data(&cfg.param_dir);
         let offsets = cfg.group_offsets.as_deref();
-        let reference = predict_all(
-            &mut load_forest(&cfg.param_dir, cfg.framework),
-            &data,
-            n_rows,
-            offsets,
-        );
-        let monotonic = {
-            let forest = load_forest(&cfg.param_dir, cfg.framework);
-            honors_monotonic_contract(&forest.config, &data, n_rows, offsets)
-        };
+        let forest = load_forest(&cfg.param_dir, cfg.framework);
+        let reference = predict_all(&forest, &data, n_rows, offsets);
+        let monotonic = honors_monotonic_contract(forest.config(), &data, n_rows, offsets);
+        let (nf, width) = (forest.config().n_features, forest.config().max_group_width);
         for &(mode, ablation) in ablations {
             // Without precompute, monotonic features are partitioned by prefix/suffix
             // scans that are only correct when the data honor the declared contract.
@@ -526,12 +506,10 @@ fn test_ablation_all_configs() {
                 );
                 continue;
             }
-            let mut forest = load_forest(&cfg.param_dir, cfg.framework);
-            forest.config.ablation = ablation;
+            let mut predictor = forest.research_predictor(ablation);
             let mut ablated = vec![0.0f64; n_rows];
-            let width = forest.config.max_group_width;
             for_each_group(width, n_rows, offsets, |s, e| {
-                forest.predict_with_stats(&data, &mut ablated, s, e);
+                predictor.predict_group(&data[s * nf..e * nf], &mut ablated[s..e]);
             });
             assert_same_bits(&ablated, &reference, &format!("{}/{mode}", cfg.label));
         }
@@ -583,20 +561,20 @@ fn test_parse_configs() {
     for cfg in &all_configs() {
         let (data, n_rows) = load_test_data(&cfg.param_dir);
         let offsets = cfg.group_offsets.as_deref();
-        let mut reference_forest = load_forest(&cfg.param_dir, cfg.framework);
-        let reference = predict_all(&mut reference_forest, &data, n_rows, offsets);
+        let reference_forest = load_forest(&cfg.param_dir, cfg.framework);
+        let reference = predict_all(&reference_forest, &data, n_rows, offsets);
         for &(mode, ref pc) in parse_configs {
-            let mut forest = Forest::load_with_config(
+            let forest = Forest::load_with_config(
                 model_file(&cfg.param_dir, cfg.framework),
                 cfg.param_dir.join("walker_config.json"),
                 pc,
             );
-            let partial = predict_all(&mut forest, &data, n_rows, offsets);
+            let partial = predict_all(&forest, &data, n_rows, offsets);
             let label = format!("{}/{mode}", cfg.label);
             if reference_forest.exact_sums() {
                 assert_same_bits(&partial, &reference, &label);
             } else {
-                let full = predict_full_all(&forest, &data, n_rows, offsets);
+                let full = predict_full_all(&forest, &data, n_rows);
                 let d = max_diff(&partial, &full);
                 assert!(d < TOL_FULL_WALK, "{label} max_diff={d:.2e}");
             }
@@ -629,7 +607,7 @@ fn test_binary_matches_json() {
             continue;
         }
 
-        let mut forest_json = match Forest::try_load(
+        let forest_json = match Forest::try_load(
             &json_path,
             cfg.param_dir.join("walker_config.json"),
         ) {
@@ -649,7 +627,7 @@ fn test_binary_matches_json() {
                 continue;
             }
         };
-        let mut forest_bin = Forest::load(&bin_path, cfg.param_dir.join("walker_config.json"));
+        let forest_bin = Forest::load(&bin_path, cfg.param_dir.join("walker_config.json"));
 
         assert_eq!(
             forest_json.trees().len(),
@@ -659,13 +637,8 @@ fn test_binary_matches_json() {
         );
 
         let (data, n_rows) = load_test_data(&cfg.param_dir);
-        let pred_json = predict_all(
-            &mut forest_json,
-            &data,
-            n_rows,
-            cfg.group_offsets.as_deref(),
-        );
-        let pred_bin = predict_all(&mut forest_bin, &data, n_rows, cfg.group_offsets.as_deref());
+        let pred_json = predict_all(&forest_json, &data, n_rows, cfg.group_offsets.as_deref());
+        let pred_bin = predict_all(&forest_bin, &data, n_rows, cfg.group_offsets.as_deref());
 
         let d = max_diff(&pred_json, &pred_bin);
         assert!(
@@ -706,10 +679,10 @@ fn test_cat_out_of_range_partial_matches_full() {
         return;
     };
 
-    let mut forest = load_forest(&cfg.param_dir, cfg.framework);
+    let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (mut data, _n_rows) = load_test_data(&cfg.param_dir);
-    let nf = forest.config.n_features;
-    let h = forest.config.max_group_width;
+    let nf = forest.config().n_features;
+    let h = forest.config().max_group_width;
 
     // Find a categorical feature by scanning nodes.
     let cat_feature = forest
@@ -726,14 +699,13 @@ fn test_cat_out_of_range_partial_matches_full() {
         data[r * nf + cat_feature] = 50.0;
     }
 
-    let start = 0;
-    let end = h;
-    let mut full_results = vec![0.0f64; end];
-    let mut partial_results = vec![0.0f64; end];
-    forest.predict_full(&data, &mut full_results, start, end);
-    forest.predict(&data, &mut partial_results, start, end);
+    let rows = &data[..h * nf];
+    let mut full_results = vec![0.0f64; h];
+    let mut partial_results = vec![0.0f64; h];
+    forest.predict_full_walk(rows, &mut full_results);
+    forest.predictor().predict_group(rows, &mut partial_results);
 
-    let d = max_diff(&full_results[start..end], &partial_results[start..end]);
+    let d = max_diff(&full_results, &partial_results);
     eprintln!("{}: cat_out_of_range partial_vs_full={d:.2e}", cfg.label);
     assert!(
         d < TOL_FULL_WALK,
@@ -751,8 +723,8 @@ fn test_cat_out_of_range_partial_matches_full() {
 fn test_width_32_boundary() {
     // Load a real model with max_group_width set to the u32 boundary.
     let base_cfg = first_config();
-    let mut forest = load_forest_at_width(&base_cfg.param_dir, base_cfg.framework, 32);
-    let nf = forest.config.n_features;
+    let forest = load_forest_at_width(&base_cfg.param_dir, base_cfg.framework, 32);
+    let nf = forest.config().n_features;
 
     // Build synthetic test data: 32 rows × n_features.
     // Use the first observation's constant features, vary the TV features linearly.
@@ -760,11 +732,11 @@ fn test_width_32_boundary() {
     let mut data = vec![0.0f64; 32 * nf];
     for row in 0..32 {
         for f in 0..nf {
-            if forest.config.is_varying(f) {
+            if forest.config().is_varying(f) {
                 // Linearly spaced values for varying features
-                if forest.config.is_mono_inc(f) {
+                if forest.config().is_mono_inc(f) {
                     data[row * nf + f] = row as f64;
-                } else if forest.config.is_mono_dec(f) {
+                } else if forest.config().is_mono_dec(f) {
                     data[row * nf + f] = 31.0 - row as f64;
                 } else {
                     data[row * nf + f] = (row as f64) * 0.1;
@@ -779,8 +751,9 @@ fn test_width_32_boundary() {
     // Predict: full walk vs partial eval on the 32-row group.
     let mut full_results = vec![0.0f64; 32];
     let mut partial_results = vec![0.0f64; 32];
-    forest.predict_full(&data, &mut full_results, 0, 32);
-    forest.predict(&data, &mut partial_results, 0, 32);
+    let mut predictor = forest.predictor();
+    forest.predict_full_walk(&data, &mut full_results);
+    predictor.predict_group(&data, &mut partial_results);
 
     let d = max_diff(&full_results, &partial_results);
     eprintln!(
@@ -793,9 +766,9 @@ fn test_width_32_boundary() {
         "Width-32 boundary: partial vs full max_diff={d:.2e} — u32 mask arithmetic may be wrong"
     );
 
-    // Also verify that predict (with internal workspace) matches.
+    // A second call reuses the predictor's workspace.
     let mut ws_results = vec![0.0f64; 32];
-    forest.predict(&data, &mut ws_results, 0, 32);
+    predictor.predict_group(&data, &mut ws_results);
     let d2 = max_diff(&full_results, &ws_results);
     assert!(
         d2 < TOL_FULL_WALK,
@@ -807,18 +780,18 @@ fn test_width_32_boundary() {
 
 #[test]
 fn test_node_visit_stats() {
-    use treewalker_gbdt::PredictStats;
+    use treewalker_gbdt::research::WorkCounters;
 
     let cfg = first_config();
-    let mut forest = load_forest(&cfg.param_dir, cfg.framework);
+    let forest = load_forest(&cfg.param_dir, cfg.framework);
     let (data, n_rows) = load_test_data(&cfg.param_dir);
-    let h = forest.config.max_group_width;
-    let n_obs = n_rows / h;
+    let (nf, h) = (forest.config().n_features, forest.config().max_group_width);
 
     let mut results = vec![0.0f64; n_rows];
-    let mut total = PredictStats::default();
-    for s in 0..n_obs {
-        total += forest.predict_with_stats(&data, &mut results, s * h, (s + 1) * h);
+    let mut total = WorkCounters::default();
+    let mut predictor = forest.research_predictor(Ablation::default());
+    for (rows, out) in data.chunks(h * nf).zip(results.chunks_mut(h)) {
+        total += predictor.predict_group_counted(rows, out);
     }
 
     assert!(total.constant_steps > 0);
@@ -835,23 +808,18 @@ fn test_node_visit_stats() {
 /// the brute-force O(P × n) precompute for every observation in every config.
 #[test]
 fn test_sweep_matches_bruteforce() {
-    // precompute_sweep/precompute_bruteforce are width-32 test helpers: they
-    // build u32 row masks and store columns in [[f64; 32]; 64]. Groups wider
-    // than 32 rows (e.g. E2's 128-row chunks) use the u64/u128 mask path,
-    // which these helpers do not exercise. Skip them here; the wider mask
-    // paths are validated by test_reference_match / test_partial_matches_full
-    // / test_wide_group_{48,64,96,128}. Validating only n <= 32 avoids an
-    // out-of-bounds index into the width-32 column buffer.
+    // predicate_masks builds u32 row masks, so it takes groups of at most 32 rows.
+    // Wider groups use the u64 and Bits<W> mask paths, which test_reference_match,
+    // test_partial_matches_full and test_wide_group_* validate.
     const SWEEP_HELPER_WIDTH: usize = 32;
     for cfg in &all_configs() {
         let forest = load_forest(&cfg.param_dir, cfg.framework);
         let (data, n_rows) = load_test_data(&cfg.param_dir);
-        let nf = forest.config.n_features;
-        let f32_mode = forest.threshold_type() == ThresholdType::F32;
+        let nf = forest.config().n_features;
 
         let mut n_obs_tested = 0usize;
         let mut n_obs_skipped_wide = 0usize;
-        let gw = forest.config.max_group_width;
+        let gw = forest.config().max_group_width;
         for_each_group(gw, n_rows, cfg.group_offsets.as_deref(), |start, end| {
             let n = end - start;
             if n > SWEEP_HELPER_WIDTH {
@@ -859,19 +827,9 @@ fn test_sweep_matches_bruteforce() {
                 return;
             }
 
-            // Build varying_cols the same way predict_typed_ablation does.
-            let mut varying_cols = Box::new([[0.0f64; 32]; 64]);
-            let mut m = forest.config.varying_mask;
-            while m != 0 {
-                let f = m.trailing_zeros() as usize;
-                for r in 0..n {
-                    varying_cols[f][r] = data[(start + r) * nf + f];
-                }
-                m &= m - 1;
-            }
-
-            let sweep = forest.precompute_sweep(&varying_cols, n, f32_mode);
-            let brute = forest.precompute_bruteforce(&varying_cols, n, f32_mode);
+            let rows = &data[start * nf..end * nf];
+            let sweep = forest.predicate_masks(rows, true);
+            let brute = forest.predicate_masks(rows, false);
 
             assert_eq!(
                 sweep.len(),
@@ -894,7 +852,7 @@ fn test_sweep_matches_bruteforce() {
             cfg.label,
             if n_obs_skipped_wide > 0 {
                 format!(
-                    " ({n_obs_skipped_wide} skipped: groups > {SWEEP_HELPER_WIDTH} rows use u64/u128 masks, not the width-32 helpers)"
+                    " ({n_obs_skipped_wide} skipped: groups > {SWEEP_HELPER_WIDTH} rows use wider masks)"
                 )
             } else {
                 String::new()
@@ -921,9 +879,9 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
         .next()
         .expect("No configs found — run prepare.py");
 
-    let mut forest = load_forest_at_width(&first_cfg.param_dir, first_cfg.framework, target_width);
+    let forest = load_forest_at_width(&first_cfg.param_dir, first_cfg.framework, target_width);
     let (orig_data, orig_n_rows) = load_test_data(&first_cfg.param_dir);
-    let nf = forest.config.n_features;
+    let nf = forest.config().n_features;
     let orig_gw =
         WalkerConfig::from_file(first_cfg.param_dir.join("walker_config.json")).max_group_width;
 
@@ -956,11 +914,8 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
             // Fill varying features from a cycling source row.
             let src_row_idx = (src_start + r) % orig_n_rows;
             let src_row = &orig_data[src_row_idx * nf..(src_row_idx + 1) * nf];
-            let mut vm = forest.config.varying_mask;
-            while vm != 0 {
-                let f = vm.trailing_zeros() as usize;
+            for f in (0..nf).filter(|&f| forest.config().is_varying(f)) {
                 row[f] = src_row[f];
-                vm &= vm - 1;
             }
             synth_data.extend_from_slice(&row);
         }
@@ -971,19 +926,13 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
 
     // Predict with partial eval (exercises the mask width chosen for target_width).
     let mut results_partial = vec![0.0f64; total_rows];
-    for g in 0..n_synthetic_groups {
-        let start = g * target_width;
-        let end = start + target_width;
-        forest.predict(&synth_data, &mut results_partial, start, end);
-    }
+    forest
+        .predictor()
+        .predict_fixed(&synth_data, target_width, &mut results_partial);
 
     // Predict with full walk (no masks, always correct).
     let mut results_full = vec![0.0f64; total_rows];
-    for g in 0..n_synthetic_groups {
-        let start = g * target_width;
-        let end = start + target_width;
-        forest.predict_full(&synth_data, &mut results_full, start, end);
-    }
+    forest.predict_full_walk(&synth_data, &mut results_full);
 
     let diff = max_diff(&results_partial, &results_full);
     eprintln!(

@@ -44,9 +44,7 @@ use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;
 
 use crate::config::{ParseConfig, WalkerConfig};
-use crate::forest::{
-    FeatureRange, Node, PrefixGroup, Threshold, ThresholdType, Tree, VaryingPredicate,
-};
+use crate::forest::{FeatureRange, Node, PrefixGroup, Threshold, Tree, VaryingPredicate};
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -73,40 +71,6 @@ impl ModelFormat {
             ))),
         }
     }
-}
-
-/// Legacy tuple API for summed, alpha=1 sigmoid models only.
-///
-/// This preserves historical leaf-bias distribution. Panics for other output
-/// semantics, malformed inputs or unsupported models. Prefer [`crate::Forest`]'s
-/// fallible loaders, which retain output metadata and support identity/averaging.
-#[expect(
-    clippy::float_cmp,
-    reason = "exact output mode, not an approximate numerical comparison"
-)]
-pub fn parse_model(
-    path: impl AsRef<Path>,
-    config: &WalkerConfig,
-    parse_config: &ParseConfig,
-) -> (Vec<Tree>, Vec<Node>, Vec<u8>, ThresholdType) {
-    let path = path.as_ref();
-    let parsed = (|| {
-        let format = ModelFormat::from_path(path)?;
-        parse_reader(std::fs::File::open(path)?, format, config, parse_config)
-    })()
-    .unwrap_or_else(|e| panic!("{e}"));
-    assert!(
-        parsed.output.divisor == 1.0 && parsed.output.postprocessor == Postprocessor::Sigmoid(1.0),
-        "legacy parse_model cannot carry this model's output metadata; use Forest::try_load or Forest::from_reader"
-    );
-    let mut nodes = parsed.nodes;
-    let bias = parsed.output.base_score / parsed.trees.len() as f64;
-    for node in &mut nodes {
-        if node.is_leaf() {
-            node.value += bias;
-        }
-    }
-    (parsed.trees, nodes, parsed.bitsets, parsed.threshold_type)
 }
 
 pub(crate) fn parse_reader(

@@ -253,7 +253,7 @@ def run_correctness(cells: list[int]) -> bool:
         "PATH": f"{Path.home() / '.cargo/bin'}:{os.environ.get('PATH', '')}",
     }
     cmd = ["cargo", "test", "--manifest-path", "benchmarks/Cargo.toml",
-            "--target-dir", "target", "--release", "--features", "test-helpers",
+            "--target-dir", "target", "--release", "--features", "research",
             "--test", "correctness", "test_reference_match", "--", "--nocapture"]
     print(f"\n[correctness] {' '.join(cmd)}", file=sys.stderr)
     proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env,

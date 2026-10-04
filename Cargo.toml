@@ -36,6 +36,7 @@ missing_errors_doc = "allow"
 struct_excessive_bools = "allow"    # AblationMode/ParseConfig are flag structs by design
 doc_markdown = "allow"              # LightGBM, XGBoost, etc. don't need backticks everywhere
 if_not_else = "allow"               # sometimes clearer to check the negative case first
+redundant_pub_crate = "allow"       # pub(crate) in private modules states that an item stays internal
 
 [package]
 name = "treewalker-gbdt"
@@ -48,7 +49,7 @@ repository.workspace = true
 include = ["src/**", "tests/**", "docs/treelite-loading.md", "docs/treelite-loading-validation.md", "Cargo.toml", "README.md", "LICENSE"]
 
 [features]
-test-helpers = []  # expose internal precompute functions for artifact integration tests
+research = []  # ablations, work counters, prediction stages, full walk, introspection
 
 [dependencies]
 serde.workspace = true
@@ -56,11 +57,25 @@ simd-json.workspace = true
 rustc-hash = "2.1.2"
 thiserror = "2.0.21"
 
+[dev-dependencies]
+# Turns research on for this package's tests, so `cargo test` runs them.
+treewalker-gbdt = { path = ".", features = ["research"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
 [lints]
 workspace = true
+
+# These tests use the research API. The self dev-dependency above turns it on for
+# `cargo test` here; the published crate's tests need `--features research`.
+[[test]]
+name = "import"
+required-features = ["research"]
+
+[[test]]
+name = "research"
+required-features = ["research"]
 
 [profile.release]
 lto = "fat"

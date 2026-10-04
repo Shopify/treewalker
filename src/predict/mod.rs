@@ -1,32 +1,54 @@
-//! Prediction: full tree walk and recursive partial evaluation.
+//! Prediction: the [`Predictor`] and its call path down to the kernel.
 //!
-//! Three public methods on `Forest`:
-//! - `predict` — fast production path (all optimizations, no stats)
-//! - `predict_full` — baseline per-row walk (no partial evaluation)
-//! - `predict_with_stats` — benchmark path (runtime ablation + stats counters)
+//! A call checks its input once, borrows the model once, and dispatches once on
+//! (threshold type × mask width). The monomorphized path then runs every group of the
+//! call in pieces of at most `M::WIDTH` rows; groups wider than [`MAX_PIECE_ROWS`]
+//! run in pieces of that many rows, and exact sums make the split invisible.
 //!
-//! The hot path is generic over `const F32: bool` (threshold comparison type),
-//! `M: RowMask` (u16/u32/u64/`Bits<W>`, chosen from the maximum group width) and
-//! `const STATS: bool`. Stats counters and ablation flags exist only in the
-//! `predict_with_stats` instantiation (`STATS = true`); `predict` compiles them out.
-//! Groups wider than [`MAX_PIECE_ROWS`] run in pieces of that many rows; exact sums
-//! make the split invisible.
+//! The kernel ([`kernel`]) is generic over `const F32: bool` (threshold comparison
+//! type), `M: RowMask` (u16/u32/u64/`Bits<W>`, chosen from the maximum group width),
+//! `const STATS: bool` (work counters) and `const ABLATE: bool` (runtime ablation
+//! flags). It is compiled three ways: production `(false, false)`, with every
+//! optimization on and nothing counted; and, with the `research` feature, research
+//! timed `(false, true)` and research counted `(true, true)`. With `ABLATE = false`
+//! the flags are the defaults at compile time.
 
 mod ablation;
 mod counters;
 mod kernel;
 
-pub use counters::PredictStats;
+pub use counters::WorkCounters;
 
-use crate::config::AblationMode;
-use crate::forest::{Forest, ThresholdType};
+use std::sync::Arc;
+
+use crate::forest::{Forest, Model, ThresholdType};
 use crate::mask::{Bits, RowMask};
-// ---------------------------------------------------------------------------
-// Workspace (private)
-// ---------------------------------------------------------------------------
+
+/// Runtime ablation flags: each disables one optimization of the predict path.
+///
+/// Used by the research predictor to measure each optimization's contribution;
+/// production prediction is compiled with every optimization on. Parse-time
+/// ablations are load options instead, because they change the model's layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Ablation {
+    /// Fall back to per-row partition functions instead of precomputed varying masks.
+    pub disable_varying_precompute: bool,
+    /// Use brute-force O(P × n) precompute instead of the sorted-threshold sweep.
+    /// Effective only with precompute on (the default).
+    pub disable_predicate_sweep: bool,
+    /// Always recurse into both children at varying splits.
+    pub disable_unsplit: bool,
+    /// Treat all monotonic varying features as non-monotonic: no early-break scans.
+    /// Effective only with `disable_varying_precompute`, because the precompute
+    /// evaluates every predicate the same way whatever its monotonicity.
+    pub disable_monotonic: bool,
+    /// Add leaf values per row in `f64`, in tree order, instead of summing them
+    /// exactly. Effective only when the model supports exact sums.
+    pub disable_exact_sums: bool,
+}
 
 /// Row masks for every varying predicate, in the width chosen at load.
-pub(crate) enum Masks {
+enum Masks {
     U16(Vec<u16>),
     U32(Vec<u32>),
     U64(Vec<u64>),
@@ -37,7 +59,7 @@ pub(crate) enum Masks {
 }
 
 /// Per-group scratch, sized for one piece of a group.
-pub(crate) struct Buffers {
+struct Buffers {
     /// One varying feature's values, by row.
     column: Vec<f64>,
     /// Sort buffer for the threshold sweep: (value, row).
@@ -47,9 +69,51 @@ pub(crate) struct Buffers {
     diff: Vec<i128>,
 }
 
-pub(crate) struct Workspace {
+struct Workspace {
     masks: Masks,
     buffers: Buffers,
+    /// The variant the last call ran with, so tests can check what each entry point
+    /// passes down.
+    #[cfg(all(test, feature = "research"))]
+    last_variant: Option<Ablation>,
+}
+
+#[cfg(all(test, feature = "research"))]
+impl Predictor {
+    pub(crate) const fn last_variant(&self) -> Option<Ablation> {
+        self.workspace.last_variant
+    }
+
+    pub(crate) const fn clear_last_variant(&mut self) {
+        self.workspace.last_variant = None;
+    }
+}
+
+impl Workspace {
+    fn new(model: &Model) -> Self {
+        let np = model.varying_predicates.len();
+        let rows = model.config.max_group_width.min(MAX_PIECE_ROWS);
+        let masks = match rows {
+            0..=16 => Masks::U16(vec![0; np]),
+            17..=32 => Masks::U32(vec![0; np]),
+            33..=64 => Masks::U64(vec![0; np]),
+            65..=128 => Masks::B2(vec![Bits::ZERO; np]),
+            129..=256 => Masks::B4(vec![Bits::ZERO; np]),
+            257..=512 => Masks::B8(vec![Bits::ZERO; np]),
+            _ => Masks::B16(vec![Bits::ZERO; np]),
+        };
+        Self {
+            masks,
+            buffers: Buffers {
+                column: vec![0.0; rows],
+                order: vec![(0.0, 0); rows],
+                prefix_starts: vec![0; model.trees.len()],
+                diff: vec![0; rows + 1],
+            },
+            #[cfg(all(test, feature = "research"))]
+            last_variant: None,
+        }
+    }
 }
 
 /// Context for recursive `partial_eval` calls.
@@ -63,8 +127,8 @@ struct EvalCtx<'a, M: RowMask> {
     /// difference array (one entry per row plus one).
     scale: Option<i32>,
     diff: &'a mut [i128],
-    stats: Option<PredictStats>,
-    ablation: AblationMode,
+    counters: &'a mut WorkCounters,
+    ablation: Ablation,
     /// The group's rows, row-major, `n_features` values per row.
     rows: &'a [f64],
     n_features: usize,
@@ -72,14 +136,40 @@ struct EvalCtx<'a, M: RowMask> {
 
 /// Rows per piece of a group: the widest mask is `Bits<16>`. Masks are passed by
 /// value down the recursion, so this also bounds its stack use in deep trees.
-pub const MAX_PIECE_ROWS: usize = 1024;
+pub(crate) const MAX_PIECE_ROWS: usize = 1024;
 
-/// Row-major rows from width-32 feature columns (test helpers).
-#[cfg(any(test, feature = "test-helpers"))]
-fn rows_from_columns(cols: &[[f64; 32]; 64], n_rows: usize, n_features: usize) -> Vec<f64> {
-    (0..n_rows)
-        .flat_map(|r| (0..n_features).map(move |f| cols[f][r]))
-        .collect()
+/// How the rows of one call divide into groups.
+#[derive(Clone, Copy)]
+pub(crate) enum Groups<'a> {
+    /// All rows form one group.
+    One,
+    /// Consecutive groups of this many rows; the last may be shorter.
+    Fixed(usize),
+    /// Group `g` is rows `offsets[g]..offsets[g + 1]`.
+    Offsets(&'a [usize]),
+}
+
+impl Groups<'_> {
+    const fn count(self, n_rows: usize) -> usize {
+        match self {
+            Self::One => (n_rows > 0) as usize,
+            Self::Fixed(width) => n_rows.div_ceil(width),
+            Self::Offsets(offsets) => offsets.len() - 1,
+        }
+    }
+
+    /// Rows of group `g < count`. Never overflows: every bound is at most `n_rows`.
+    #[inline]
+    fn bounds(self, g: usize, n_rows: usize) -> (usize, usize) {
+        match self {
+            Self::One => (0, n_rows),
+            Self::Fixed(width) => {
+                let start = g * width;
+                (start, start + width.min(n_rows - start))
+            }
+            Self::Offsets(offsets) => (offsets[g], offsets[g + 1]),
+        }
+    }
 }
 
 #[inline]
@@ -95,36 +185,212 @@ fn sigmoid_inplace(slice: &mut [f64]) {
     }
 }
 
+/// Predicts groups of rows with a [`Forest`]'s model and its own scratch space.
+///
+/// Create one with [`Forest::predictor`] and reuse it, one per worker thread: creating
+/// a predictor allocates the scratch space for the widest group, and calls never
+/// allocate. A predictor is `Send`, so it can move to the thread that uses it, and it
+/// keeps its model alive.
+///
+/// Every call takes row-major `f64` input, `n_features` values per row in the trained
+/// column order, and writes one output per row. Within a group, constant features
+/// must be equal in every row, and each monotonic feature must be monotonic in the
+/// declared direction; these contracts are not checked. Empty input is a no-op.
+///
+/// # Panics
+///
+/// Each call panics, before writing any output, if the input length is not a multiple
+/// of `n_features`, if `out` does not hold one value per row, or if the grouping is
+/// invalid as documented on the call. Groups may have any width up to the configured
+/// `max_group_width`.
+pub struct Predictor {
+    pub(crate) model: Arc<Model>,
+    workspace: Workspace,
+}
+
+impl std::fmt::Debug for Predictor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Predictor")
+            .field("max_group_width", &self.model.config.max_group_width)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Forest {
-    fn check_input(&self, data: &[f64], results: &[f64], start: usize, end: usize, grouped: bool) {
-        assert!(
-            self.config.structural_key() == self.compiled_config.structural_key(),
-            "Forest.config structural fields changed after loading; reload the forest to change feature classification or maximum group width"
-        );
-        assert!(start <= end, "prediction start exceeds end");
-        if grouped {
-            assert!(start < end, "group must be nonempty");
-            assert!(
-                end - start <= self.config.max_group_width,
-                "group exceeds configured max_group_width"
-            );
+    /// Create a [`Predictor`] with scratch space for this model's widest group.
+    ///
+    /// Predictors are meant to be reused: create one per worker, not one per call.
+    #[must_use]
+    pub fn predictor(&self) -> Predictor {
+        Predictor {
+            workspace: Workspace::new(&self.model),
+            model: Arc::clone(&self.model),
         }
-        let elements = end
-            .checked_mul(self.config.n_features)
-            .expect("prediction dimensions overflow");
-        assert!(elements <= data.len(), "prediction data is too short");
-        assert!(end <= results.len(), "prediction output is too short");
+    }
+}
+
+impl Predictor {
+    /// Predict one group: every row of `rows` belongs to the same entity.
+    ///
+    /// # Panics
+    ///
+    /// If `rows.len()` is not a multiple of `n_features`, if `out.len()` is not the row
+    /// count, or if the group has more than `max_group_width` rows.
+    pub fn predict_group(&mut self, rows: &[f64], out: &mut [f64]) {
+        self.run::<false, false>(rows, out, Groups::One, Ablation::default(), None);
     }
 
+    /// Predict consecutive groups of varying width: group `g` is rows
+    /// `offsets[g]..offsets[g + 1]` of `data`.
+    ///
+    /// `offsets` starts at 0, ends at the row count and strictly increases, so it holds
+    /// one more entry than there are groups: `[0]` for no rows.
+    ///
+    /// # Panics
+    ///
+    /// If `data.len()` is not a multiple of `n_features`, if `out.len()` is not the row
+    /// count, if `offsets` is empty, does not start at 0, does not end at the row count
+    /// or does not strictly increase, or if a group has more than `max_group_width`
+    /// rows.
+    pub fn predict_groups(&mut self, data: &[f64], offsets: &[usize], out: &mut [f64]) {
+        self.run::<false, false>(
+            data,
+            out,
+            Groups::Offsets(offsets),
+            Ablation::default(),
+            None,
+        );
+    }
+
+    /// Predict consecutive groups of `width` rows. The last group is shorter when the
+    /// row count is not a multiple of `width`.
+    ///
+    /// # Panics
+    ///
+    /// If `data.len()` is not a multiple of `n_features`, if `out.len()` is not the row
+    /// count, or if `width` is 0 or more than `max_group_width`.
+    pub fn predict_fixed(&mut self, data: &[f64], width: usize, out: &mut [f64]) {
+        self.run::<false, false>(data, out, Groups::Fixed(width), Ablation::default(), None);
+    }
+
+    /// Check a call's input, then run its groups.
+    pub(crate) fn run<const STATS: bool, const ABLATE: bool>(
+        &mut self,
+        data: &[f64],
+        out: &mut [f64],
+        groups: Groups<'_>,
+        variant: Ablation,
+        counters: Option<&mut WorkCounters>,
+    ) {
+        self.check(data, out, groups);
+        self.run_unchecked::<STATS, ABLATE>(data, out, groups, variant, counters, true);
+    }
+
+    /// Panic unless the call's input matches the model and the grouping is valid.
+    pub(crate) fn check(&self, data: &[f64], out: &[f64], groups: Groups<'_>) {
+        let config = &self.model.config;
+        let (nf, max_width) = (config.n_features, config.max_group_width);
+        assert!(
+            data.len().is_multiple_of(nf),
+            "input length {} is not a multiple of n_features {nf}",
+            data.len()
+        );
+        let n_rows = data.len() / nf;
+        assert!(
+            out.len() == n_rows,
+            "output length {} differs from the row count {n_rows}",
+            out.len()
+        );
+        match groups {
+            Groups::One => assert!(
+                n_rows <= max_width,
+                "group of {n_rows} rows exceeds max_group_width {max_width}"
+            ),
+            Groups::Fixed(width) => {
+                assert!(width > 0, "group width must be positive");
+                assert!(
+                    width <= max_width,
+                    "group width {width} exceeds max_group_width {max_width}"
+                );
+            }
+            Groups::Offsets(offsets) => {
+                assert!(offsets.first() == Some(&0), "offsets must start at 0");
+                assert!(
+                    offsets.last() == Some(&n_rows),
+                    "offsets must end at the row count {n_rows}"
+                );
+                for pair in offsets.windows(2) {
+                    assert!(pair[0] < pair[1], "offsets must strictly increase");
+                    assert!(
+                        pair[1] - pair[0] <= max_width,
+                        "group of {} rows exceeds max_group_width {max_width}",
+                        pair[1] - pair[0]
+                    );
+                }
+            }
+        }
+    }
+
+    /// Dispatch once on (threshold type × mask width), then run every group. The input
+    /// must have passed [`Self::check`]. Without `finalize`, `out` receives the tree
+    /// sums, before averaging, the base score and the link function.
+    pub(crate) fn run_unchecked<const STATS: bool, const ABLATE: bool>(
+        &mut self,
+        data: &[f64],
+        out: &mut [f64],
+        groups: Groups<'_>,
+        variant: Ablation,
+        counters: Option<&mut WorkCounters>,
+        finalize: bool,
+    ) {
+        #[cfg(all(test, feature = "research"))]
+        {
+            self.workspace.last_variant = Some(variant);
+        }
+        let model: &Model = &self.model;
+        let Workspace { masks, buffers, .. } = &mut self.workspace;
+        let mut unused = WorkCounters::default();
+        let counters = counters.unwrap_or(&mut unused);
+        macro_rules! run {
+            ($m:ty, $masks:expr) => {
+                match model.threshold_type {
+                    ThresholdType::F64 => model.predict_groups::<false, $m, STATS, ABLATE>(
+                        data, out, groups, $masks, buffers, variant, counters, finalize,
+                    ),
+                    ThresholdType::F32 => model.predict_groups::<true, $m, STATS, ABLATE>(
+                        data, out, groups, $masks, buffers, variant, counters, finalize,
+                    ),
+                }
+            };
+        }
+        match masks {
+            Masks::U16(m) => run!(u16, m),
+            Masks::U32(m) => run!(u32, m),
+            Masks::U64(m) => run!(u64, m),
+            Masks::B2(m) => run!(Bits<2>, m),
+            Masks::B4(m) => run!(Bits<4>, m),
+            Masks::B8(m) => run!(Bits<8>, m),
+            Masks::B16(m) => run!(Bits<16>, m),
+        }
+    }
+}
+
+impl Model {
     #[expect(clippy::float_cmp, reason = "exact fast-path identities")]
-    fn finalize(&self, values: &mut [f64]) {
+    #[inline]
+    pub(crate) fn apply_margin(&self, values: &mut [f64]) {
         let out = self.output;
         if out.divisor != 1.0 || out.base_score != 0.0 {
             for v in &mut *values {
                 *v = *v / out.divisor + out.base_score;
             }
         }
-        match out.postprocessor {
+    }
+
+    #[expect(clippy::float_cmp, reason = "exact fast-path identity")]
+    #[inline]
+    pub(crate) fn apply_link(&self, values: &mut [f64]) {
+        match self.output.postprocessor {
             crate::parser::Postprocessor::Identity => {}
             crate::parser::Postprocessor::Sigmoid(alpha) => {
                 if alpha != 1.0 {
@@ -137,125 +403,54 @@ impl Forest {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Workspace management (private)
-    // -----------------------------------------------------------------------
-
-    fn ensure_workspace(&mut self) -> &mut Workspace {
-        if self.workspace.is_none() {
-            let np = self.varying_predicates.len();
-            let rows = self.config.max_group_width.min(MAX_PIECE_ROWS);
-            let masks = match rows {
-                0..=16 => Masks::U16(vec![0; np]),
-                17..=32 => Masks::U32(vec![0; np]),
-                33..=64 => Masks::U64(vec![0; np]),
-                65..=128 => Masks::B2(vec![Bits::ZERO; np]),
-                129..=256 => Masks::B4(vec![Bits::ZERO; np]),
-                257..=512 => Masks::B8(vec![Bits::ZERO; np]),
-                _ => Masks::B16(vec![Bits::ZERO; np]),
-            };
-            self.workspace = Some(Workspace {
-                masks,
-                buffers: Buffers {
-                    column: vec![0.0; rows],
-                    order: vec![(0.0, 0); rows],
-                    prefix_starts: vec![0; self.trees.len()],
-                    diff: vec![0; rows + 1],
-                },
-            });
-        }
-        self.workspace.as_mut().unwrap()
+    /// Turn tree sums into outputs: the staged finalization, then the link function.
+    #[inline]
+    fn finalize(&self, values: &mut [f64]) {
+        self.apply_margin(values);
+        self.apply_link(values);
     }
 
-    // -----------------------------------------------------------------------
-    // Public API
-    // -----------------------------------------------------------------------
-
-    /// Baseline: evaluate every tree for every row independently. No partial evaluation.
-    pub fn predict_full(&self, data: &[f64], results: &mut [f64], start: usize, end: usize) {
-        self.check_input(data, results, start, end, false);
-        match self.threshold_type {
-            ThresholdType::F64 => self.predict_full_inner::<false>(data, results, start, end),
-            ThresholdType::F32 => self.predict_full_inner::<true>(data, results, start, end),
-        }
-    }
-
-    /// Fast production path. All optimizations enabled, no stats.
-    pub fn predict(&mut self, data: &[f64], results: &mut [f64], start: usize, end: usize) {
-        self.check_input(data, results, start, end, true);
-        self.ensure_workspace();
-        self.dispatch::<false>(data, results, start, end, AblationMode::default(), None);
-    }
-
-    /// Benchmark path: runtime ablation flags + stats collection.
-    pub fn predict_with_stats(
-        &mut self,
-        data: &[f64],
-        results: &mut [f64],
-        start: usize,
-        end: usize,
-    ) -> PredictStats {
-        self.check_input(data, results, start, end, true);
-        self.ensure_workspace();
-        let ablation = self.config.ablation;
-        self.dispatch::<true>(
-            data,
-            results,
-            start,
-            end,
-            ablation,
-            Some(PredictStats::default()),
-        )
-        .unwrap()
-    }
-
-    // -----------------------------------------------------------------------
-    // Dispatch: (threshold type × mask width), then pieces of the group
-    // -----------------------------------------------------------------------
-
-    fn dispatch<const STATS: bool>(
-        &mut self,
-        data: &[f64],
-        results: &mut [f64],
-        start: usize,
-        end: usize,
-        ablation: AblationMode,
-        stats: Option<PredictStats>,
-    ) -> Option<PredictStats> {
-        let mut ws = self.workspace.take().unwrap();
-        let Workspace { masks, buffers } = &mut ws;
-        macro_rules! run {
-            ($m:ty, $masks:expr) => {
-                match self.threshold_type {
-                    ThresholdType::F64 => self.predict_pieces::<false, $m, STATS>(
-                        data, results, start, end, $masks, buffers, ablation, stats,
-                    ),
-                    ThresholdType::F32 => self.predict_pieces::<true, $m, STATS>(
-                        data, results, start, end, $masks, buffers, ablation, stats,
-                    ),
-                }
-            };
-        }
-        let result = match masks {
-            Masks::U16(m) => run!(u16, m),
-            Masks::U32(m) => run!(u32, m),
-            Masks::U64(m) => run!(u64, m),
-            Masks::B2(m) => run!(Bits<2>, m),
-            Masks::B4(m) => run!(Bits<4>, m),
-            Masks::B8(m) => run!(Bits<8>, m),
-            Masks::B16(m) => run!(Bits<16>, m),
-        };
-        self.workspace = Some(ws);
-        result
-    }
-
-    /// Predict a group in pieces of at most `M::WIDTH` rows. The pieces share the
-    /// group's constant features; each row's prediction does not depend on the split.
+    /// Run every group of a call, each in pieces of at most `M::WIDTH` rows. The
+    /// pieces share the group's constant features; each row's prediction does not
+    /// depend on the split.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the group, its workspace and its variant"
+        reason = "the call, its workspace and its variant"
     )]
-    fn predict_pieces<const F32: bool, M: RowMask, const STATS: bool>(
+    fn predict_groups<const F32: bool, M: RowMask, const STATS: bool, const ABLATE: bool>(
+        &self,
+        data: &[f64],
+        results: &mut [f64],
+        groups: Groups<'_>,
+        masks: &mut [M],
+        buffers: &mut Buffers,
+        variant: Ablation,
+        counters: &mut WorkCounters,
+        finalize: bool,
+    ) {
+        let n_rows = results.len();
+        for g in 0..groups.count(n_rows) {
+            let (start, end) = groups.bounds(g, n_rows);
+            let mut s = start;
+            while s < end {
+                let e = end.min(s + M::WIDTH);
+                self.predict_core::<F32, M, STATS, ABLATE>(
+                    data, results, s, e, masks, buffers, variant, counters,
+                );
+                s = e;
+            }
+            if finalize {
+                self.finalize(&mut results[start..end]);
+            }
+        }
+    }
+
+    /// Tree sums of one piece, rows `start..end` of `data`, into `results[start..end]`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the piece, its workspace and its variant"
+    )]
+    fn predict_core<const F32: bool, M: RowMask, const STATS: bool, const ABLATE: bool>(
         &self,
         data: &[f64],
         results: &mut [f64],
@@ -263,47 +458,9 @@ impl Forest {
         end: usize,
         masks: &mut [M],
         buffers: &mut Buffers,
-        ablation: AblationMode,
-        stats: Option<PredictStats>,
-    ) -> Option<PredictStats> {
-        let mut total: Option<PredictStats> = None;
-        let mut s = start;
-        while s < end {
-            let e = end.min(s + M::WIDTH);
-            let piece = self.predict_core::<F32, M, STATS>(
-                data, results, s, e, masks, buffers, ablation, stats,
-            );
-            total = match (total, piece) {
-                (Some(mut t), Some(p)) => {
-                    t += p;
-                    Some(t)
-                }
-                (t, p) => t.or(p),
-            };
-            s = e;
-        }
-        total
-    }
-
-    // -----------------------------------------------------------------------
-    // Core predict — one function, runtime ablation/stats
-    // -----------------------------------------------------------------------
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the group, its workspace and its variant"
-    )]
-    fn predict_core<const F32: bool, M: RowMask, const STATS: bool>(
-        &self,
-        data: &[f64],
-        results: &mut [f64],
-        start: usize,
-        end: usize,
-        masks: &mut [M],
-        buffers: &mut Buffers,
-        ablation: AblationMode,
-        stats: Option<PredictStats>,
-    ) -> Option<PredictStats> {
+        variant: Ablation,
+        counters: &mut WorkCounters,
+    ) {
         let n = end - start;
         let Buffers {
             column,
@@ -313,16 +470,13 @@ impl Forest {
         } = buffers;
         debug_assert!(n <= M::WIDTH && n < diff.len());
         let nf = self.config.n_features;
-        // SAFETY: check_input asserts that data holds end * nf values, and start < end.
+        // SAFETY: Predictor::check asserts that data holds n_features values per
+        // output row, and groups give start < end <= results.len().
         let const_features = unsafe { data.get_unchecked(start * nf..(start + 1) * nf) };
         // SAFETY: as above.
         let rows = unsafe { data.get_unchecked(start * nf..end * nf) };
-        // `predict` runs every optimization; ablation exists only with STATS.
-        let ablation = if STATS {
-            ablation
-        } else {
-            AblationMode::default()
-        };
+        // Production runs every optimization; the flags exist only with ABLATE.
+        let ablation = if ABLATE { variant } else { Ablation::default() };
 
         // Precompute varying masks (unless ablation disables it).
         let use_precompute = !ablation.disable_varying_precompute;
@@ -337,11 +491,30 @@ impl Forest {
             &[]
         };
 
-        let scale = self.fixed_scale;
+        let scale = if ablation.disable_exact_sums {
+            None
+        } else {
+            self.fixed_scale
+        };
         if scale.is_none() {
             results[start..end].fill(0.0);
         }
         let all_mask: M = M::from_width(n);
+
+        if STATS && use_precompute {
+            let n_u64 = n as u64;
+            let num_advances: u64 = self
+                .feature_ranges
+                .iter()
+                .map(|r| if r.num_start < r.num_end { n_u64 } else { 0 })
+                .sum();
+            let cat_evals: u64 = self
+                .feature_ranges
+                .iter()
+                .map(|r| u64::from(r.cat_end - r.cat_start) * n_u64)
+                .sum();
+            counters.precompute_row_evals += num_advances + cat_evals;
+        }
 
         let mut ctx = EvalCtx::<M> {
             base: 0,
@@ -351,30 +524,7 @@ impl Forest {
             start,
             scale,
             diff,
-            stats: if STATS {
-                let precompute_evals = if use_precompute {
-                    let n_u64 = n as u64;
-                    let num_advances: u64 = self
-                        .feature_ranges
-                        .iter()
-                        .map(|r| if r.num_start < r.num_end { n_u64 } else { 0 })
-                        .sum();
-                    let cat_evals: u64 = self
-                        .feature_ranges
-                        .iter()
-                        .map(|r| u64::from(r.cat_end - r.cat_start) * n_u64)
-                        .sum();
-                    num_advances + cat_evals
-                } else {
-                    0
-                };
-                stats.map(|mut s| {
-                    s.precompute_row_evals = precompute_evals;
-                    s
-                })
-            } else {
-                None
-            },
+            counters,
             ablation,
             rows,
             n_features: nf,
@@ -386,7 +536,7 @@ impl Forest {
             for group in &self.prefix_groups {
                 self.precompute_prefix_starts::<F32, STATS>(
                     const_features,
-                    &mut ctx.stats,
+                    ctx.counters,
                     group,
                     k,
                     prefix_starts,
@@ -397,7 +547,7 @@ impl Forest {
         for (i, tree) in self.trees.iter().enumerate() {
             ctx.base = tree.node_start as usize;
             let start_idx = prefix_starts[i] as usize;
-            self.partial_eval::<F32, M, STATS>(&mut ctx, start_idx, all_mask);
+            self.partial_eval::<F32, M, STATS, ABLATE>(&mut ctx, start_idx, all_mask);
         }
 
         if let Some(e) = scale {
@@ -408,87 +558,5 @@ impl Forest {
             }
             ctx.diff[..=n].fill(0);
         }
-        self.finalize(&mut ctx.results[start..end]);
-        ctx.stats
-    }
-
-    // -----------------------------------------------------------------------
-    // Full walk baseline
-    // -----------------------------------------------------------------------
-
-    fn predict_full_inner<const F32: bool>(
-        &self,
-        data: &[f64],
-        results: &mut [f64],
-        start: usize,
-        end: usize,
-    ) {
-        let nf = self.config.n_features;
-        let nodes = &self.nodes;
-        results[start..end].fill(0.0);
-        for tree in &self.trees {
-            let base = tree.node_start as usize;
-            for (j, res) in results[start..end].iter_mut().enumerate() {
-                let features = &data[(start + j) * nf..(start + j + 1) * nf];
-                let mut local = 0usize;
-                while !nodes[base + local].is_leaf() {
-                    local = self.step::<F32>(nodes, base + local, local, features);
-                }
-                *res += nodes[base + local].value;
-            }
-        }
-        self.finalize(&mut results[start..end]);
-    }
-
-    // -----------------------------------------------------------------------
-    // Test helpers
-    // -----------------------------------------------------------------------
-
-    #[cfg(any(test, feature = "test-helpers"))]
-    pub fn precompute_bruteforce(
-        &self,
-        varying_cols: &[[f64; 32]; 64],
-        n_rows: usize,
-        f32_mode: bool,
-    ) -> Vec<u32> {
-        assert!(n_rows <= 32, "test helpers take at most 32 rows");
-        let mut out = vec![0u32; self.varying_predicates.len()];
-        for (i, pred) in self.varying_predicates.iter().enumerate() {
-            let f = pred.feature() as usize;
-            let col = &varying_cols[f];
-            let mut left_mask = 0u32;
-            for r in 0..n_rows {
-                // SAFETY: n_rows <= 32, the column length, as asserted above.
-                let val = unsafe { *col.get_unchecked(r) };
-                let goes_left = if f32_mode {
-                    pred.goes_left::<true>(val, &self.bitsets)
-                } else {
-                    pred.goes_left::<false>(val, &self.bitsets)
-                };
-                if goes_left {
-                    left_mask |= 1 << r;
-                }
-            }
-            out[i] = left_mask;
-        }
-        out
-    }
-
-    #[cfg(any(test, feature = "test-helpers"))]
-    pub fn precompute_sweep(
-        &self,
-        varying_cols: &[[f64; 32]; 64],
-        n_rows: usize,
-        f32_mode: bool,
-    ) -> Vec<u32> {
-        let rows = rows_from_columns(varying_cols, n_rows, self.config.n_features);
-        let mut out = vec![0u32; self.varying_predicates.len()];
-        let (mut column, mut order) = (vec![0.0; n_rows], vec![(0.0, 0); n_rows]);
-        if f32_mode {
-            self.precompute_varying_masks::<true, u32>(&rows, &mut column, &mut order, &mut out);
-        } else {
-            self.precompute_varying_masks::<false, u32>(&rows, &mut column, &mut order, &mut out);
-        }
-        out
     }
 }

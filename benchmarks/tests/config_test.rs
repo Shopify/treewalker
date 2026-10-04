@@ -1,4 +1,4 @@
-use treewalker_gbdt::config::WalkerConfig;
+use treewalker_gbdt::WalkerConfig;
 
 fn test_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {

@@ -1,8 +1,8 @@
 //! Work counters of the counted predict path.
 
-/// Node visit counters for algorithmic analysis.
-#[derive(Clone, Copy, Default)]
-pub struct PredictStats {
+/// Work done by one or more counted predictions, summed over their pieces.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WorkCounters {
     pub constant_steps: u64,
     pub varying_splits: u64,
     pub unsplit_skips: u64,
@@ -12,7 +12,7 @@ pub struct PredictStats {
     pub precompute_row_evals: u64,
 }
 
-impl std::fmt::Display for PredictStats {
+impl std::fmt::Display for WorkCounters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -28,7 +28,7 @@ impl std::fmt::Display for PredictStats {
     }
 }
 
-impl std::ops::AddAssign for PredictStats {
+impl std::ops::AddAssign for WorkCounters {
     fn add_assign(&mut self, rhs: Self) {
         self.constant_steps += rhs.constant_steps;
         self.varying_splits += rhs.varying_splits;
