@@ -1,25 +1,83 @@
-use treewalker_gbdt::ParseConfig;
+use std::path::{Path, PathBuf};
+
 use treewalker_gbdt::config::WalkerConfig;
 use treewalker_gbdt::forest::Forest;
+use treewalker_gbdt::{LoadError, ParseConfig};
 
-fn test_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
+fn test_dir() -> PathBuf {
+    PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../paper/experiments/artifacts/expedia/nt50_md8"
+            "/../paper/experiments/artifacts/flchain/nt500_md8_h16"
         )
         .into()
     }))
 }
 
 /// Guard: skip tests that require artifacts not present on this machine.
-fn require_artifacts(dir: &std::path::Path) -> bool {
+fn require_artifacts(dir: &Path) -> bool {
     let needed = dir.join("walker_config.json");
     if !needed.exists() {
         eprintln!("Skipping: {} not found (run prepare.py)", needed.display());
         return false;
     }
     true
+}
+
+/// Number of `"threshold": ,` entries in a Treelite JSON export, found without the
+/// parser under test. Treelite writes an empty value for nonfinite thresholds, and
+/// the loader rejects such dumps rather than repairing them (docs/treelite-loading.md).
+fn empty_thresholds(path: &Path) -> usize {
+    const KEY: &[u8] = b"\"threshold\":";
+    let bytes = std::fs::read(path).unwrap();
+    (0..bytes.len().saturating_sub(KEY.len()))
+        .filter(|&i| bytes[i..].starts_with(KEY))
+        .filter(|&i| {
+            bytes[i + KEY.len()..]
+                .iter()
+                .find(|b| !b.is_ascii_whitespace())
+                .is_some_and(|&b| b == b',' || b == b'}')
+        })
+        .count()
+}
+
+/// Load the cell's LightGBM JSON export, or `None` if the export is missing or has
+/// empty thresholds. Every other load error fails the test.
+fn load_json(dir: &Path, parse: &ParseConfig) -> Option<Forest> {
+    let model = dir.join("lightgbm/model_treelite.json");
+    if !model.exists() {
+        eprintln!("Skipping: {} not found (run prepare.py)", model.display());
+        return None;
+    }
+    match Forest::try_load_with_config(&model, dir.join("walker_config.json"), parse) {
+        Ok(forest) => Some(forest),
+        Err(e) => {
+            let empty = empty_thresholds(&model);
+            assert!(
+                empty > 0 && matches!(&e, LoadError::MalformedModel(m) if m.starts_with("JSON: ")),
+                "{}: {e}",
+                model.display()
+            );
+            eprintln!(
+                "Skipping: {} has {empty} empty thresholds ({e})",
+                model.display()
+            );
+            None
+        }
+    }
+}
+
+/// A five-field grouping configuration under the test's own temporary directory.
+fn temp_config(test: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(test);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("walker_config.json");
+    std::fs::write(
+        &path,
+        r#"{"n_features": 1, "max_group_width": 1, "varying_features": [], "mono_inc_features": [], "mono_dec_features": []}"#,
+    )
+    .unwrap();
+    path
 }
 
 #[test]
@@ -29,10 +87,9 @@ fn test_parse_model_basic() {
         return;
     }
 
-    let forest = Forest::load(
-        dir.join("lightgbm/model_treelite.json"),
-        dir.join("walker_config.json"),
-    );
+    let Some(forest) = load_json(&dir, &ParseConfig::default()) else {
+        return;
+    };
     assert!(!forest.trees().is_empty(), "should parse at least one tree");
 
     let t0 = &forest.trees()[0];
@@ -60,14 +117,10 @@ fn test_tree_order_is_deterministic() {
         return;
     }
 
-    let forest_a = Forest::load(
-        dir.join("lightgbm/model_treelite.json"),
-        dir.join("walker_config.json"),
-    );
-    let forest_b = Forest::load(
-        dir.join("lightgbm/model_treelite.json"),
-        dir.join("walker_config.json"),
-    );
+    let Some(forest_a) = load_json(&dir, &ParseConfig::default()) else {
+        return;
+    };
+    let forest_b = load_json(&dir, &ParseConfig::default()).unwrap();
 
     assert_eq!(forest_a.trees().len(), forest_b.trees().len());
     for (a, b) in forest_a.trees().iter().zip(forest_b.trees()) {
@@ -85,18 +138,17 @@ fn test_tree_ordering_changes_order_but_not_output() {
     }
 
     let config = WalkerConfig::from_file(dir.join("walker_config.json"));
-    let mut forest_ordered = Forest::load(
-        dir.join("lightgbm/model_treelite.json"),
-        dir.join("walker_config.json"),
-    );
-    let mut forest_original = Forest::load_with_config(
-        dir.join("lightgbm/model_treelite.json"),
-        dir.join("walker_config.json"),
+    let Some(mut forest_ordered) = load_json(&dir, &ParseConfig::default()) else {
+        return;
+    };
+    let mut forest_original = load_json(
+        &dir,
         &ParseConfig {
             disable_tree_ordering: true,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
 
     assert_eq!(forest_ordered.trees().len(), forest_original.trees().len());
 
@@ -138,10 +190,9 @@ fn test_lightgbm_json_matches_native() {
         return;
     }
 
-    let mut forest = Forest::load(
-        dir.join("lightgbm/model_treelite.json"),
-        dir.join("walker_config.json"),
-    );
+    let Some(mut forest) = load_json(&dir, &ParseConfig::default()) else {
+        return;
+    };
     let preds_path = dir.join("lightgbm/predictions.npy");
     if !preds_path.exists() {
         eprintln!("Skipping: {} not found", preds_path.display());
@@ -179,27 +230,24 @@ fn test_lightgbm_json_matches_native() {
 #[test]
 #[should_panic(expected = "must end in .bin or .json")]
 fn test_reject_non_json() {
-    let dir = test_dir();
-    Forest::load("model.csv", dir.join("walker_config.json"));
+    Forest::load("model.csv", temp_config("reject_non_json"));
 }
 
 #[test]
 #[should_panic(expected = "unknown JSON field")]
 fn test_reject_unknown_json_schema() {
-    let dir = test_dir();
-    if !require_artifacts(&dir) {
-        return;
-    }
-    std::fs::write("/tmp/bad_model.json", r#"{"foo": "bar"}"#).unwrap();
-    Forest::load("/tmp/bad_model.json", dir.join("walker_config.json"));
+    let config = temp_config("reject_unknown_json_schema");
+    let model = config.with_file_name("bad_model.json");
+    std::fs::write(&model, r#"{"foo": "bar"}"#).unwrap();
+    Forest::load(&model, &config);
 }
 
-fn load_test_bin(path: &std::path::Path) -> (Vec<f64>, usize) {
+fn load_test_bin(path: &Path) -> (Vec<f64>, usize) {
     let (data, n_rows, _) = treewalker_bench::load_raw_f64(path);
     (data, n_rows)
 }
 
-fn load_group_offsets_if_present(dir: &std::path::Path) -> Option<Vec<usize>> {
+fn load_group_offsets_if_present(dir: &Path) -> Option<Vec<usize>> {
     let path = dir.join("group_offsets.bin");
     if !path.exists() {
         return None;
