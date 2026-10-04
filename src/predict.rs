@@ -70,16 +70,19 @@ pub(crate) enum Workspace {
         masks: Vec<u32>,
         varying_cols: Box<[[f64; 32]; 64]>,
         prefix_starts: Vec<u16>,
+        diff: Vec<i128>,
     },
     G64 {
         masks: Vec<u64>,
         varying_cols: Box<[[f64; 64]; 64]>,
         prefix_starts: Vec<u16>,
+        diff: Vec<i128>,
     },
     G128 {
         masks: Vec<u128>,
         varying_cols: Box<[[f64; 128]; 64]>,
         prefix_starts: Vec<u16>,
+        diff: Vec<i128>,
     },
 }
 
@@ -90,6 +93,10 @@ struct EvalCtx<'a, M: RowMask, const G: usize> {
     pred_left_masks: &'a [M],
     results: &'a mut [f64],
     start: usize,
+    /// Exact sums: leaves add `value * 2^scale` over runs of rows into this
+    /// difference array (one entry per row plus one).
+    scale: Option<i32>,
+    diff: &'a mut [i128],
     stats: Option<PredictStats>,
     ablation: AblationMode,
     /// The group's rows, row-major, `n_features` values per row.
@@ -169,18 +176,21 @@ impl Forest {
                     masks: vec![0u32; np],
                     varying_cols: Box::new([[0.0; 32]; 64]),
                     prefix_starts: vec![0u16; nt],
+                    diff: vec![0i128; 33],
                 }
             } else if self.config.max_group_width <= 64 {
                 Workspace::G64 {
                     masks: vec![0u64; np],
                     varying_cols: vec![[0.0; 64]; 64].into_boxed_slice().try_into().unwrap(),
                     prefix_starts: vec![0u16; nt],
+                    diff: vec![0i128; 65],
                 }
             } else {
                 Workspace::G128 {
                     masks: vec![0u128; np],
                     varying_cols: vec![[0.0; 128]; 64].into_boxed_slice().try_into().unwrap(),
                     prefix_starts: vec![0u16; nt],
+                    diff: vec![0i128; 129],
                 }
             };
             self.workspace = Some(ws);
@@ -251,6 +261,7 @@ impl Forest {
                     masks,
                     varying_cols,
                     prefix_starts,
+                    diff,
                 },
             ) => self.predict_core::<false, u32, 32, STATS>(
                 data,
@@ -260,6 +271,7 @@ impl Forest {
                 masks,
                 varying_cols,
                 prefix_starts,
+                diff,
                 ablation,
                 stats,
             ),
@@ -269,6 +281,7 @@ impl Forest {
                     masks,
                     varying_cols,
                     prefix_starts,
+                    diff,
                 },
             ) => self.predict_core::<false, u64, 64, STATS>(
                 data,
@@ -278,6 +291,7 @@ impl Forest {
                 masks,
                 varying_cols,
                 prefix_starts,
+                diff,
                 ablation,
                 stats,
             ),
@@ -287,6 +301,7 @@ impl Forest {
                     masks,
                     varying_cols,
                     prefix_starts,
+                    diff,
                 },
             ) => self.predict_core::<false, u128, 128, STATS>(
                 data,
@@ -296,6 +311,7 @@ impl Forest {
                 masks,
                 varying_cols,
                 prefix_starts,
+                diff,
                 ablation,
                 stats,
             ),
@@ -305,6 +321,7 @@ impl Forest {
                     masks,
                     varying_cols,
                     prefix_starts,
+                    diff,
                 },
             ) => self.predict_core::<true, u32, 32, STATS>(
                 data,
@@ -314,6 +331,7 @@ impl Forest {
                 masks,
                 varying_cols,
                 prefix_starts,
+                diff,
                 ablation,
                 stats,
             ),
@@ -323,6 +341,7 @@ impl Forest {
                     masks,
                     varying_cols,
                     prefix_starts,
+                    diff,
                 },
             ) => self.predict_core::<true, u64, 64, STATS>(
                 data,
@@ -332,6 +351,7 @@ impl Forest {
                 masks,
                 varying_cols,
                 prefix_starts,
+                diff,
                 ablation,
                 stats,
             ),
@@ -341,6 +361,7 @@ impl Forest {
                     masks,
                     varying_cols,
                     prefix_starts,
+                    diff,
                 },
             ) => self.predict_core::<true, u128, 128, STATS>(
                 data,
@@ -350,6 +371,7 @@ impl Forest {
                 masks,
                 varying_cols,
                 prefix_starts,
+                diff,
                 ablation,
                 stats,
             ),
@@ -372,6 +394,7 @@ impl Forest {
         masks: &mut [M],
         varying_cols: &mut [[f64; G]; 64],
         prefix_starts: &mut [u16],
+        diff: &mut [i128],
         ablation: AblationMode,
         stats: Option<PredictStats>,
     ) -> Option<PredictStats> {
@@ -410,7 +433,10 @@ impl Forest {
             &[]
         };
 
-        results[start..end].fill(0.0);
+        let scale = self.fixed_scale;
+        if scale.is_none() {
+            results[start..end].fill(0.0);
+        }
         let all_mask: M = M::from_width(n);
 
         let mut ctx = EvalCtx::<M, G> {
@@ -419,6 +445,8 @@ impl Forest {
             pred_left_masks,
             results,
             start,
+            scale,
+            diff,
             stats: if STATS {
                 let precompute_evals = if use_precompute {
                     let n_u64 = n as u64;
@@ -469,6 +497,14 @@ impl Forest {
             self.partial_eval::<F32, M, G, STATS>(&mut ctx, start_idx, all_mask);
         }
 
+        if let Some(e) = scale {
+            let mut acc = 0i128;
+            for (out, &d) in ctx.results[start..end].iter_mut().zip(&ctx.diff[..n]) {
+                acc += d;
+                *out = crate::exact::to_f64(acc, e);
+            }
+            ctx.diff[..=n].fill(0);
+        }
         self.finalize(&mut ctx.results[start..end]);
         ctx.stats
     }
@@ -611,15 +647,20 @@ impl Forest {
                 if STATS && let Some(ref mut s) = ctx.stats {
                     s.leaf_hits += 1;
                 }
-                let val = node.value;
-                let start = ctx.start;
-                let mut m = row_mask;
-                while !m.is_zero() {
-                    let r = m.trailing_zeros() as usize;
-                    unsafe {
-                        *ctx.results.get_unchecked_mut(start + r) += val;
-                    }
-                    m = m.clear_lowest();
+                if let Some(e) = ctx.scale {
+                    // diff has n + 1 entries; runs lie within rows 0..n.
+                    let x = crate::exact::to_fixed(node.value, e);
+                    let diff = &mut *ctx.diff;
+                    row_mask
+                        .run_starts()
+                        .for_each_bit(|a| unsafe { *diff.get_unchecked_mut(a) += x });
+                    row_mask
+                        .run_ends()
+                        .for_each_bit(|b| unsafe { *diff.get_unchecked_mut(b + 1) -= x });
+                } else {
+                    let val = node.value;
+                    let results = &mut ctx.results[ctx.start..];
+                    row_mask.for_each_bit(|r| unsafe { *results.get_unchecked_mut(r) += val });
                 }
                 return;
             }
@@ -1139,6 +1180,7 @@ mod tests {
             threshold_type: ThresholdType::F64,
             prefix_groups: Vec::new(),
             prefix_depth: 0,
+            fixed_scale: None,
             workspace: None,
         }
     }

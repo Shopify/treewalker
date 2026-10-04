@@ -15,8 +15,10 @@ const TOL_F64: f64 = 1e-14;
 /// native XGBoost (f32 sum). Split decisions are identical (f32 comparison).
 const TOL_F32: f64 = 1e-5;
 
-/// Partial eval vs full walk: must be bitwise identical (same code path, same precision).
-const TOL_EXACT: f64 = 1e-15;
+/// Partial eval vs full walk. `predict` returns the correctly rounded sum of the leaf
+/// values; the full walk adds them in f64 in tree order, so the two differ by the full
+/// walk's rounding: the same accumulation noise as the GTIL comparison.
+const TOL_FULL_WALK: f64 = TOL_F64;
 
 /// Current importer bounds JSON memory; larger models use streaming binary.
 const SIMD_JSON_MAX_BYTES: u64 = 64 * 1024 * 1024;
@@ -223,6 +225,42 @@ fn max_diff(a: &[f64], b: &[f64]) -> f64 {
         .fold(0.0f64, f64::max)
 }
 
+/// Whether every group's declared monotonic features are monotonic (ignoring NaN).
+/// The tiled chunked-G cells repeat a 16-step panel inside each group, so they break
+/// this caller contract on purpose.
+fn honors_monotonic_contract(
+    config: &WalkerConfig,
+    data: &[f64],
+    n_rows: usize,
+    offsets: Option<&[usize]>,
+) -> bool {
+    let nf = config.n_features;
+    let mut ok = true;
+    for_each_group(config.max_group_width, n_rows, offsets, |s, e| {
+        for f in (0..nf).filter(|&f| config.is_mono_inc(f) || config.is_mono_dec(f)) {
+            let values: Vec<f64> = (s..e)
+                .map(|r| data[r * nf + f])
+                .filter(|v| !v.is_nan())
+                .collect();
+            ok &= values.windows(2).all(|w| {
+                if config.is_mono_inc(f) {
+                    w[0] <= w[1]
+                } else {
+                    w[0] >= w[1]
+                }
+            });
+        }
+    });
+    ok
+}
+
+fn assert_same_bits(actual: &[f64], expected: &[f64], label: &str) {
+    assert_eq!(actual.len(), expected.len(), "{label}: length");
+    if let Some(r) = (0..actual.len()).find(|&r| actual[r].to_bits() != expected[r].to_bits()) {
+        panic!("{label}: row {r}: {} != {}", actual[r], expected[r]);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Core correctness — runs on EVERY artifact
 // ---------------------------------------------------------------------------
@@ -267,7 +305,7 @@ fn test_partial_matches_full() {
 
         let d = max_diff(&partial, &full);
         eprintln!("{}: partial_vs_full={d:.2e}", cfg.label);
-        assert!(d < TOL_EXACT, "{} partial vs full: {d:.2e}", cfg.label);
+        assert!(d < TOL_FULL_WALK, "{} partial vs full: {d:.2e}", cfg.label);
     }
 }
 
@@ -314,7 +352,7 @@ fn assert_partial_matches_full_on_obs(forest: &mut Forest, data: &[f64], obs: us
 
     let d = max_diff(&full[start..end], &partial[start..end]);
     assert!(
-        d < TOL_EXACT,
+        d < TOL_FULL_WALK,
         "Partial vs full max_diff={d:.2e} on observation {obs}"
     );
 }
@@ -442,17 +480,40 @@ fn test_ablation_all_configs() {
         ),
     ];
 
+    // Every mode reaches the same leaves with the same rows, so predictions are
+    // bitwise identical to the default.
     for cfg in &all_configs() {
+        let (data, n_rows) = load_test_data(&cfg.param_dir);
+        let offsets = cfg.group_offsets.as_deref();
+        let reference = predict_all(
+            &mut load_forest(&cfg.param_dir, cfg.framework),
+            &data,
+            n_rows,
+            offsets,
+        );
+        let monotonic = {
+            let forest = load_forest(&cfg.param_dir, cfg.framework);
+            honors_monotonic_contract(&forest.config, &data, n_rows, offsets)
+        };
         for &(mode, ablation) in ablations {
+            // Without precompute, monotonic features are partitioned by prefix/suffix
+            // scans that are only correct when the data honor the declared contract.
+            let scans = ablation.disable_varying_precompute && !ablation.disable_monotonic;
+            if scans && !monotonic {
+                eprintln!(
+                    "{}/{mode}: skipped, data break the monotonic contract",
+                    cfg.label
+                );
+                continue;
+            }
             let mut forest = load_forest(&cfg.param_dir, cfg.framework);
             forest.config.ablation = ablation;
-            let (data, n_rows) = load_test_data(&cfg.param_dir);
-
-            let partial = predict_all(&mut forest, &data, n_rows, cfg.group_offsets.as_deref());
-            let full = predict_full_all(&forest, &data, n_rows, cfg.group_offsets.as_deref());
-
-            let d = max_diff(&partial, &full);
-            assert!(d < TOL_EXACT, "{}/{mode} max_diff={d:.2e}", cfg.label);
+            let mut ablated = vec![0.0f64; n_rows];
+            let width = forest.config.max_group_width;
+            for_each_group(width, n_rows, offsets, |s, e| {
+                forest.predict_with_stats(&data, &mut ablated, s, e);
+            });
+            assert_same_bits(&ablated, &reference, &format!("{}/{mode}", cfg.label));
         }
         eprintln!("{}: all ablations ok", cfg.label);
     }
@@ -498,18 +559,27 @@ fn test_parse_configs() {
         // disable_predicate_dedup tested separately — large models exceed u16 limit.
     ];
 
+    // With exact sums, tree order and node layout cannot change a prediction.
     for cfg in &all_configs() {
+        let (data, n_rows) = load_test_data(&cfg.param_dir);
+        let offsets = cfg.group_offsets.as_deref();
+        let mut reference_forest = load_forest(&cfg.param_dir, cfg.framework);
+        let reference = predict_all(&mut reference_forest, &data, n_rows, offsets);
         for &(mode, ref pc) in parse_configs {
             let mut forest = Forest::load_with_config(
                 model_file(&cfg.param_dir, cfg.framework),
                 cfg.param_dir.join("walker_config.json"),
                 pc,
             );
-            let (data, n_rows) = load_test_data(&cfg.param_dir);
-            let partial = predict_all(&mut forest, &data, n_rows, cfg.group_offsets.as_deref());
-            let full = predict_full_all(&forest, &data, n_rows, cfg.group_offsets.as_deref());
-            let d = max_diff(&partial, &full);
-            assert!(d < TOL_EXACT, "{}/{mode} max_diff={d:.2e}", cfg.label);
+            let partial = predict_all(&mut forest, &data, n_rows, offsets);
+            let label = format!("{}/{mode}", cfg.label);
+            if reference_forest.exact_sums() {
+                assert_same_bits(&partial, &reference, &label);
+            } else {
+                let full = predict_full_all(&forest, &data, n_rows, offsets);
+                let d = max_diff(&partial, &full);
+                assert!(d < TOL_FULL_WALK, "{label} max_diff={d:.2e}");
+            }
         }
         eprintln!("{}: all parse configs ok", cfg.label);
     }
@@ -626,7 +696,7 @@ fn test_cat_out_of_range_partial_matches_full() {
     let d = max_diff(&full_results[start..end], &partial_results[start..end]);
     eprintln!("{}: cat_out_of_range partial_vs_full={d:.2e}", cfg.label);
     assert!(
-        d < TOL_EXACT,
+        d < TOL_FULL_WALK,
         "{}: cat out-of-range partial vs full max_diff={d:.2e}",
         cfg.label
     );
@@ -679,7 +749,7 @@ fn test_width_32_boundary() {
         nf,
     );
     assert!(
-        d < TOL_EXACT,
+        d < TOL_FULL_WALK,
         "Width-32 boundary: partial vs full max_diff={d:.2e} — u32 mask arithmetic may be wrong"
     );
 
@@ -688,7 +758,7 @@ fn test_width_32_boundary() {
     forest.predict(&data, &mut ws_results, 0, 32);
     let d2 = max_diff(&full_results, &ws_results);
     assert!(
-        d2 < TOL_EXACT,
+        d2 < TOL_FULL_WALK,
         "Width-32 boundary (workspace): max_diff={d2:.2e}"
     );
 }
@@ -881,7 +951,7 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
         first_cfg.framework,
     );
     assert!(
-        diff < TOL_EXACT,
+        diff < TOL_FULL_WALK,
         "wide_group(width={target_width}): partial eval diverges from full walk: max_diff={diff:.2e}"
     );
 }

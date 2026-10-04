@@ -420,6 +420,9 @@ pub struct Forest {
     pub(crate) prefix_groups: Vec<PrefixGroup>,
     /// Depth of the shared prefix (K). 0 when prefix grouping is disabled.
     pub(crate) prefix_depth: usize,
+    /// Fixed-point scale for exact leaf sums ([`crate::exact::scale`]); `None`
+    /// when the leaf values cannot be summed exactly and prediction adds in `f64`.
+    pub(crate) fixed_scale: Option<i32>,
     /// Reusable scratch space for partial evaluation. Lazily initialized on first
     /// `predict` call. Private — callers never touch this.
     pub(crate) workspace: Option<crate::predict::Workspace>,
@@ -519,6 +522,11 @@ impl Forest {
             (Vec::new(), 0)
         };
 
+        let fixed_scale = crate::exact::scale(
+            nodes.iter().filter(|n| n.is_leaf()).map(|n| n.value),
+            trees.len(),
+        );
+
         #[cfg(target_os = "linux")]
         unsafe {
             libc::malloc_trim(0);
@@ -536,6 +544,7 @@ impl Forest {
             threshold_type,
             prefix_groups,
             prefix_depth,
+            fixed_scale,
             workspace: None,
         })
     }
@@ -568,6 +577,16 @@ impl Forest {
     #[must_use]
     pub const fn threshold_type(&self) -> ThresholdType {
         self.threshold_type
+    }
+
+    /// Whether `predict` sums leaf values exactly and rounds once, so predictions are
+    /// the `f64` nearest to the true sum whatever the tree order. False only if a leaf
+    /// is not finite or the leaf exponents span too wide a range for a 126-bit fixed
+    /// point; prediction then adds in `f64` in tree order.
+    #[inline]
+    #[must_use]
+    pub const fn exact_sums(&self) -> bool {
+        self.fixed_scale.is_some()
     }
 
     /// Test if `category` belongs to a categorical node's split set.

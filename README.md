@@ -201,9 +201,12 @@ only on the released CSVs.
 
 ## Correctness
 
-LightGBM (f64) predictions match treelite GTIL within 1e-14; XGBoost (f32)
-predictions match native XGBoost within 1e-5 (`benchmarks/tests/correctness.rs`).
-Partial evaluation and the full walk agree within 1e-15.
+Predictions are the correctly rounded sums of the leaf values: leaves are added as
+exact fixed-point integers and rounded once, so tree order, layout and ablation
+modes cannot change a prediction. LightGBM (f64) predictions match treelite GTIL
+within 1e-14; XGBoost (f32) predictions match native XGBoost within 1e-5
+(`benchmarks/tests/correctness.rs`). The full walk adds leaves in f64 in tree order
+and agrees within 1e-14.
 
 ## Citation
 

@@ -45,6 +45,12 @@ struct Case {
 
 /// Groups as in the import tests: blocks of 128 rows with a constant second feature,
 /// split into chunks of the configured width.
+fn assert_same_bits(actual: &[f64], expected: &[f64], label: &str) {
+    if let Some(r) = (0..actual.len()).find(|&r| actual[r].to_bits() != expected[r].to_bits()) {
+        panic!("{label}: row {r}: {} != {}", actual[r], expected[r]);
+    }
+}
+
 fn groups(rows: usize, width: usize) -> Vec<(usize, usize)> {
     (0..rows)
         .step_by(128)
@@ -67,9 +73,13 @@ fn experimental_kernels_match_predict_on_import_fixtures() {
         for width in [32, 64, 128] {
             let gs = groups(rows, width);
             let mut base = load(&name, width);
+            // predict() sums leaves exactly; the f64-accumulating kernels add them in
+            // tree order, as the full walk does.
+            let mut exact = vec![0.0; rows];
             let mut expected = vec![0.0; rows];
             for &(s, e) in &gs {
-                base.predict(&data, &mut expected, s, e);
+                base.predict(&data, &mut exact, s, e);
+                base.predict_full(&data, &mut expected, s, e);
             }
 
             let mut hinted = load(&name, width);
@@ -232,15 +242,17 @@ fn experimental_kernels_match_predict_on_import_fixtures() {
                     for &(s, e) in &gs {
                         flipped.predict_opt(&mut ws, &data, &mut out, s, e, &flags);
                     }
+                    assert_same_bits(&out, &exact, &format!("{name} width {width} {label}"));
                     checked.push((label, out));
                 }
                 // Run lists: groups whose varying feature is not monotone/unimodal/valley
                 // shaped are rejected and left untouched; accepted ones must agree.
                 let mut rws = RunWorkspace::new(&flipped, width);
-                let mut out = expected.clone();
+                let mut out = exact.clone();
                 for &(s, e2) in &gs {
                     let _ = flipped.predict_runs(&mut rws, &data, &mut out, s, e2, e);
                 }
+                assert_same_bits(&out, &exact, &format!("{name} width {width} runs"));
                 checked.push(("runs", out));
             }
             let mut ws = OptWorkspace::new(&flipped);
@@ -300,10 +312,10 @@ fn inline_categorical_rules_match_predict() {
             )
             .unwrap()
         };
-        let mut base = load();
+        let base = load();
         let mut expected = vec![0.0; rows];
         for s in (0..rows).step_by(128) {
-            base.predict(&data, &mut expected, s, s + 128);
+            base.predict_full(&data, &mut expected, s, s + 128);
         }
         let mut hinted = load();
         hinted.add_child_hints();

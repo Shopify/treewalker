@@ -100,13 +100,22 @@ output   = 1 / (1 + exp(-alpha * margin))    # sigmoid
 The base score is stored on the forest, rather than distributed across leaves.
 This can change the last few rounding bits from older TreeWalker versions.
 
+`predict` and `predict_with_stats` compute `tree_sum` exactly: every leaf value is
+an integer multiple of 2^-e for one scale e per model, the scaled leaves add as
+128-bit integers, and the sum is rounded to float64 once. The result is the float64
+nearest to the true sum and does not depend on tree order, node layout or group
+width. This needs the scaled sums to fit in 126 bits; a model with a non-finite leaf
+or leaf exponents too far apart adds in float64 in tree order instead, which
+`Forest::exact_sums` reports. `predict_full` always adds in float64 in tree order,
+so it can differ from `predict` in the last bits.
+
 Float64 numerical inputs compare in float64. `<` thresholds are normalized to
 `<= next_down(threshold)`, including signed zero and positive infinity. Float64
 `< -infinity` and all NaN thresholds are explicitly rejected because this
 normalization cannot represent them exactly. Float64 `<= -infinity` is valid.
 Float32 models round numerical inputs and thresholds to float32 before `<`;
-categorical inputs are also rounded to float32. Leaves are promoted and summed
-in float64, so native XGBoost bitwise parity is not promised. Use float32 input
+categorical inputs are also rounded to float32. Leaves are promoted to float64
+and summed as above, so native XGBoost bitwise parity is not promised. Use float32 input
 to Treelite GTIL when testing this policy; GTIL with float64 input can select a
 different branch near a float32 threshold.
 

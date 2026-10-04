@@ -57,6 +57,17 @@ pub trait RowMask:
     #[must_use]
     fn set_bit(self, r: usize) -> Self;
 
+    /// Bits that start a run of set bits: bit `r` set and bit `r - 1` clear.
+    #[must_use]
+    fn run_starts(self) -> Self;
+
+    /// Bits that end a run of set bits: bit `r` set and bit `r + 1` clear.
+    #[must_use]
+    fn run_ends(self) -> Self;
+
+    /// Call `f` with the index of every set bit, in increasing order.
+    fn for_each_bit(self, f: impl FnMut(usize));
+
     /// Zero-extend to u128 (used by the experimental leaf-accumulation kernels).
     #[cfg(feature = "experimental")]
     fn to_u128(self) -> u128;
@@ -98,6 +109,22 @@ macro_rules! impl_row_mask {
             fn set_bit(self, r: usize) -> Self {
                 debug_assert!(r < Self::WIDTH);
                 self | (1 << r)
+            }
+            #[inline]
+            fn run_starts(self) -> Self {
+                self & !(self << 1)
+            }
+            #[inline]
+            fn run_ends(self) -> Self {
+                self & !(self >> 1)
+            }
+            #[inline]
+            fn for_each_bit(self, mut f: impl FnMut(usize)) {
+                let mut m = self;
+                while m != 0 {
+                    f(m.trailing_zeros() as usize);
+                    m &= m.wrapping_sub(1);
+                }
             }
             #[cfg(feature = "experimental")]
             #[inline]
@@ -148,6 +175,21 @@ mod tests {
         // from_width(WIDTH) = all bits set
         let full = M::from_width(M::WIDTH);
         assert_eq!(full.count_ones(), M::WIDTH as u32);
+
+        // Runs: rows 0-1, 3, 5-(WIDTH-1).
+        let runs = M::from_width(2) | M::ZERO.set_bit(3) | (full & !M::from_width(5));
+        assert_eq!(bits(runs.run_starts()), [0, 3, 5]);
+        assert_eq!(bits(runs.run_ends()), [1, 3, M::WIDTH - 1]);
+        assert_eq!(bits(full.run_starts()), [0]);
+        assert_eq!(bits(full.run_ends()), [M::WIDTH - 1]);
+        assert!(M::ZERO.run_starts().is_zero() && M::ZERO.run_ends().is_zero());
+        assert_eq!(bits(b), [2, 5]);
+    }
+
+    fn bits<M: RowMask>(m: M) -> Vec<usize> {
+        let mut out = Vec::new();
+        m.for_each_bit(|r| out.push(r));
+        out
     }
 
     #[test]
