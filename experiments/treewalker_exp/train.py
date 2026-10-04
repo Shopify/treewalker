@@ -15,6 +15,12 @@ NATIVE_NAME = {"lightgbm": "model_native.txt", "xgboost": "model_native.json"}
 LEARNING_RATE = 0.05
 TRAIN_SEED = 42
 
+# TreeWalker's import limits (src/parser/validation.rs, src/forest.rs).
+MAX_TREE_NODES = 32767  # the light-child index is an i16
+MAX_TOTAL_NODES = 32_000_000
+MAX_PREDICATES = 65535  # u16 ids 0..=65534; u16::MAX is the sentinel
+MAX_JSON_BYTES = 64 * 1024 * 1024  # the JSON loader's limit (src/parser/validation.rs)
+
 
 def library_versions(framework: str) -> dict[str, str]:
     """The versions that determine a model's bytes."""
@@ -105,13 +111,25 @@ def load_treelite(framework: str, native: Path) -> Any:
     return treelite.frontend.load_xgboost_model(str(native))
 
 
-def export_treelite(framework: str, native: Path, json_path: Path, bin_path: Path) -> Any:
+def export_treelite(
+    framework: str, native: Path, json_path: Path, bin_path: Path, json: bool = True
+) -> tuple[Any, int | None]:
+    """Write the binary export, which the runner and tl2cgen read, and the JSON
+    dump only when ``json`` asks for it and it fits the JSON loader's limit.
+    Returns the model and the dump's size, or None when it was not dumped."""
     from .formats import write_bytes
 
     tl = load_treelite(framework, native)
-    write_bytes(json_path, tl.dump_as_json().encode())
+    size = None
+    json_path.unlink(missing_ok=True)
+    if json:
+        dumped = tl.dump_as_json().encode()
+        size = len(dumped)
+        if size <= MAX_JSON_BYTES:
+            write_bytes(json_path, dumped)
+        del dumped
     write_bytes(bin_path, tl.serialize_bytes())
-    return tl
+    return tl, size
 
 
 class Reference:
@@ -154,3 +172,74 @@ def gtil(tl_model: Any, X: np.ndarray) -> np.ndarray:
     import treelite
 
     return treelite.gtil.predict(tl_model, X).flatten().astype(np.float64)
+
+
+def split_counts(framework: str, native: Path, n_features: int) -> np.ndarray:
+    """How many splits each feature has in the model."""
+    if framework == "lightgbm":
+        import lightgbm as lgb
+
+        counts = lgb.Booster(model_file=str(native)).feature_importance(importance_type="split")
+        return np.asarray(counts, dtype=np.int64)
+    import xgboost as xgb
+
+    bst = xgb.Booster()
+    bst.load_model(str(native))
+    names = bst.feature_names or [f"f{i}" for i in range(n_features)]
+    score = bst.get_score(importance_type="weight")
+    return np.array([score.get(n, 0) for n in names], dtype=np.int64)
+
+
+def structure(tl_model: Any) -> dict[str, Any]:
+    """Per-model counts behind TreeWalker's import limits."""
+    nodes = []
+    for i in range(tl_model.num_tree):
+        acc = tl_model.get_tree_accessor(i)
+        nodes.append(int(acc.get_field("num_nodes")[0]))
+    return {
+        "trees": tl_model.num_tree,
+        "total_nodes": int(sum(nodes)),
+        "max_tree_nodes": int(max(nodes)),
+    }
+
+
+def varying_predicates(tl_model: Any, varying: set[int]) -> int:
+    """An upper bound on the varying predicates the parser interns: numerical
+    splits on varying features, deduplicated by (feature, threshold bits,
+    default direction), plus every categorical split on one, since their
+    category sets are not compared. The parser's own count can be lower, so
+    this only warns; the runner's preflight loads the model and decides."""
+    var = np.array(sorted(varying), dtype=np.int32)
+    keys = []
+    n_cat = 0
+    for i in range(tl_model.num_tree):
+        acc = tl_model.get_tree_accessor(i)
+        split = acc.get_field("split_index")
+        node_type = acc.get_field("node_type")
+        on_varying = (acc.get_field("cleft") >= 0) & np.isin(split, var)
+        cat = on_varying & (node_type == 2)
+        n_cat += int(cat.sum())
+        num = on_varying & ~cat
+        k = np.zeros(int(num.sum()), dtype=[("f", "<i4"), ("t", "<u8"), ("d", "u1")])
+        k["f"] = split[num]
+        k["t"] = np.asarray(acc.get_field("threshold")[num], dtype=np.float64).view("<u8")
+        k["d"] = acc.get_field("default_left")[num]
+        keys.append(k)
+    return (len(np.unique(np.concatenate(keys))) if keys else 0) + n_cat
+
+
+def model_limits(s: dict[str, Any]) -> list[str]:
+    """Violations of TreeWalker's per-model import limits; empty when it loads.
+    The JSON size limit is not one: the runner loads the binary export."""
+    out = []
+    if s["max_tree_nodes"] > MAX_TREE_NODES:
+        out.append(f"a tree has {s['max_tree_nodes']} nodes; limit {MAX_TREE_NODES}")
+    if s["total_nodes"] > MAX_TOTAL_NODES:
+        out.append(f"{s['total_nodes']} nodes; pool limit {MAX_TOTAL_NODES}")
+    return out
+
+
+def predicate_warning(upper_bound: int) -> list[str]:
+    if upper_bound > MAX_PREDICATES:
+        return [f"up to {upper_bound} varying predicates; the parser accepts {MAX_PREDICATES}"]
+    return []

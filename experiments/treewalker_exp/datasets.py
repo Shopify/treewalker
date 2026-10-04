@@ -6,8 +6,11 @@ redistributed: ``fetch-expedia`` converts the user's Kaggle download, and
 ``check_expedia`` compares its content fingerprint with the file behind the
 paper.
 
-Every function here reproduces the released preparation exactly (the
-byte-identical check), so its arithmetic and row order are deliberate.
+Every function here reproduced the released preparation exactly at the
+package refactor (the byte-identical check), so its arithmetic and row order
+are deliberate. One change since is intended: ``split_expedia`` filters only
+on the search-level features, so cross-border searches, where
+``prop_country_id`` varies, stay in the pool.
 """
 
 import hashlib
@@ -318,7 +321,8 @@ def expand_train(
 # --- Expedia (ranking) -------------------------------------------------------------
 
 EXPEDIA_LABEL = "click_bool"
-EXPEDIA_CONSTANT = [
+# Feature columns, in the order the models are trained on.
+EXPEDIA_FEATURES = [
     "site_id",
     "visitor_location_country_id",
     "prop_country_id",
@@ -330,8 +334,6 @@ EXPEDIA_CONSTANT = [
     "srch_room_count",
     "srch_saturday_night_bool",
     "random_bool",
-]
-EXPEDIA_VARYING = [
     "prop_id",
     "prop_starrating",
     "prop_review_score",
@@ -343,7 +345,23 @@ EXPEDIA_VARYING = [
     "price_usd",
     "promotion_flag",
 ]
-EXPEDIA_FEATURES = EXPEDIA_CONSTANT + EXPEDIA_VARYING
+# Search-level features: one value per search, so constant across its
+# candidates. prop_country_id is a property attribute and varies: it is the
+# same for every candidate of 99.44% of searches, but 2,236 of the 399,344
+# searches with 2-128 candidates span countries.
+EXPEDIA_SESSION = [
+    "site_id",
+    "visitor_location_country_id",
+    "srch_destination_id",
+    "srch_length_of_stay",
+    "srch_booking_window",
+    "srch_adults_count",
+    "srch_children_count",
+    "srch_room_count",
+    "srch_saturday_night_bool",
+    "random_bool",
+]
+EXPEDIA_VARYING = [f for f in EXPEDIA_FEATURES if f not in EXPEDIA_SESSION]
 
 # Column order and dtypes of the parquet the paper was run on.
 EXPEDIA_SCHEMA: dict[str, pl.DataType] = {
@@ -434,7 +452,7 @@ class RankingSplit:
 
 
 def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) -> RankingSplit:
-    """Sessions of 2-128 candidates whose session features are constant,
+    """Sessions of 2-128 candidates whose search-level features are constant,
     subsampled to ``max_sessions`` and split by session."""
     if not paths.expedia.exists():
         raise FileNotFoundError(f"{paths.expedia} not found; run treewalker-exp fetch-expedia")
@@ -447,7 +465,7 @@ def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) 
     sizes = df.group_by("srch_id").agg(pl.len().alias("_n"))
     valid = sizes.filter((pl.col("_n") >= 2) & (pl.col("_n") <= 128))
     df_valid = df.join(valid.select("srch_id"), on="srch_id")
-    for col in EXPEDIA_CONSTANT:
+    for col in EXPEDIA_SESSION:
         varying = (
             df_valid.group_by("srch_id")
             .agg(pl.col(col).drop_nulls().n_unique().alias("_nuniq"))

@@ -25,7 +25,7 @@ found [under the neurips2026 tag](https://github.com/Shopify/treewalker/releases
 | `src/` | inference library and treelite model parser |
 | `experiments/benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
 | `experiments/treewalker_exp/` | `treewalker-exp`: dataset preparation, workloads, training, compiled baselines |
-| `experiments/grids.toml` | the benchmark suites and their grids |
+| `experiments/grids.toml` | the benchmark suites, resolved by `treewalker-exp` into execution manifests |
 | `experiments/scripts/` | figures, tables and the chunked-G run, on the released CSVs |
 | `experiments/data/` | released result CSVs and machine descriptions |
 | `infra/` | Terraform and VM startup script for the two GCE benchmark machines |
