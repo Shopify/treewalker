@@ -17,6 +17,7 @@ pub mod external;
 pub mod grid;
 mod system;
 pub mod timing;
+pub mod wide;
 
 pub use data::{load_group_offsets, load_raw_f64, try_load_raw_f64};
 pub use system::get_rss_kb;
