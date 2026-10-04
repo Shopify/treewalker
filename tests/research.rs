@@ -2,7 +2,7 @@
 //! and the stages compose to production's output.
 #![expect(clippy::float_cmp, reason = "exact hand-computable expectations")]
 use simd_json::{OwnedValue as Value, prelude::*};
-use treewalker_gbdt::research::{Ablation, Stages};
+use treewalker_gbdt::research::{Ablation, COUNTERS_VERSION, Stages};
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -182,6 +182,91 @@ fn counters_show_each_flag() {
     });
     assert_eq!(no_unsplit.unsplit_skips, 0);
     assert!(no_unsplit.recursive_calls > all_on.recursive_calls);
+}
+
+#[test]
+fn counters_count_actual_work() {
+    assert_eq!(COUNTERS_VERSION, 2);
+    let data = raw("data.bin");
+    let rows = &data[..256];
+    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
+    assert!(forest.exact_sums());
+    let count = |variant: Ablation, rows: &[f64]| {
+        let mut out = vec![0.0; rows.len() / 2];
+        forest
+            .research_predictor(variant)
+            .predict_group_counted(rows, &mut out)
+    };
+    // Exact sums write a run's two difference-array entries; f64 sums every row.
+    let one_row = count(Ablation::default(), &rows[..2]);
+    assert_eq!(one_row.leaf_adds, 2 * one_row.leaf_hits);
+    let f64_sums = Ablation {
+        disable_exact_sums: true,
+        ..Default::default()
+    };
+    let one_row = count(f64_sums, &rows[..2]);
+    assert_eq!(one_row.leaf_adds, one_row.leaf_hits);
+    assert!(count(f64_sums, rows).leaf_adds > count(Ablation::default(), rows).leaf_adds);
+    // The sweep reads each row once for the one varying feature, sorts and merges;
+    // the brute force evaluates every predicate on every row.
+    let sweep = count(Ablation::default(), rows);
+    assert_eq!(sweep.precompute_row_evals, 128);
+    assert!(sweep.precompute_sort_compares >= 127);
+    assert!(sweep.precompute_sweep_compares > 0);
+    let brute = count(
+        Ablation {
+            disable_predicate_sweep: true,
+            ..Default::default()
+        },
+        rows,
+    );
+    assert_eq!(brute.precompute_mask_writes, sweep.precompute_mask_writes);
+    assert_eq!(
+        brute.precompute_row_evals,
+        128 * brute.precompute_mask_writes
+    );
+    assert_eq!(
+        (
+            brute.precompute_sort_compares,
+            brute.precompute_sweep_compares
+        ),
+        (0, 0)
+    );
+    assert_eq!(brute.scan_row_evals, 0);
+    // Without precompute, the partitions count their own work instead.
+    let scans = count(
+        Ablation {
+            disable_varying_precompute: true,
+            ..Default::default()
+        },
+        rows,
+    );
+    assert_eq!(scans.precompute_row_evals + scans.precompute_mask_writes, 0);
+    assert!(scans.scan_row_evals > 0);
+    assert!(scans.scan_row_evals <= scans.partition_row_evals);
+    assert_eq!(scans.scan_missing_checks, scans.scan_row_evals);
+    assert!(scans.scan_compares <= scans.scan_row_evals);
+}
+
+#[test]
+fn walk_counters_count_empty_heavy_visits_without_unsplit() {
+    // Without the unsplit shortcut, a split whose rows all go light still walks its
+    // heavy side with no active row, so leaf_hits counts a leaf no row reaches. Only
+    // real rows write the accumulator: leaf_adds is unchanged.
+    let forest = load("identity.bin", &LoadOptions::default());
+    let count = |variant: Ablation| {
+        forest
+            .research_predictor(variant)
+            .predict_group_counted(&[2.0, 0.0], &mut [0.0])
+    };
+    let all_on = count(Ablation::default());
+    let no_unsplit = count(Ablation {
+        disable_unsplit: true,
+        ..Default::default()
+    });
+    assert_eq!((all_on.leaf_hits, all_on.leaf_adds), (2, 4));
+    assert_eq!((no_unsplit.leaf_hits, no_unsplit.leaf_adds), (3, 4));
+    assert!(no_unsplit.varying_splits >= all_on.varying_splits);
 }
 
 #[test]
