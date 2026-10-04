@@ -237,7 +237,11 @@ impl<const W: usize> RowMask for Bits<W> {
         debug_assert!(r < Self::WIDTH);
         self.0[r / 64] >> (r % 64) & 1 != 0
     }
-    #[inline]
+    #[expect(
+        clippy::inline_always,
+        reason = "keeps the production call path independent of the research builds"
+    )]
+    #[inline(always)]
     fn set_bit(mut self, r: usize) -> Self {
         debug_assert!(r < Self::WIDTH);
         self.0[r / 64] |= 1 << (r % 64);
