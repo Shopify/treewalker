@@ -6,9 +6,9 @@
 //! - `predict_with_stats` — benchmark path (runtime ablation + stats counters)
 //!
 //! The hot path is generic over `const F32: bool` (threshold comparison type),
-//! `M: RowMask` (u32/u64/u128), and `const G: usize` (group width). Ablation
-//! flags and stats collection are runtime checks — the branch predictor handles
-//! these perfectly since they're constant across all trees in one call.
+//! `M: RowMask` (u32/u64/u128), `const G: usize` (group width) and
+//! `const STATS: bool`. Stats counters and ablation flags exist only in the
+//! `predict_with_stats` instantiation (`STATS = true`); `predict` compiles them out.
 
 use crate::config::AblationMode;
 use crate::forest::{
@@ -92,7 +92,9 @@ struct EvalCtx<'a, M: RowMask, const G: usize> {
     start: usize,
     stats: Option<PredictStats>,
     ablation: AblationMode,
-    row_ptrs: [&'a [f64]; G],
+    /// The group's rows, row-major, `n_features` values per row.
+    rows: &'a [f64],
+    n_features: usize,
     varying_cols: &'a [[f64; G]; 64],
 }
 
@@ -377,19 +379,20 @@ impl Forest {
         debug_assert!(n <= G);
         let nf = self.config.n_features;
         let const_features = unsafe { data.get_unchecked(start * nf..(start + 1) * nf) };
-
-        let empty: &[f64] = &[];
-        let mut row_ptrs = [empty; G];
-        for (r, ptr) in row_ptrs.iter_mut().enumerate().take(n) {
-            *ptr = unsafe { data.get_unchecked((start + r) * nf..(start + r + 1) * nf) };
-        }
+        let rows = unsafe { data.get_unchecked(start * nf..end * nf) };
+        // `predict` runs every optimization; ablation exists only with STATS.
+        let ablation = if STATS {
+            ablation
+        } else {
+            AblationMode::default()
+        };
 
         // Populate varying columns.
         let mut vm = self.config.varying_mask;
         while vm != 0 {
             let f = vm.trailing_zeros() as usize;
-            for r in 0..n {
-                varying_cols[f][r] = row_ptrs[r][f];
+            for (r, row) in rows.chunks_exact(nf).enumerate() {
+                varying_cols[f][r] = row[f];
             }
             vm &= vm - 1;
         }
@@ -441,7 +444,8 @@ impl Forest {
                 None
             },
             ablation,
-            row_ptrs,
+            rows,
+            n_features: nf,
             varying_cols,
         };
 
@@ -568,7 +572,7 @@ impl Forest {
     }
 
     // -----------------------------------------------------------------------
-    // Partial eval — runtime ablation/stats, generic over F32/M/G only
+    // Partial eval — ablation and stats only when STATS
     // -----------------------------------------------------------------------
 
     fn partial_eval<const F32: bool, M: RowMask, const G: usize, const STATS: bool>(
@@ -582,9 +586,14 @@ impl Forest {
         }
         let nodes = self.nodes.as_slice();
         let base = ctx.base;
-        let use_precompute = !ctx.ablation.disable_varying_precompute;
-        let use_unsplit = !ctx.ablation.disable_unsplit;
-        let use_mono = !ctx.ablation.disable_monotonic || use_precompute;
+        let ablation = if STATS {
+            ctx.ablation
+        } else {
+            AblationMode::default()
+        };
+        let use_precompute = !ablation.disable_varying_precompute;
+        let use_unsplit = !ablation.disable_unsplit;
+        let use_mono = !ablation.disable_monotonic || use_precompute;
 
         loop {
             // Constant walk — single bit test per node.
@@ -628,7 +637,7 @@ impl Forest {
                 let feat = node.feature as usize;
                 let col = &ctx.varying_cols[feat][..];
                 let result = if node.is_categorical() {
-                    Self::partition_per_row::<F32, M>(self, node, &ctx.row_ptrs, row_mask)
+                    self.partition_per_row::<F32, M>(node, ctx.rows, ctx.n_features, row_mask)
                 } else if use_mono {
                     match node.varying_type() {
                         SPLIT_MONO_INC => Self::partition_mono_inc::<F32, M>(node, col, row_mask),
@@ -939,7 +948,8 @@ impl Forest {
     fn partition_per_row<const F32: bool, M: RowMask>(
         &self,
         node: &Node,
-        row_ptrs: &[&[f64]],
+        rows: &[f64],
+        n_features: usize,
         row_mask: M,
     ) -> (M, M) {
         let mut left = M::ZERO;
@@ -947,7 +957,7 @@ impl Forest {
         while !m.is_zero() {
             let r = m.trailing_zeros() as usize;
             m = m.clear_lowest();
-            if self.eval_split::<F32>(node, row_ptrs[r]) {
+            if self.eval_split::<F32>(node, &rows[r * n_features..(r + 1) * n_features]) {
                 left = left.set_bit(r);
             }
         }

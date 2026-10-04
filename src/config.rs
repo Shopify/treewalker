@@ -30,8 +30,8 @@ struct WalkerConfigFile {
 /// Ablation flags — disable individual optimizations for controlled experiments.
 ///
 /// Used by the paper's ablation study to measure each trick's contribution.
-/// Each flag becomes a const generic on `partial_eval` — the compiler monomorphizes
-/// a separate version per combination, eliminating all runtime ablation branches.
+/// Only [`Forest::predict_with_stats`](crate::Forest::predict_with_stats) reads the
+/// flags, at runtime; `predict` is compiled with every optimization on.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct AblationMode {
     /// Treat all monotonic varying features as non-monotonic (disable early-break scans).
