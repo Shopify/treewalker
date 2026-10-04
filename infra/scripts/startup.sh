@@ -229,14 +229,14 @@ if [ "$ROLE" = "trainer" ]; then
   phase 9 "Generate artifacts + upload (trainer role)"
 
   # Pull any existing artifacts from GCS first so prepare.py skips them.
-  mkdir -p "$REPO_DIR/paper/experiments/artifacts"
-  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/artifacts"
+  mkdir -p "$REPO_DIR/experiments/artifacts"
+  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
   if gcloud storage ls "$GCS_ARTIFACTS_URI/" &>/dev/null; then
     gcloud storage rsync -r \
-      "$GCS_ARTIFACTS_URI/" "$REPO_DIR/paper/experiments/artifacts/"
+      "$GCS_ARTIFACTS_URI/" "$REPO_DIR/experiments/artifacts/"
     # Remove stale sentinel so we write a fresh one after upload.
-    rm -f "$REPO_DIR/paper/experiments/artifacts/UPLOAD_DONE"
-    chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/artifacts"
+    rm -f "$REPO_DIR/experiments/artifacts/UPLOAD_DONE"
+    chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
     log "Pulled existing artifacts from GCS (prepare.py will skip them)"
   else
     log "No existing artifacts in GCS — training from scratch"
@@ -252,24 +252,24 @@ if [ "$ROLE" = "trainer" ]; then
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/prepare.py --datasets support --combos 500,8,16 --skip-compiled
-      uv run python3 paper/experiments/scripts/prepare_scenario.py
-      uv run python3 paper/experiments/scripts/prepare_chunked.py --stage prepare
-      uv run python3 paper/experiments/scripts/prepare_chunked.py --stage correctness
+      uv run python3 experiments/scripts/prepare.py --datasets support --combos 500,8,16 --skip-compiled
+      uv run python3 experiments/scripts/prepare_scenario.py
+      uv run python3 experiments/scripts/prepare_chunked.py --stage prepare
+      uv run python3 experiments/scripts/prepare_chunked.py --stage correctness
     "
     log "Rebuttal artifacts generated (SUPPORT + scenario + chunked), correctness gates passed"
   else
     # Expedia is not redistributable: Terraform uploads the locally built
     # parquet; check its fingerprint before training on it.
     [ -n "$GCS_EXPEDIA_URI" ] || fail "bench_suite=paper needs expedia.parquet (see fetch_expedia.py)"
-    gcloud storage cp "$GCS_EXPEDIA_URI" "$REPO_DIR/paper/experiments/data/expedia.parquet"
-    chown $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/data/expedia.parquet"
+    gcloud storage cp "$GCS_EXPEDIA_URI" "$REPO_DIR/experiments/data/expedia.parquet"
+    chown $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/data/expedia.parquet"
     run_as_bench "
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/fetch_expedia.py --check-only
-      uv run python3 paper/experiments/scripts/prepare.py --grid all --prepare-groups --skip-compiled
+      uv run python3 experiments/scripts/fetch_expedia.py --check-only
+      uv run python3 experiments/scripts/prepare.py --grid all --prepare-groups --skip-compiled
     "
     log "Artifacts generated (models + data)"
   fi
@@ -277,13 +277,13 @@ if [ "$ROLE" = "trainer" ]; then
   # Upload shared artifacts to GCS for the benchmarker.
   # Excludes .so files (architecture-specific).
   gcloud storage rsync -r --exclude=".*\.so$" \
-    "$REPO_DIR/paper/experiments/artifacts/" "$GCS_ARTIFACTS_URI/"
+    "$REPO_DIR/experiments/artifacts/" "$GCS_ARTIFACTS_URI/"
   # Write sentinel AFTER upload completes so benchmarker knows it's safe.
   echo "$(date -Iseconds)" | gcloud storage cp - "$GCS_ARTIFACTS_URI/UPLOAD_DONE"
   log "Shared artifacts uploaded to $GCS_ARTIFACTS_URI"
 
   # Force recompilation of tl2cgen .so (model source changed from native to treelite binary)
-  find "$REPO_DIR/paper/experiments/artifacts" -name "tl2cgen.so" -delete
+  find "$REPO_DIR/experiments/artifacts" -name "tl2cgen.so" -delete
   log "Cleared stale tl2cgen .so files"
 
   # Now compile tl2cgen/lleaves locally for this architecture.
@@ -293,7 +293,7 @@ if [ "$ROLE" = "trainer" ]; then
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/prepare.py --grid all --compile-only
+      uv run python3 experiments/scripts/prepare.py --grid all --compile-only
     "
     log "Local .so compilation complete"
   fi
@@ -319,15 +319,15 @@ else
   done
 
   # Download shared artifacts (models, data, configs — no .so files).
-  mkdir -p "$REPO_DIR/paper/experiments/artifacts"
-  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/artifacts"
+  mkdir -p "$REPO_DIR/experiments/artifacts"
+  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
   gcloud storage rsync -r \
-    "$GCS_ARTIFACTS_URI/" "$REPO_DIR/paper/experiments/artifacts/"
-  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/artifacts"
+    "$GCS_ARTIFACTS_URI/" "$REPO_DIR/experiments/artifacts/"
+  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
   log "Shared artifacts downloaded"
 
   # Force recompilation of tl2cgen .so (model source changed from native to treelite binary)
-  find "$REPO_DIR/paper/experiments/artifacts" -name "tl2cgen.so" -delete
+  find "$REPO_DIR/experiments/artifacts" -name "tl2cgen.so" -delete
   log "Cleared stale tl2cgen .so files"
 
   if [ "$BENCH_SUITE" = "rebuttal" ]; then
@@ -338,8 +338,8 @@ else
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/prepare_scenario.py
-      uv run python3 paper/experiments/scripts/prepare_chunked.py --stage correctness
+      uv run python3 experiments/scripts/prepare_scenario.py
+      uv run python3 experiments/scripts/prepare_chunked.py --stage correctness
     "
     log "Rebuttal correctness gates passed on this architecture"
   else
@@ -348,7 +348,7 @@ else
       source \"\$HOME/.local/bin/env\"
       source \"\$HOME/.cargo/env\"
       cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/prepare.py --grid all --compile-only
+      uv run python3 experiments/scripts/prepare.py --grid all --compile-only
     "
     log "Local .so compilation complete"
   fi
@@ -411,7 +411,7 @@ EXT_FLAGS=""
 
 if [ "$BENCH_SUITE" = "rebuttal" ]; then
   # Clear the released CSVs so this run writes fresh ones.
-  find "$REPO_DIR/paper/experiments/data" \( -name "scenario_credit_*" -o -name "chunked_g_*" \) -delete 2>/dev/null
+  find "$REPO_DIR/experiments/data" \( -name "scenario_credit_*" -o -name "chunked_g_*" \) -delete 2>/dev/null
   log "Cleared stale rebuttal CSVs/summaries"
 
   # E1: scenario grid (treewalker + fullwalk, timing + stats + inline correctness).
@@ -419,9 +419,9 @@ if [ "$BENCH_SUITE" = "rebuttal" ]; then
     source \"\$HOME/.cargo/env\"
     cd '$REPO_DIR'
     taskset -c 0 ./target/release/sweep_bench \
-      '$REPO_DIR/paper/experiments/artifacts' \
+      '$REPO_DIR/experiments/artifacts' \
       --grid scen \
-      --output-dir '$REPO_DIR/paper/experiments/data' \
+      --output-dir '$REPO_DIR/experiments/data' \
       --warmup 3 --iters 21 --min-iters 11 \
       --max-time-secs 10
   "
@@ -432,7 +432,7 @@ if [ "$BENCH_SUITE" = "rebuttal" ]; then
     source \"\$HOME/.local/bin/env\"
     source \"\$HOME/.cargo/env\"
     cd '$REPO_DIR'
-    taskset -c 0 uv run python3 paper/experiments/scripts/prepare_chunked.py --stage timing
+    taskset -c 0 uv run python3 experiments/scripts/prepare_chunked.py --stage timing
   "
   log "E2 chunked-G timing complete"
 
@@ -441,13 +441,13 @@ if [ "$BENCH_SUITE" = "rebuttal" ]; then
   run_as_bench "
     source \"\$HOME/.local/bin/env\"
     cd '$REPO_DIR'
-    uv run python3 paper/experiments/scripts/summarize_scenario.py --arch '$ARCH_LABEL' \
+    uv run python3 experiments/scripts/summarize_scenario.py --arch '$ARCH_LABEL' \
       --platform-note 'GCE $MACHINE_TYPE, Ubuntu 24.04 LTS, SMT off, core-pinned (taskset -c 0)'
   "
   log "Rebuttal summaries written"
 else
 # Clear stale CSVs from prior runs so sweep_bench starts fresh.
-find "$REPO_DIR/paper/experiments/data" -name "grid*_results*.csv" -delete 2>/dev/null
+find "$REPO_DIR/experiments/data" -name "grid*_results*.csv" -delete 2>/dev/null
 log "Cleared stale result CSVs"
 
 # Run sweep pinned to core 0 — all methods in one Rust binary.
@@ -455,9 +455,9 @@ run_as_bench "
   source \"\$HOME/.cargo/env\"
   cd '$REPO_DIR'
   taskset -c 0 ./target/release/sweep_bench \
-    '$REPO_DIR/paper/experiments/artifacts' \
+    '$REPO_DIR/experiments/artifacts' \
     --grid all \
-    --output-dir '$REPO_DIR/paper/experiments/data' \
+    --output-dir '$REPO_DIR/experiments/data' \
     --warmup 3 --iters 21 --min-iters 11 \
     --max-time-secs 30 \
     $EXT_FLAGS
@@ -466,8 +466,8 @@ log "Sweep complete (all methods via sweep_bench)"
 
 # Copy with architecture-free name for backward compatibility.
 for csv in grid1_results; do
-  SRC="$REPO_DIR/paper/experiments/data/$${csv}_$${ARCH_LABEL}.csv"
-  DST="$REPO_DIR/paper/experiments/data/$${csv}.csv"
+  SRC="$REPO_DIR/experiments/data/$${csv}_$${ARCH_LABEL}.csv"
+  DST="$REPO_DIR/experiments/data/$${csv}.csv"
   [ -f "$SRC" ] && cp "$SRC" "$DST" && log "  $${csv}_$${ARCH_LABEL} → $csv"
 done
 
@@ -477,9 +477,9 @@ fi
 # Phase 12: Collect results
 # ---------------------------------------------------------------------------
 phase 12 "Collect results"
-cp "$REPO_DIR/paper/experiments/data/"*.csv "$RESULTS_DIR/" 2>/dev/null || true
-cp "$REPO_DIR/paper/experiments/data/"*.md "$RESULTS_DIR/" 2>/dev/null || true
-cp "$REPO_DIR/paper/experiments/data/"*.log "$RESULTS_DIR/" 2>/dev/null || true
+cp "$REPO_DIR/experiments/data/"*.csv "$RESULTS_DIR/" 2>/dev/null || true
+cp "$REPO_DIR/experiments/data/"*.md "$RESULTS_DIR/" 2>/dev/null || true
+cp "$REPO_DIR/experiments/data/"*.log "$RESULTS_DIR/" 2>/dev/null || true
 
 cat > "$RESULTS_DIR/system_info.txt" <<SYSINFO
 git_ref: $GIT_REF

@@ -1300,8 +1300,7 @@ mod tests {
 
     #[test]
     fn test_discover_cells() {
-        let artifacts =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../paper/experiments/artifacts");
+        let artifacts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../artifacts");
         if !artifacts.exists() {
             return;
         }
@@ -1320,8 +1319,7 @@ mod tests {
 
     #[test]
     fn test_run_single_cell() {
-        let artifacts =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../paper/experiments/artifacts");
+        let artifacts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../artifacts");
         if !artifacts.exists() {
             return;
         }

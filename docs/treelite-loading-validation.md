@@ -45,7 +45,7 @@ already present in the local Cargo cache.
 | `cargo test --release --offline` | 14 unit, 11 import tests; 1 compiling doctest |
 | `cargo fmt --check` | Passed |
 | `cargo clippy --offline --all-targets -- -D warnings` | Passed |
-| `cargo build --offline --release --manifest-path benchmarks/Cargo.toml` | Passed |
+| `cargo build --offline --release --manifest-path experiments/benchmarks/Cargo.toml` | Passed |
 | Benchmark artifact `correctness` suite, `--features test-helpers` | 18 tests passed |
 | Benchmark artifact `parse_test` suite | 6 tests passed |
 | `cargo package --list --allow-dirty --offline` | Library tests, fixtures, and loading documentation included |

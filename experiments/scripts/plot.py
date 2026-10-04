@@ -5,7 +5,7 @@ All figures use plotnine with a shared theme and redundant encoding
 (color + linetype/marker/alpha) for grayscale print.
 
 Usage:
-    uv run python3 paper/experiments/scripts/plot.py
+    uv run python3 experiments/scripts/plot.py
 """
 from __future__ import annotations
 
@@ -47,9 +47,9 @@ from plotnine import (
     theme_minimal,
 )
 
-ROOT = Path(__file__).resolve().parents[3]
-DATA = ROOT / "paper" / "experiments" / "data"
-FIG = ROOT / "paper" / "experiments" / "figures"
+ROOT = Path(__file__).resolve().parents[2]
+DATA = ROOT / "experiments" / "data"
+FIG = ROOT / "experiments" / "figures"
 FIG.mkdir(parents=True, exist_ok=True)
 
 DPI = 300

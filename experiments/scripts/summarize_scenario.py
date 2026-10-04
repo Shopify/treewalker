@@ -3,7 +3,7 @@
 
 Reads scenario_credit_results_{arch}.csv and scenario_credit_stats_{arch}.csv
 (written by `sweep_bench --grid scen`) and writes
-paper/experiments/data/scenario_credit_summary.md with one row per cell:
+experiments/data/scenario_credit_summary.md with one row per cell:
 
     k | G | TW median us/obs | fullwalk median | algorithmic speedup |
     precompute ratio | trace ratio | predicted (d_v+1)/(d+1) | d_v
@@ -37,7 +37,7 @@ where L = max_depth is a conservative ceiling on root-to-leaf depth):
         d_v = partition_row_evals / (G * T * n_obs)
 
 Usage:
-    uv run python3 paper/experiments/scripts/summarize_scenario.py [--arch arm|intel]
+    uv run python3 experiments/scripts/summarize_scenario.py [--arch arm|intel]
         [--platform-note NOTE]
 
 --platform-note overrides the detected platform string (use it for pinned/remote

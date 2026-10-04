@@ -41,7 +41,7 @@ import numpy as np
 import xgboost as xgb
 
 
-ARTIFACTS = Path("paper/experiments/artifacts")
+ARTIFACTS = Path("experiments/artifacts")
 
 
 def kahan_sum(values: list[float]) -> float:

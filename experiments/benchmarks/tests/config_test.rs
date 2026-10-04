@@ -4,7 +4,7 @@ fn test_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../paper/experiments/artifacts/expedia/nt500_md8"
+            "/../artifacts/expedia/nt500_md8"
         )
         .into()
     }))

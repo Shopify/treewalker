@@ -28,10 +28,10 @@ Reuses utils.py helpers: train_lgb_model, write_raw_f64, write_group_offsets,
 build_sweep_bench/find_sweep_bench. prepare.py is NOT modified.
 
 Usage:
-    uv run python3 paper/experiments/scripts/prepare_scenario.py            # all 16 cells
-    uv run python3 paper/experiments/scripts/prepare_scenario.py --cell k1_G4   # hard-gate cell
-    uv run python3 paper/experiments/scripts/prepare_scenario.py --no-validate  # skip sweep_bench gate
-    uv run python3 paper/experiments/scripts/prepare_scenario.py --force
+    uv run python3 experiments/scripts/prepare_scenario.py            # all 16 cells
+    uv run python3 experiments/scripts/prepare_scenario.py --cell k1_G4   # hard-gate cell
+    uv run python3 experiments/scripts/prepare_scenario.py --no-validate  # skip sweep_bench gate
+    uv run python3 experiments/scripts/prepare_scenario.py --force
 """
 
 from __future__ import annotations
