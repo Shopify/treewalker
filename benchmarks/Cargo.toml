@@ -48,16 +48,7 @@ struct_excessive_bools = "allow"
 doc_markdown = "allow"
 if_not_else = "allow"
 
-# Keep the benchmark optimization settings identical to the inference library.
-[profile.release]
-lto = "fat"
-codegen-units = 1
-
-[profile.profiling]
-inherits = "release"
-debug = true
-debug-assertions = false
-overflow-checks = false
+# Build profiles (release, profiling) come from the workspace root Cargo.toml.
 
 [[bin]]
 name = "sweep_bench"
