@@ -53,9 +53,12 @@ use crate::forest::{
 // ---------------------------------------------------------------------------
 
 /// Explicit format for loading models from memory or readers.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ModelFormat {
+    /// Treelite 4.0 to 4.7 binary checkpoint, from `Model.serialize_bytes()`.
     TreeliteBinaryV4,
+    /// Treelite JSON dump, from `Model.dump_as_json()`.
     TreeliteJson,
 }
 
