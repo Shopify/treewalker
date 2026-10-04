@@ -488,10 +488,11 @@ impl Forest {
         &self.model.config
     }
 
-    /// Whether `predict` sums leaf values exactly and rounds once, so predictions are
-    /// the `f64` nearest to the true sum whatever the tree order. False only if a leaf
-    /// is not finite or the leaf exponents span too wide a range for a 126-bit fixed
-    /// point; prediction then adds in `f64` in tree order.
+    /// Whether prediction sums leaf values exactly and rounds once, so each row's tree
+    /// sum is the `f64` nearest to the true sum whatever the tree order. Averaging, the
+    /// base score and the link function are applied afterwards in ordinary `f64`.
+    /// False only if a leaf is not finite or the leaf exponents span too wide a range
+    /// for a 126-bit fixed point; prediction then adds in `f64` in tree order.
     #[inline]
     #[must_use]
     pub fn exact_sums(&self) -> bool {
