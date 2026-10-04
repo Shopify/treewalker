@@ -4,7 +4,7 @@
 //! each split during tree traversal. Prediction uses `u16` (≤16 rows), `u32` (≤32),
 //! `u64` (≤64) and [`Bits<W>`] of `W` 64-bit words above that: one native word keeps
 //! the per-predicate mask table small for small groups, and 64-bit words keep the
-//! per-word loops short for wide ones. `u128` also implements the trait.
+//! per-word loops short for wide ones.
 //!
 //! The compiler monomorphizes `partial_eval<..., M: RowMask>` into separate
 //! versions per mask width, eliminating all trait dispatch overhead.
@@ -64,10 +64,6 @@ pub trait RowMask:
 
     /// Call `f` with the index of every set bit, in increasing order.
     fn for_each_bit(self, f: impl FnMut(usize));
-
-    /// Zero-extend to u128 (used by the experimental leaf-accumulation kernels).
-    #[cfg(feature = "experimental")]
-    fn to_u128(self) -> u128;
 }
 
 macro_rules! impl_row_mask {
@@ -128,11 +124,6 @@ macro_rules! impl_row_mask {
                     m &= m.wrapping_sub(1);
                 }
             }
-            #[cfg(feature = "experimental")]
-            #[inline]
-            fn to_u128(self) -> u128 {
-                u128::from(self)
-            }
         }
     };
 }
@@ -140,7 +131,6 @@ macro_rules! impl_row_mask {
 impl_row_mask!(u16, 16);
 impl_row_mask!(u32, 32);
 impl_row_mask!(u64, 64);
-impl_row_mask!(u128, 128);
 
 /// Row mask of `W` 64-bit words (`64 * W` rows); bit `r` is bit `r % 64` of word `r / 64`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -291,13 +281,6 @@ impl<const W: usize> RowMask for Bits<W> {
             }
         }
     }
-    #[cfg(feature = "experimental")]
-    #[inline]
-    fn to_u128(self) -> u128 {
-        let lo = self.0.first().copied().unwrap_or(0);
-        let hi = self.0.get(1).copied().unwrap_or(0);
-        u128::from(hi) << 64 | u128::from(lo)
-    }
 }
 
 #[cfg(test)]
@@ -399,11 +382,6 @@ mod tests {
     #[test]
     fn test_u64_mask() {
         test_mask::<u64>();
-    }
-
-    #[test]
-    fn test_u128_mask() {
-        test_mask::<u128>();
     }
 
     #[test]

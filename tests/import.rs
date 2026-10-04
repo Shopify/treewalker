@@ -168,6 +168,84 @@ fn groups_of_any_width_match_single_rows() {
 }
 
 #[test]
+fn exact_sums_make_layout_invisible() {
+    // Tree order, prefix sharing and bitset interning change the order in which
+    // leaves are added; exact sums make the predictions bit-identical anyway.
+    let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
+    let data = raw("data.bin");
+    let rows = data.len() / 2;
+    for case in manifest.models {
+        let name = format!("{}.bin", case.name);
+        let predict_with = |parse: &ParseConfig| {
+            let mut forest = Forest::from_bytes(
+                &bytes(&name),
+                ModelFormat::TreeliteBinaryV4,
+                config(128),
+                parse,
+            )
+            .unwrap();
+            assert!(forest.exact_sums(), "{name}");
+            let mut out = vec![0.0; rows];
+            for s in (0..rows).step_by(128) {
+                forest.predict(&data, &mut out, s, s + 128);
+            }
+            out
+        };
+        let reference = predict_with(&ParseConfig::default());
+        for parse in [
+            ParseConfig {
+                disable_tree_ordering: true,
+                ..Default::default()
+            },
+            ParseConfig {
+                prefix_depth: 0,
+                ..Default::default()
+            },
+            ParseConfig {
+                disable_tree_ordering: true,
+                disable_bitset_intern: true,
+                prefix_depth: 0,
+                ..Default::default()
+            },
+        ] {
+            let out = predict_with(&parse);
+            for r in 0..rows {
+                assert_eq!(out[r].to_bits(), reference[r].to_bits(), "{name} row {r}");
+            }
+        }
+    }
+}
+
+#[test]
+fn leaves_without_a_common_scale_add_in_tree_order() {
+    // Leaf exponents 2^-997 apart leave no 126-bit fixed point: prediction adds in
+    // f64 in tree order, exactly as the full walk does.
+    let mut model = simd_json::to_owned_value(&mut bytes("identity.json")).unwrap();
+    model["trees"][0]["nodes"][1]["leaf_value"] = 1e300.into();
+    model["trees"][1]["nodes"][1]["leaf_value"] = 1e-300.into();
+    let json = simd_json::to_vec(&model).unwrap();
+    let mut forest = Forest::from_bytes(
+        &json,
+        ModelFormat::TreeliteJson,
+        config(128),
+        &ParseConfig::default(),
+    )
+    .unwrap();
+    assert!(!forest.exact_sums());
+    let data = raw("data.bin");
+    let rows = data.len() / 2;
+    let (mut partial, mut full) = (vec![0.0; rows], vec![0.0; rows]);
+    for s in (0..rows).step_by(128) {
+        forest.predict(&data, &mut partial, s, s + 128);
+    }
+    forest.predict_full(&data, &mut full, 0, rows);
+    assert!(partial.iter().any(|&v| v == 1e300));
+    for r in 0..rows {
+        assert_eq!(partial[r].to_bits(), full[r].to_bits(), "row {r}");
+    }
+}
+
+#[test]
 fn native_random_forest_and_hand_computable_aggregation() {
     let forest = load("random_forest.bin", ModelFormat::TreeliteBinaryV4, 128).unwrap();
     let data = raw("rf_native_data.bin");

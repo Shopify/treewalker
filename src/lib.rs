@@ -52,8 +52,6 @@ pub mod config;
 mod exact;
 pub mod forest;
 pub mod mask;
-#[cfg(feature = "experimental")]
-pub mod opt;
 pub mod parser;
 pub mod predict;
 

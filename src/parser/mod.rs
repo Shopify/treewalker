@@ -34,8 +34,6 @@
 
 mod binary;
 pub(crate) mod common;
-#[cfg(feature = "experimental")]
-pub use common::layout;
 mod json;
 mod validation;
 use crate::LoadError;

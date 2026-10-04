@@ -10,7 +10,6 @@ publish = false
 test-helpers = ["treewalker-gbdt/test-helpers"]
 quickscorer-bench = ["dep:quickscorer"]  # QuickScorer baseline in the legacy CLI
 external-bench = ["dep:libloading", "dep:quickscorer"]  # C FFI baselines + QuickScorer
-experimental = ["treewalker-gbdt/experimental"]  # research kernels: opt_bench, run_bench, probe
 
 [dependencies]
 treewalker-gbdt = { path = ".." }
@@ -54,22 +53,6 @@ if_not_else = "allow"
 [[bin]]
 name = "sweep_bench"
 path = "src/bin/sweep_bench.rs"
-
-# Research benchmarks for the experimental kernels (paired, blocked, exactness-checked).
-[[bin]]
-name = "opt_bench"
-path = "src/bin/opt_bench.rs"
-required-features = ["experimental", "external-bench"]
-
-[[bin]]
-name = "run_bench"
-path = "src/bin/run_bench.rs"
-required-features = ["experimental"]
-
-[[bin]]
-name = "probe"
-path = "src/bin/probe.rs"
-required-features = ["experimental"]
 
 [[test]]
 name = "correctness"
