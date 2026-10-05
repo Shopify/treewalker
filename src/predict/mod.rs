@@ -559,7 +559,7 @@ impl Model {
         for (i, tree) in self.trees.iter().enumerate() {
             ctx.base = tree.node_start as usize;
             let start_idx = prefix_starts[i] as usize;
-            self.partial_eval::<F32, M, STATS, ABLATE>(&mut ctx, start_idx, all_mask);
+            self.eval_tree::<F32, M, STATS, ABLATE>(&mut ctx, start_idx, all_mask, n);
         }
 
         if let Some(e) = scale {
