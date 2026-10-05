@@ -84,6 +84,77 @@ impl Model {
         }
     }
 
+    /// Add a leaf's value to the rows of `row_mask`.
+    #[inline(always)]
+    fn add_leaf<M: RowMask, const STATS: bool>(ctx: &mut EvalCtx<M>, node: &Node, row_mask: M) {
+        if STATS {
+            ctx.counters.leaf_hits += 1;
+        }
+        if STATS {
+            ctx.counters.leaf_adds += if ctx.scale.is_some() {
+                let mut runs = 0;
+                row_mask.for_each_run(|_, _| runs += 2);
+                runs
+            } else {
+                u64::from(row_mask.count_ones())
+            };
+        }
+        if let Some(e) = ctx.scale {
+            let x = crate::exact::to_fixed(node.value, e);
+            let diff = &mut *ctx.diff;
+            // SAFETY: diff has n + 1 entries, and runs lie within rows 0..n.
+            row_mask.for_each_run(|a, b| unsafe {
+                *diff.get_unchecked_mut(a) += x;
+                *diff.get_unchecked_mut(b) -= x;
+            });
+        } else {
+            let val = node.value;
+            let results = &mut ctx.results[ctx.start..];
+            // SAFETY: set bits are rows of this piece, below n, and the piece's
+            // rows start..start + n lie within results.
+            row_mask.for_each_bit(|r| unsafe { *results.get_unchecked_mut(r) += val });
+        }
+    }
+
+    /// One tree over all `n` rows of a piece: the constant walk from `idx` and a leaf
+    /// reached without a varying split run here, without a call; everything else is
+    /// [`Self::partial_eval`]'s. Same leaf additions in the same order.
+    #[inline(always)]
+    pub(super) fn eval_tree<const F32: bool, M: RowMask, const STATS: bool, const ABLATE: bool>(
+        &self,
+        ctx: &mut EvalCtx<M>,
+        mut idx: usize,
+        all_mask: M,
+        n: usize,
+    ) {
+        let nodes = self.nodes.as_slice();
+        let base = ctx.base;
+        // SAFETY: as in partial_eval.
+        while unsafe { nodes.get_unchecked(base + idx) }.is_walkable() {
+            if STATS {
+                ctx.counters.constant_steps += 1;
+            }
+            idx = self.step::<F32>(nodes, base + idx, idx, ctx.const_features);
+        }
+        // SAFETY: as above.
+        let node = unsafe { nodes.get_unchecked(base + idx) };
+        if node.is_leaf() && n > 0 {
+            if let (Some(e), false) = (ctx.scale, STATS) {
+                // All rows are one run, 0..n.
+                let x = crate::exact::to_fixed(node.value, e);
+                // SAFETY: diff has n + 1 entries.
+                unsafe {
+                    *ctx.diff.get_unchecked_mut(0) += x;
+                    *ctx.diff.get_unchecked_mut(n) -= x;
+                }
+            } else {
+                Self::add_leaf::<M, STATS>(ctx, node, all_mask);
+            }
+            return;
+        }
+        self.partial_eval::<F32, M, STATS, ABLATE>(ctx, idx, all_mask);
+    }
+
     // -----------------------------------------------------------------------
     // Partial eval — counters only with STATS, ablation flags only with ABLATE
     // -----------------------------------------------------------------------
@@ -129,33 +200,7 @@ impl Model {
 
             // Leaf (walked past all constant nodes, could be leaf or varying).
             if node.is_leaf() {
-                if STATS {
-                    ctx.counters.leaf_hits += 1;
-                }
-                if STATS {
-                    ctx.counters.leaf_adds += if ctx.scale.is_some() {
-                        let mut runs = 0;
-                        row_mask.for_each_run(|_, _| runs += 2);
-                        runs
-                    } else {
-                        u64::from(row_mask.count_ones())
-                    };
-                }
-                if let Some(e) = ctx.scale {
-                    let x = crate::exact::to_fixed(node.value, e);
-                    let diff = &mut *ctx.diff;
-                    // SAFETY: diff has n + 1 entries, and runs lie within rows 0..n.
-                    row_mask.for_each_run(|a, b| unsafe {
-                        *diff.get_unchecked_mut(a) += x;
-                        *diff.get_unchecked_mut(b) -= x;
-                    });
-                } else {
-                    let val = node.value;
-                    let results = &mut ctx.results[ctx.start..];
-                    // SAFETY: set bits are rows of this piece, below n, and the piece's
-                    // rows start..start + n lie within results.
-                    row_mask.for_each_bit(|r| unsafe { *results.get_unchecked_mut(r) += val });
-                }
+                Self::add_leaf::<M, STATS>(ctx, node, row_mask);
                 return;
             }
 
