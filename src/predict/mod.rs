@@ -544,7 +544,8 @@ impl Model {
 
         if !self.prefix_groups.is_empty() {
             let k = self.prefix_depth;
-            prefix_starts.fill(0);
+            // No fill: trees outside every prefix group keep the zero start the
+            // workspace was created with, and grouped trees are overwritten below.
             for group in &self.prefix_groups {
                 self.precompute_prefix_starts::<F32, STATS>(
                     const_features,
@@ -564,11 +565,12 @@ impl Model {
 
         if let Some(e) = scale {
             let mut acc = 0i128;
-            for (out, &d) in ctx.results[start..end].iter_mut().zip(&ctx.diff[..n]) {
-                acc += d;
+            for (out, d) in ctx.results[start..end].iter_mut().zip(&mut ctx.diff[..n]) {
+                acc += *d;
+                *d = 0;
                 *out = crate::exact::to_f64(acc, e);
             }
-            ctx.diff[..=n].fill(0);
+            ctx.diff[n] = 0;
         }
     }
 }
