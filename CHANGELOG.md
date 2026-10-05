@@ -72,8 +72,8 @@ are `from_file` and `from_json`.
 `research` replaces `test-helpers`. It adds:
 
 - `forest.research_predictor(Ablation)`. Its flags are fixed when it is created.
-  `predict_group` runs the research timed build of the kernel and
-  `predict_group_counted` the counted build; both use the flags. In 1.x,
+  `predict_group` and `predict_groups` run the research timed build of the kernel
+  and `predict_group_counted` the counted build; all use the flags. In 1.x,
   `predict()` ignored `config.ablation`, so ablations timed through it measured
   the production path.
 - `predict_group_stages`, which returns each row's `tree_sum`, `raw_margin` and
