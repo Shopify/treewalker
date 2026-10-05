@@ -294,6 +294,27 @@ def _compile_one(tool, fw_dir, threads, script, llc, clang, force) -> None:
         bl.compile_lleaves(script, fw_dir, threads, llc, clang, force)
 
 
+@app.command("build-native")
+def build_native(
+    library: Annotated[
+        list[str] | None, typer.Argument(help="lightgbm, xgboost [default: both].")
+    ] = None,
+    jobs: Annotated[int | None, typer.Option(help="Parallel compile jobs.")] = None,
+    force: Annotated[bool, typer.Option(help="Rebuild even when the cache matches.")] = False,
+) -> None:
+    """Build the native LightGBM and XGBoost C libraries from pinned sources.
+
+    Versions come from uv.lock and sources are pinned by commit SHA; the build is
+    Release with -march=native and OpenMP, into experiments/.cache/native.
+    """
+    from . import native
+
+    paths = _paths()
+    for lib in library or list(native.LIBRARIES):
+        rec = native.build(paths, lib, jobs, force)
+        print(f"{lib} {rec['version']} ({rec['commit'][:12]}): {rec['path']}")
+
+
 @app.command("build-bench")
 def build_bench(
     features: Annotated[str, typer.Option(help="Cargo features.")] = "external-bench",
