@@ -56,7 +56,8 @@ pub struct Stages {
 /// runtime ablation flags of an [`Ablation`].
 ///
 /// The flags are fixed when the predictor is created, and every call runs with them.
-/// [`Self::predict_group`] is the timed build, without counters;
+/// [`Self::predict_group`] and [`Self::predict_groups`] are the timed build, without
+/// counters;
 /// [`Self::predict_group_counted`] is the counted build. With every flag off, the
 /// research builds compute what production does, but are separate code.
 #[derive(Debug)]
@@ -165,6 +166,17 @@ impl ResearchPredictor {
     pub fn predict_group(&mut self, rows: &[f64], out: &mut [f64]) {
         self.inner
             .run::<false, true>(rows, out, Groups::One, self.variant, None);
+    }
+
+    /// Predict consecutive groups of varying width with the ablation flags: the
+    /// research timed build. Same contract as [`Predictor::predict_groups`].
+    ///
+    /// # Panics
+    ///
+    /// As [`Predictor::predict_groups`].
+    pub fn predict_groups(&mut self, data: &[f64], offsets: &[usize], out: &mut [f64]) {
+        self.inner
+            .run::<false, true>(data, out, Groups::Offsets(offsets), self.variant, None);
     }
 
     /// Predict one group with the ablation flags and count its work: the research
@@ -322,6 +334,9 @@ mod tests {
             r.inner.clear_last_variant();
             r.predict_group_stages(&rows, &mut super::Stages::default());
             assert_eq!(r.inner.last_variant(), Some(variant), "stages");
+            r.inner.clear_last_variant();
+            r.predict_groups(&rows, &[0, 16, 33], &mut out);
+            assert_eq!(r.inner.last_variant(), Some(variant), "groups");
         }
         let mut p = forest.predictor();
         p.predict_group(&rows, &mut out);

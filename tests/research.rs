@@ -106,11 +106,16 @@ fn disabling_exact_sums_changes_the_timed_and_counted_outputs() {
             production
         };
         let mut r = forest.research_predictor(variant);
-        let (mut timed, mut counted) = ([f64::NAN; 3], [f64::NAN; 3]);
+        let (mut timed, mut counted, mut batch) = ([f64::NAN; 3], [f64::NAN; 3], [f64::NAN; 6]);
         r.predict_group(&rows, &mut timed);
         r.predict_group_counted(&rows, &mut counted);
+        // Batch calls run the same flags: two groups of the three rows.
+        let doubled: Vec<f64> = rows.iter().chain(&rows).copied().collect();
+        r.predict_groups(&doubled, &[0, 3, 6], &mut batch);
         assert_eq!(bits(&timed), bits(&expected), "timed {variant:?}");
         assert_eq!(bits(&counted), bits(&expected), "counted {variant:?}");
+        assert_eq!(bits(&batch[..3]), bits(&expected), "batch {variant:?}");
+        assert_eq!(bits(&batch[3..]), bits(&expected), "batch {variant:?}");
         let mut stages = Stages::default();
         r.predict_group_stages(&rows, &mut stages);
         assert_eq!(
