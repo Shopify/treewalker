@@ -1,9 +1,10 @@
 //! Public import contract, independent Treelite/GTIL fixtures, and malformed input guards.
-#![allow(clippy::float_cmp)] // Exact hand-computable expectations.
+#![expect(clippy::float_cmp, reason = "exact hand-computable expectations")]
 use serde::Deserialize;
 use simd_json::{OwnedValue as Value, prelude::*};
 use std::{io::Cursor, path::PathBuf};
-use treewalker_gbdt::{AblationMode, Forest, LoadError, ModelFormat, ParseConfig, WalkerConfig};
+use treewalker_gbdt::research::Ablation;
+use treewalker_gbdt::{Forest, LoadError, LoadOptions, ModelFormat, WalkerConfig};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -20,10 +21,14 @@ fn raw(name: &str) -> Vec<f64> {
         .collect()
 }
 fn config(width: usize) -> WalkerConfig {
-    WalkerConfig::try_new(2, width, &[0], &[], &[]).unwrap()
+    WalkerConfig::builder(2)
+        .max_group_width(width)
+        .varying([0])
+        .build()
+        .unwrap()
 }
 fn load(name: &str, format: ModelFormat, width: usize) -> Result<Forest, LoadError> {
-    Forest::from_bytes(&bytes(name), format, config(width), &ParseConfig::default())
+    Forest::from_bytes(&bytes(name), format, config(width), &LoadOptions::default())
 }
 fn model_json() -> Value {
     simd_json::to_owned_value(&mut bytes("sigmoid_f64.json")).unwrap()
@@ -33,8 +38,30 @@ fn parse_json(v: &Value) -> Result<Forest, LoadError> {
         &simd_json::to_vec(v).unwrap(),
         ModelFormat::TreeliteJson,
         config(128),
-        &ParseConfig::default(),
+        &LoadOptions::default(),
     )
+}
+/// Predict each 128-row block of the two-feature fixture data in groups of `width` rows.
+fn predict_blocks(forest: &Forest, data: &[f64], width: usize, out: &mut [f64]) {
+    let mut p = forest.predictor();
+    for (block, out) in data.chunks(128 * 2).zip(out.chunks_mut(128)) {
+        p.predict_fixed(block, width, out);
+    }
+}
+/// As [`predict_blocks`], through the research timed build with `ablation`.
+fn predict_blocks_ablated(
+    forest: &Forest,
+    ablation: Ablation,
+    data: &[f64],
+    width: usize,
+    out: &mut [f64],
+) {
+    let mut r = forest.research_predictor(ablation);
+    for (block, out) in data.chunks(128 * 2).zip(out.chunks_mut(128)) {
+        for (rows, out) in block.chunks(width * 2).zip(out.chunks_mut(width)) {
+            r.predict_group(rows, out);
+        }
+    }
 }
 fn check(actual: &[f64], expected: &[f64], atol: f64, rtol: f64, context: &str) {
     for (i, (&x, &y)) in actual.iter().zip(expected).enumerate() {
@@ -72,38 +99,28 @@ fn independent_oracles_all_formats_paths_and_workspace_widths() {
             }
             let name = format!("{}.{extension}", case.name);
             for width in [1, 16, 17, 32, 33, 64, 65, 128] {
-                let mut forest = load(&name, format, width).unwrap();
+                let forest = load(&name, format, width).unwrap();
                 let mut actual = vec![0.0; rows];
-                forest.predict_full(&data, &mut actual, 0, rows);
+                forest.predict_full_walk(&data, &mut actual);
                 check(&actual, &expected, case.atol, case.rtol, &name);
-                for group in (0..rows).step_by(128) {
-                    for start in (group..group + 128).step_by(width) {
-                        forest.predict(&data, &mut actual, start, (start + width).min(group + 128));
-                    }
-                }
+                predict_blocks(&forest, &data, width, &mut actual);
                 check(&actual, &expected, case.atol, case.rtol, &name);
                 for ablation in [
-                    AblationMode::default(),
-                    AblationMode {
+                    Ablation::default(),
+                    Ablation {
                         disable_varying_precompute: true,
                         ..Default::default()
                     },
-                    AblationMode {
+                    Ablation {
                         disable_predicate_sweep: true,
                         ..Default::default()
                     },
+                    Ablation {
+                        disable_exact_sums: true,
+                        ..Default::default()
+                    },
                 ] {
-                    forest.config.ablation = ablation;
-                    for group in (0..rows).step_by(128) {
-                        for start in (group..group + 128).step_by(width) {
-                            forest.predict_with_stats(
-                                &data,
-                                &mut actual,
-                                start,
-                                (start + width).min(group + 128),
-                            );
-                        }
-                    }
+                    predict_blocks_ablated(&forest, ablation, &data, width, &mut actual);
                     check(&actual, &expected, case.atol, case.rtol, &name);
                 }
             }
@@ -120,9 +137,11 @@ fn groups_of_any_width_match_single_rows() {
     let rows = data.len() / 2;
     for case in manifest.models {
         let name = format!("{}.bin", case.name);
-        let mut single = load(&name, ModelFormat::TreeliteBinaryV4, 1).unwrap();
+        let mut single = load(&name, ModelFormat::TreeliteBinaryV4, 1)
+            .unwrap()
+            .predictor();
         for width in [129, 300, 1024, 1025, 2500] {
-            let mut forest = load(&name, ModelFormat::TreeliteBinaryV4, width).unwrap();
+            let forest = load(&name, ModelFormat::TreeliteBinaryV4, width).unwrap();
             for block in [0, rows / 128 - 1] {
                 // Varying feature cycles through every test value; the constant
                 // feature is the block's.
@@ -131,26 +150,25 @@ fn groups_of_any_width_match_single_rows() {
                     .flat_map(|r| [data[(r % rows) * 2], constant])
                     .collect();
                 let mut alone = vec![0.0; width];
-                for r in 0..width {
-                    single.predict(&group, &mut alone, r, r + 1);
-                }
+                single.predict_fixed(&group, 1, &mut alone);
                 for ablation in [
-                    AblationMode::default(),
-                    AblationMode {
+                    None,
+                    Some(Ablation::default()),
+                    Some(Ablation {
                         disable_varying_precompute: true,
                         ..Default::default()
-                    },
-                    AblationMode {
+                    }),
+                    Some(Ablation {
                         disable_predicate_sweep: true,
                         ..Default::default()
-                    },
+                    }),
                 ] {
-                    forest.config.ablation = ablation;
                     let mut wide = vec![f64::NAN; width];
-                    if ablation.is_default() {
-                        forest.predict(&group, &mut wide, 0, width);
-                    } else {
-                        forest.predict_with_stats(&group, &mut wide, 0, width);
+                    match ablation {
+                        None => forest.predictor().predict_group(&group, &mut wide),
+                        Some(a) => forest
+                            .research_predictor(a)
+                            .predict_group(&group, &mut wide),
                     }
                     for r in 0..width {
                         assert_eq!(
@@ -176,8 +194,8 @@ fn exact_sums_make_layout_invisible() {
     let rows = data.len() / 2;
     for case in manifest.models {
         let name = format!("{}.bin", case.name);
-        let predict_with = |parse: &ParseConfig| {
-            let mut forest = Forest::from_bytes(
+        let predict_with = |parse: &LoadOptions| {
+            let forest = Forest::from_bytes(
                 &bytes(&name),
                 ModelFormat::TreeliteBinaryV4,
                 config(128),
@@ -186,22 +204,20 @@ fn exact_sums_make_layout_invisible() {
             .unwrap();
             assert!(forest.exact_sums(), "{name}");
             let mut out = vec![0.0; rows];
-            for s in (0..rows).step_by(128) {
-                forest.predict(&data, &mut out, s, s + 128);
-            }
+            forest.predictor().predict_fixed(&data, 128, &mut out);
             out
         };
-        let reference = predict_with(&ParseConfig::default());
+        let reference = predict_with(&LoadOptions::default());
         for parse in [
-            ParseConfig {
+            LoadOptions {
                 disable_tree_ordering: true,
                 ..Default::default()
             },
-            ParseConfig {
+            LoadOptions {
                 prefix_depth: 0,
                 ..Default::default()
             },
-            ParseConfig {
+            LoadOptions {
                 disable_tree_ordering: true,
                 disable_bitset_intern: true,
                 prefix_depth: 0,
@@ -224,21 +240,19 @@ fn leaves_without_a_common_scale_add_in_tree_order() {
     model["trees"][0]["nodes"][1]["leaf_value"] = 1e300.into();
     model["trees"][1]["nodes"][1]["leaf_value"] = 1e-300.into();
     let json = simd_json::to_vec(&model).unwrap();
-    let mut forest = Forest::from_bytes(
+    let forest = Forest::from_bytes(
         &json,
         ModelFormat::TreeliteJson,
         config(128),
-        &ParseConfig::default(),
+        &LoadOptions::default(),
     )
     .unwrap();
     assert!(!forest.exact_sums());
     let data = raw("data.bin");
     let rows = data.len() / 2;
     let (mut partial, mut full) = (vec![0.0; rows], vec![0.0; rows]);
-    for s in (0..rows).step_by(128) {
-        forest.predict(&data, &mut partial, s, s + 128);
-    }
-    forest.predict_full(&data, &mut full, 0, rows);
+    forest.predictor().predict_fixed(&data, 128, &mut partial);
+    forest.predict_full_walk(&data, &mut full);
     assert!(partial.iter().any(|&v| v == 1e300));
     for r in 0..rows {
         assert_eq!(partial[r].to_bits(), full[r].to_bits(), "row {r}");
@@ -251,189 +265,141 @@ fn native_random_forest_and_hand_computable_aggregation() {
     let data = raw("rf_native_data.bin");
     let expected = raw("rf_native_reference.bin");
     let mut actual = vec![0.0; expected.len()];
-    forest.predict_full(&data, &mut actual, 0, expected.len());
+    forest.predict_full_walk(&data, &mut actual);
     check(&actual, &expected, 1e-14, 1e-14, "sklearn");
-    let mut forest = load("average_base.bin", ModelFormat::TreeliteBinaryV4, 128).unwrap();
+    let forest = load("average_base.bin", ModelFormat::TreeliteBinaryV4, 128).unwrap();
     let mut result = [0.0];
-    forest.predict(&[0.0, 0.0], &mut result, 0, 1);
+    forest.predictor().predict_group(&[0.0, 0.0], &mut result);
     assert_eq!(result, [3.375]);
 }
 
 #[test]
-fn file_reader_memory_and_legacy_paths() {
+fn file_reader_and_memory_loaders() {
     let cfg = fixture("walker_config.json");
-    let a = Forest::try_load(fixture("sigmoid_f64.bin"), &cfg).unwrap();
+    let a = Forest::load(fixture("sigmoid_f64.bin"), &cfg).unwrap();
     let b = Forest::from_reader(
         Cursor::new(bytes("sigmoid_f64.bin")),
         ModelFormat::TreeliteBinaryV4,
         config(128),
-        &ParseConfig::default(),
+        &LoadOptions::default(),
     )
     .unwrap();
-    let c = Forest::load(fixture("sigmoid_f64.json"), &cfg);
-    let d = Forest::load_with_config(fixture("sigmoid_f64.bin"), &cfg, &ParseConfig::default());
+    let c = Forest::load(fixture("sigmoid_f64.json"), &cfg).unwrap();
+    let d = Forest::load_with(fixture("sigmoid_f64.bin"), &cfg, &LoadOptions::default()).unwrap();
     let input = raw("data.bin");
     let expected = raw("sigmoid_f64_reference.bin");
     for f in [a, b, c, d] {
         let mut output = vec![0.0; expected.len()];
-        f.predict_full(&input, &mut output, 0, expected.len());
+        f.predict_full_walk(&input, &mut output);
         check(&output, &expected, 1e-14, 0.0, "loader");
     }
     assert!(matches!(
-        Forest::try_load("missing.bin", &cfg),
+        Forest::load("missing.bin", &cfg),
         Err(LoadError::Io(_))
     ));
     assert!(matches!(
-        Forest::try_load("unknown.format", &cfg),
+        Forest::load("unknown.format", &cfg),
         Err(LoadError::Unsupported(_))
     ));
     let mut config_file = bytes("walker_config.json");
-    let _: WalkerConfig = WalkerConfig::try_from_json(&config_file).unwrap();
+    let _: WalkerConfig = WalkerConfig::from_json(&config_file).unwrap();
     config_file.truncate(10);
-    assert!(WalkerConfig::try_from_json(&config_file).is_err());
-    assert_eq!(WalkerConfig::from_file(cfg).n_features, 2);
-    let (trees, nodes, _, _) = treewalker_gbdt::parser::parse_model(
-        fixture("sigmoid_f64.bin"),
-        &config(128),
-        &ParseConfig::default(),
-    );
-    assert_eq!(trees.len(), 2);
-    assert!(
-        nodes
-            .iter()
-            .any(|n| n.is_leaf() && n.value == 0.25 + 0.125 / 2.0)
-    );
-}
-
-#[test]
-#[should_panic(expected = "output metadata")]
-fn legacy_tuple_refuses_to_discard_output_metadata() {
-    treewalker_gbdt::parser::parse_model(
-        fixture("average_base.bin"),
-        &config(128),
-        &ParseConfig::default(),
-    );
+    assert!(WalkerConfig::from_json(&config_file).is_err());
+    assert_eq!(WalkerConfig::from_file(&cfg).unwrap().n_features(), 2);
+    assert!(matches!(
+        WalkerConfig::from_file("missing.json"),
+        Err(LoadError::Io(_))
+    ));
 }
 
 #[test]
 fn grouping_schema_and_configuration_validation() {
     let schema = br#"{"n_features":4,"max_group_width":14,"varying_features":[1,2,3],"mono_inc_features":[3],"mono_dec_features":[1]}"#;
-    let c = WalkerConfig::try_from_json(schema).unwrap();
-    assert_eq!(
-        (c.varying_mask, c.mono_inc_mask, c.mono_dec_mask),
-        (14, 8, 2)
+    let parsed = WalkerConfig::from_json(schema).unwrap();
+    assert_eq!((parsed.n_features(), parsed.max_group_width()), (4, 14));
+    let roles = |c: &WalkerConfig| {
+        (0..=c.n_features())
+            .map(|f| (c.is_varying(f), c.is_increasing(f), c.is_decreasing(f)))
+            .collect::<Vec<_>>()
+    };
+    let varying = (true, false, false);
+    let (inc, dec, constant) = (
+        (true, true, false),
+        (true, false, true),
+        (false, false, false),
     );
+    assert_eq!(roles(&parsed), [constant, dec, varying, inc, constant]);
+    // The builder gives the same configuration, and monotonic features imply varying.
+    let built = WalkerConfig::builder(4)
+        .max_group_width(14)
+        .varying([2])
+        .increasing([3])
+        .decreasing([1])
+        .build()
+        .unwrap();
+    assert_eq!(built, parsed);
+    let all = WalkerConfig::builder(3)
+        .max_group_width(1)
+        .all_varying()
+        .increasing([0])
+        .build()
+        .unwrap();
+    assert_eq!(roles(&all), [inc, varying, varying, constant]);
+    let builder = |nf: usize| WalkerConfig::builder(nf).max_group_width(1).varying([]);
     for nf in [0, 65, 128, usize::MAX] {
-        assert!(WalkerConfig::try_new(nf, 1, &[], &[], &[]).is_err());
+        assert!(builder(nf).build().is_err());
     }
-    assert!(WalkerConfig::try_new(1, 0, &[], &[], &[]).is_err());
+    assert!(builder(1).max_group_width(0).build().is_err());
     for width in [129, 1_000_000, usize::MAX] {
-        assert!(WalkerConfig::try_new(1, width, &[], &[], &[]).is_ok());
+        assert!(builder(1).max_group_width(width).build().is_ok());
     }
-    for (v, i, d) in [
-        (&[0, 0][..], &[][..], &[][..]),
-        (&[2][..], &[][..], &[][..]),
-        (&[0][..], &[0][..], &[0][..]),
-        (&[][..], &[0][..], &[][..]),
-        (&[0][..], &[0, 0][..], &[][..]),
-    ] {
-        assert!(WalkerConfig::try_new(2, 1, v, i, d).is_err());
-    }
-    for mutate in 0..4 {
-        let mut cfg = config(128);
-        match mutate {
-            0 => cfg.n_features = 65,
-            1 => cfg.max_group_width = 0,
-            2 => cfg.varying_mask = 1 << 64,
-            _ => cfg.mono_inc_mask = 2,
-        }
-        assert!(matches!(
-            Forest::from_bytes(
-                &bytes("sigmoid_f64.bin"),
-                ModelFormat::TreeliteBinaryV4,
-                cfg,
-                &ParseConfig::default()
-            ),
-            Err(LoadError::MalformedConfig(_))
-        ));
-    }
+    let reject = |b: treewalker_gbdt::WalkerConfigBuilder, expected: &str| match b.build() {
+        Err(LoadError::MalformedConfig(msg)) => assert!(msg.contains(expected), "{msg}"),
+        other => panic!("{expected}: {other:?}"),
+    };
+    // Feature roles must be declared: an undeclared feature would be constant.
+    reject(WalkerConfig::builder(2).max_group_width(1), "varying(..)");
+    reject(
+        WalkerConfig::builder(2).max_group_width(1).increasing([0]),
+        "varying(..)",
+    );
+    reject(WalkerConfig::builder(2).varying([0]), "max_group_width");
+    reject(builder(2).varying([0, 0]), "duplicate index 0");
+    reject(builder(2).varying([2]), "index 2 >= n_features 2");
+    reject(builder(2).increasing([0, 0]), "duplicate index 0");
+    reject(builder(2).decreasing([5]), "index 5 >= n_features 2");
+    reject(
+        builder(2).increasing([0]).decreasing([1, 0]),
+        "feature 0 is both increasing and decreasing",
+    );
+    assert!(
+        WalkerConfig::from_json(
+            br#"{"n_features":2,"max_group_width":4,"varying_features":[0],"mono_inc_features":[1],"mono_dec_features":[1]}"#
+        )
+        .is_err()
+    );
+    // Later calls to a setter replace earlier ones.
+    let replaced = builder(2).varying([0]).varying([1]).build().unwrap();
+    assert!(!replaced.is_varying(0) && replaced.is_varying(1));
     let mut value = model_json();
     value["num_feature"] = 64.into();
     value["trees"][0]["nodes"][0]["split_feature_id"] = 63.into();
-    let cfg = WalkerConfig::try_new(64, 128, &[63], &[], &[]).unwrap();
-    let mut forest = Forest::from_bytes(
+    let cfg = WalkerConfig::builder(64)
+        .max_group_width(128)
+        .varying([63])
+        .build()
+        .unwrap();
+    let forest = Forest::from_bytes(
         &simd_json::to_vec(&value).unwrap(),
         ModelFormat::TreeliteJson,
         cfg,
-        &ParseConfig::default(),
+        &LoadOptions::default(),
     )
     .unwrap();
     let mut result = vec![0.0; 128];
-    forest.predict(&vec![0.0; 128 * 64], &mut result, 0, 128);
-}
-
-#[test]
-fn prediction_checks_structural_mutations_width_and_overflow() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-    for change in 0..5 {
-        let mut f = load("sigmoid_f64.bin", ModelFormat::TreeliteBinaryV4, 32).unwrap();
-        f.predict(&[0.0; 2], &mut [0.0], 0, 1); // allocate workspace first
-        match change {
-            0 => f.config.n_features = 1,
-            1 => f.config.max_group_width = 64,
-            2 => f.config.varying_mask = 0,
-            3 => f.config.mono_inc_mask = 1,
-            _ => f.config.mono_dec_mask = 1,
-        }
-        assert!(catch_unwind(AssertUnwindSafe(|| f.predict(&[0.0; 2], &mut [0.0], 0, 1))).is_err());
-        assert!(
-            catch_unwind(AssertUnwindSafe(|| f.predict_full(
-                &[0.0; 2],
-                &mut [0.0],
-                0,
-                1
-            )))
-            .is_err()
-        );
-        assert!(
-            catch_unwind(AssertUnwindSafe(|| f.predict_with_stats(
-                &[0.0; 2],
-                &mut [0.0],
-                0,
-                1
-            )))
-            .is_err()
-        );
-    }
-    let mut f = load("sigmoid_f64.bin", ModelFormat::TreeliteBinaryV4, 32).unwrap();
-    assert!(
-        catch_unwind(AssertUnwindSafe(|| f.predict(
-            &[0.0; 66],
-            &mut [0.0; 33],
-            0,
-            33
-        )))
-        .is_err()
-    );
-    assert!(
-        catch_unwind(AssertUnwindSafe(|| f.predict_with_stats(
-            &[0.0; 66],
-            &mut [0.0; 33],
-            0,
-            33
-        )))
-        .is_err()
-    );
-    assert!(
-        catch_unwind(AssertUnwindSafe(|| f.predict_full(
-            &[],
-            &mut [],
-            usize::MAX - 1,
-            usize::MAX
-        )))
-        .is_err()
-    );
-    f.predict_full(&[0.0; 66], &mut [0.0; 33], 0, 33);
+    forest
+        .predictor()
+        .predict_group(&vec![0.0; 128 * 64], &mut result);
 }
 
 #[test]
@@ -566,7 +532,7 @@ fn rejects_bad_json_nodes_and_topology() {
             bad.as_bytes(),
             ModelFormat::TreeliteJson,
             config(128),
-            &ParseConfig::default()
+            &LoadOptions::default()
         )
         .is_err()
     );
@@ -664,7 +630,7 @@ fn binary_result(b: &[u8]) -> Result<Forest, LoadError> {
         b,
         ModelFormat::TreeliteBinaryV4,
         config(128),
-        &ParseConfig::default(),
+        &LoadOptions::default(),
     )
 }
 #[test]
@@ -740,8 +706,8 @@ fn binary_truncation_lengths_extensions_metadata_and_nodes() {
         seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
         let mut b = original.clone();
         b[(seed as usize) % original.len()] ^= (seed >> 32) as u8;
-        if let Ok(mut f) = binary_result(&b) {
-            f.predict(&[0.0; 4], &mut [0.0; 2], 0, 2);
+        if let Ok(f) = binary_result(&b) {
+            f.predictor().predict_group(&[0.0; 4], &mut [0.0; 2]);
         }
     }
 }
@@ -797,9 +763,9 @@ fn deep_trees_and_deep_json_are_bounded() {
             nested.as_bytes(),
             ModelFormat::TreeliteJson,
             config(128),
-            &ParseConfig::default()
+            &LoadOptions::default()
         ),
         Err(LoadError::Limit(_))
     ));
-    assert!(WalkerConfig::try_from_json(nested.as_bytes()).is_err());
+    assert!(WalkerConfig::from_json(nested.as_bytes()).is_err());
 }

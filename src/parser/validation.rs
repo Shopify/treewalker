@@ -55,10 +55,11 @@ impl Metadata {
                 self.num_tree
             )));
         }
-        if self.num_feature != config.n_features as i64 {
+        if self.num_feature != config.n_features() as i64 {
             return Err(LoadError::MalformedModel(format!(
                 "num_feature {} differs from configured n_features {}",
-                self.num_feature, config.n_features
+                self.num_feature,
+                config.n_features()
             )));
         }
         if !matches!(

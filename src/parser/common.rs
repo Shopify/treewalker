@@ -100,9 +100,9 @@ pub fn next_down(x: f64) -> f64 {
 
 /// Classify a feature into its varying type for the node flags field.
 pub const fn classify_feature(config: &WalkerConfig, feat: usize) -> u8 {
-    if config.is_mono_inc(feat) {
+    if config.is_increasing(feat) {
         SPLIT_MONO_INC
-    } else if config.is_mono_dec(feat) {
+    } else if config.is_decreasing(feat) {
         SPLIT_MONO_DEC
     } else if config.is_varying(feat) {
         SPLIT_NON_MONO

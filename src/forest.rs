@@ -2,7 +2,7 @@
 //!
 //! # Memory layout
 //!
-//! All data lives in three contiguous allocations on [`Forest`]:
+//! All data lives in three contiguous allocations on the model behind [`Forest`]:
 //! - `nodes: Vec<Node>` — all trees' nodes in one buffer (~52 MB for 3.3M nodes).
 //! - `bitsets: Vec<u8>` — all categorical split bitsets, packed (~25 MB after dedup).
 //! - `trees: Vec<Tree>` — per-tree metadata, 12 bytes each (~11 KB for 938 trees).
@@ -31,8 +31,9 @@
 //! always `idx + 1` (the fall-through convention).
 
 use std::path::Path;
+use std::sync::Arc;
 
-use crate::config::{ParseConfig, WalkerConfig};
+use crate::config::{LoadOptions, WalkerConfig};
 use crate::parser;
 use crate::{LoadError, ModelFormat};
 use std::io::{Cursor, Read};
@@ -152,11 +153,11 @@ pub const SPLIT_NON_MONO: u8 = 3;
 /// and tree 200 both split on "feature 14 ≤ 3.5 with default_left=true", they
 /// share the same `VaryingPredicate` and the same `varying_pred_id`. This means the
 /// precompute pass evaluates ~5K unique predicates instead of ~50K total varying nodes.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum VaryingPredicate {
     Num {
         feature: u16,
-        threshold: f64,
+        threshold: Threshold,
         default_left: bool,
     },
     CatInline {
@@ -172,92 +173,24 @@ pub(crate) enum VaryingPredicate {
     },
 }
 
-// Manual Hash/Eq using f64::to_bits() so VaryingPredicate can serve as its own HashMap key,
-// eliminating the need for a separate key type.
-impl std::hash::Hash for VaryingPredicate {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(self).hash(state);
-        match *self {
-            Self::Num {
-                feature,
-                threshold,
-                default_left,
-            } => {
-                feature.hash(state);
-                threshold.to_bits().hash(state);
-                default_left.hash(state);
-            }
-            Self::CatInline {
-                feature,
-                default_left,
-                word,
-            } => {
-                feature.hash(state);
-                default_left.hash(state);
-                word.hash(state);
-            }
-            Self::CatPool {
-                feature,
-                default_left,
-                offset,
-                n_words,
-            } => {
-                feature.hash(state);
-                default_left.hash(state);
-                offset.hash(state);
-                n_words.hash(state);
-            }
-        }
-    }
-}
+/// A split threshold compared and hashed by its bits, so `-0.0` and `0.0` are distinct
+/// predicates and [`VaryingPredicate`] can derive `Eq` and `Hash` to key the dedup map.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Threshold(pub f64);
 
-impl PartialEq for VaryingPredicate {
+impl PartialEq for Threshold {
     fn eq(&self, other: &Self) -> bool {
-        match (*self, *other) {
-            (
-                Self::Num {
-                    feature: f1,
-                    threshold: t1,
-                    default_left: d1,
-                },
-                Self::Num {
-                    feature: f2,
-                    threshold: t2,
-                    default_left: d2,
-                },
-            ) => f1 == f2 && t1.to_bits() == t2.to_bits() && d1 == d2,
-            (
-                Self::CatInline {
-                    feature: f1,
-                    default_left: d1,
-                    word: w1,
-                },
-                Self::CatInline {
-                    feature: f2,
-                    default_left: d2,
-                    word: w2,
-                },
-            ) => f1 == f2 && d1 == d2 && w1 == w2,
-            (
-                Self::CatPool {
-                    feature: f1,
-                    default_left: d1,
-                    offset: o1,
-                    n_words: n1,
-                },
-                Self::CatPool {
-                    feature: f2,
-                    default_left: d2,
-                    offset: o2,
-                    n_words: n2,
-                },
-            ) => f1 == f2 && d1 == d2 && o1 == o2 && n1 == n2,
-            _ => false,
-        }
+        self.0.to_bits() == other.0.to_bits()
     }
 }
 
-impl Eq for VaryingPredicate {}
+impl Eq for Threshold {}
+
+impl std::hash::Hash for Threshold {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
 
 impl VaryingPredicate {
     /// Feature index this predicate splits on.
@@ -275,7 +208,7 @@ impl VaryingPredicate {
     pub(crate) fn goes_left<const F32: bool>(&self, val: f64, bitsets: &[u8]) -> bool {
         match *self {
             Self::Num {
-                threshold,
+                threshold: Threshold(threshold),
                 default_left,
                 ..
             } => {
@@ -318,6 +251,8 @@ impl VaryingPredicate {
                         return false;
                     }
                     let byte_offset = offset as usize + word_idx * 4;
+                    // SAFETY: the parser writes n_words × 4 bytes at `offset` in the
+                    // pool, and word_idx < n_words.
                     let word = unsafe {
                         bitsets
                             .as_ptr()
@@ -345,6 +280,10 @@ pub struct Tree {
     /// point into earlier regions. The hot path uses per-node absolute offsets
     /// (stored in `Node.value`), not this field. Retained for diagnostics and
     /// memory accounting.
+    #[cfg_attr(
+        not(feature = "research"),
+        expect(dead_code, reason = "read through the research introspection")
+    )]
     pub bitset_start: u32,
 }
 
@@ -366,7 +305,6 @@ pub enum ThresholdType {
 /// - `F32=false` (LightGBM): `val <= threshold` (thresholds adjusted by `next_down` at parse time)
 /// - `F32=true` (XGBoost): `(val as f32) < (threshold as f32)` (f32 comparison, thresholds as-is)
 #[inline]
-#[allow(clippy::cast_possible_truncation)]
 pub(crate) fn threshold_go_left<const F32: bool>(val: f64, threshold: f64) -> bool {
     if F32 {
         (val as f32) < (threshold as f32)
@@ -405,11 +343,12 @@ pub(crate) struct PrefixGroup {
     pub trees: Vec<u32>,
 }
 
-pub struct Forest {
+/// The parsed model: all trees sharing contiguous node and bitset pools, with the
+/// feature classification they were laid out for. Immutable once loaded.
+pub(crate) struct Model {
     pub(crate) output: parser::Output,
-    pub(crate) compiled_config: WalkerConfig,
     pub(crate) trees: Vec<Tree>,
-    pub config: WalkerConfig,
+    pub(crate) config: WalkerConfig,
     pub(crate) nodes: Vec<Node>,
     pub(crate) bitsets: Vec<u8>,
     pub(crate) varying_predicates: Vec<VaryingPredicate>,
@@ -423,62 +362,53 @@ pub struct Forest {
     /// Fixed-point scale for exact leaf sums ([`crate::exact::scale`]); `None`
     /// when the leaf values cannot be summed exactly and prediction adds in `f64`.
     pub(crate) fixed_scale: Option<i32>,
-    /// Reusable scratch space for partial evaluation. Lazily initialized on first
-    /// `predict` call. Private — callers never touch this.
-    pub(crate) workspace: Option<crate::predict::Workspace>,
+}
+
+/// A loaded model: a cheap, immutable handle that can be cloned and shared
+/// across threads.
+///
+/// Predictions go through a [`Predictor`](crate::Predictor), which owns the
+/// scratch space; create one per worker with [`Forest::predictor`].
+#[derive(Clone)]
+pub struct Forest {
+    pub(crate) model: Arc<Model>,
 }
 
 impl std::fmt::Debug for Forest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let m = &*self.model;
         f.debug_struct("Forest")
-            .field("trees", &self.trees.len())
-            .field("nodes", &self.nodes.len())
-            .field("bitsets_bytes", &self.bitsets.len())
-            .field("varying_predicates", &self.varying_predicates.len())
-            .field("threshold_type", &self.threshold_type)
+            .field("trees", &m.trees.len())
+            .field("nodes", &m.nodes.len())
+            .field("bitsets_bytes", &m.bitsets.len())
+            .field("varying_predicates", &m.varying_predicates.len())
+            .field("threshold_type", &m.threshold_type)
             .finish_non_exhaustive()
     }
 }
 
 impl Forest {
-    /// Compatibility wrapper; panics on I/O, malformed or unsupported models.
-    /// Prefer [`Self::try_load`].
-    pub fn load(model_path: impl AsRef<Path>, config_path: impl AsRef<Path>) -> Self {
-        Self::try_load(model_path, config_path).unwrap_or_else(|e| panic!("{e}"))
-    }
-
-    /// Compatibility wrapper; panics on load errors. Prefer [`Self::try_load_with_config`].
-    pub fn load_with_config(
-        model_path: impl AsRef<Path>,
-        config_path: impl AsRef<Path>,
-        parse_config: &ParseConfig,
-    ) -> Self {
-        Self::try_load_with_config(model_path, config_path, parse_config)
-            .unwrap_or_else(|e| panic!("{e}"))
-    }
-
-    /// Load a supported Treelite `.bin` or `.json` model and grouping configuration.
-    pub fn try_load(
+    /// Load a supported Treelite `.bin` or `.json` model and its grouping
+    /// configuration file, with the default [`LoadOptions`].
+    ///
+    /// The model format follows the file extension. Unsupported model semantics, such
+    /// as multiclass output, return [`LoadError::Unsupported`].
+    pub fn load(
         model_path: impl AsRef<Path>,
         config_path: impl AsRef<Path>,
     ) -> Result<Self, LoadError> {
-        Self::try_load_with_config(model_path, config_path, &ParseConfig::default())
+        Self::load_with(model_path, config_path, &LoadOptions::default())
     }
 
-    /// Load model/configuration files with explicit parse-time optimization options.
-    pub fn try_load_with_config(
+    /// As [`Self::load`], with explicit load options.
+    pub fn load_with(
         model_path: impl AsRef<Path>,
         config_path: impl AsRef<Path>,
-        parse_config: &ParseConfig,
+        options: &LoadOptions,
     ) -> Result<Self, LoadError> {
-        let config = WalkerConfig::try_from_file(config_path)?;
+        let config = WalkerConfig::from_file(config_path)?;
         let format = ModelFormat::from_path(model_path.as_ref())?;
-        Self::from_reader(
-            std::fs::File::open(model_path)?,
-            format,
-            config,
-            parse_config,
-        )
+        Self::from_reader(std::fs::File::open(model_path)?, format, config, options)
     }
 
     /// Load a model from memory with explicit format and validated grouping metadata.
@@ -486,9 +416,9 @@ impl Forest {
         bytes: &[u8],
         format: ModelFormat,
         config: WalkerConfig,
-        parse_config: &ParseConfig,
+        options: &LoadOptions,
     ) -> Result<Self, LoadError> {
-        Self::from_reader(Cursor::new(bytes), format, config, parse_config)
+        Self::from_reader(Cursor::new(bytes), format, config, options)
     }
 
     /// Load a model from a reader. Binary decoding streams with reusable tree buffers;
@@ -498,7 +428,7 @@ impl Forest {
         reader: impl Read,
         format: ModelFormat,
         config: WalkerConfig,
-        parse_config: &ParseConfig,
+        options: &LoadOptions,
     ) -> Result<Self, LoadError> {
         let parser::ParsedModel {
             trees,
@@ -506,18 +436,18 @@ impl Forest {
             bitsets,
             threshold_type,
             output,
-        } = parser::parse_reader(reader, format, &config, parse_config)?;
-        let mut varying_predicates = if parse_config.disable_predicate_dedup {
+        } = parser::parse_reader(reader, format, &config, options)?;
+        let mut varying_predicates = if options.disable_predicate_dedup {
             parser::build_varying_predicates_no_dedup(&mut nodes)?
         } else {
             parser::build_varying_predicates(&mut nodes)?
         };
         parser::sort_varying_predicates(&mut varying_predicates, &mut nodes);
         let feature_ranges = parser::build_feature_ranges(&varying_predicates);
-        let (prefix_groups, prefix_depth) = if parse_config.prefix_depth > 0 {
+        let (prefix_groups, prefix_depth) = if options.prefix_depth > 0 {
             let (groups, _ungrouped) =
-                parser::build_prefix_groups(&trees, &nodes, &config, parse_config.prefix_depth);
-            (groups, parse_config.prefix_depth)
+                parser::build_prefix_groups(&trees, &nodes, &config, options.prefix_depth);
+            (groups, options.prefix_depth)
         } else {
             (Vec::new(), 0)
         };
@@ -527,79 +457,60 @@ impl Forest {
             trees.len(),
         );
 
+        // SAFETY: malloc_trim takes no pointers; it only returns free heap pages to
+        // the system.
         #[cfg(target_os = "linux")]
         unsafe {
             libc::malloc_trim(0);
         }
 
         Ok(Self {
-            compiled_config: config.clone(),
-            output,
-            trees,
-            config,
-            nodes,
-            bitsets,
-            varying_predicates,
-            feature_ranges,
-            threshold_type,
-            prefix_groups,
-            prefix_depth,
-            fixed_scale,
-            workspace: None,
+            model: Arc::new(Model {
+                output,
+                trees,
+                config,
+                nodes,
+                bitsets,
+                varying_predicates,
+                feature_ranges,
+                threshold_type,
+                prefix_groups,
+                prefix_depth,
+                fixed_scale,
+            }),
         })
     }
 
+    /// The feature classification the model was loaded with.
     #[inline]
     #[must_use]
-    pub fn tree_nodes(&self, tree: &Tree) -> &[Node] {
-        &self.nodes[tree.node_start as usize..(tree.node_start + tree.node_count) as usize]
+    pub fn config(&self) -> &WalkerConfig {
+        &self.model.config
     }
 
+    /// Whether prediction sums leaf values exactly and rounds once, so each row's tree
+    /// sum is the `f64` nearest to the true sum whatever the tree order. Averaging, the
+    /// base score and the link function are applied afterwards in ordinary `f64`.
+    /// False only if a leaf is not finite or the leaf exponents span too wide a range
+    /// for a 126-bit fixed point; prediction then adds in `f64` in tree order.
     #[inline]
     #[must_use]
-    pub fn nodes(&self) -> &[Node] {
-        &self.nodes
+    pub fn exact_sums(&self) -> bool {
+        self.model.fixed_scale.is_some()
     }
+}
 
-    #[inline]
-    #[must_use]
-    pub fn trees(&self) -> &[Tree] {
-        &self.trees
-    }
-
-    #[inline]
-    #[must_use]
-    pub const fn bitset_bytes(&self) -> usize {
-        self.bitsets.len()
-    }
-
-    #[inline]
-    #[must_use]
-    pub const fn threshold_type(&self) -> ThresholdType {
-        self.threshold_type
-    }
-
-    /// Whether `predict` sums leaf values exactly and rounds once, so predictions are
-    /// the `f64` nearest to the true sum whatever the tree order. False only if a leaf
-    /// is not finite or the leaf exponents span too wide a range for a 126-bit fixed
-    /// point; prediction then adds in `f64` in tree order.
-    #[inline]
-    #[must_use]
-    pub const fn exact_sums(&self) -> bool {
-        self.fixed_scale.is_some()
-    }
-
+impl Model {
     /// Test if `category` belongs to a categorical node's split set.
     ///
     /// For inline nodes the bitset word is in `node.value`. For pool nodes
     /// the packed u32 words start at `node.value` (byte offset) in `self.bitsets`.
     ///
     /// Out-of-range categories return false (non-membership). The parser normalizes
-    /// membership-right splits by swapping children and missing routing. The last
-    /// argument is retained for source compatibility; only NaN uses missing routing.
+    /// membership-right splits by swapping children and missing routing, and only
+    /// NaN uses missing routing, which the caller handles.
     #[inline]
-    #[must_use]
-    pub const fn cat_test(&self, node: &Node, category: i32, _default_left: bool) -> bool {
+    pub(crate) const fn cat_test(&self, node: &Node, category: i32) -> bool {
         if category < 0 {
             return false;
         }

@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use treewalker_gbdt::config::WalkerConfig;
-use treewalker_gbdt::forest::Forest;
-use treewalker_gbdt::{LoadError, ParseConfig};
+use treewalker_gbdt::{Forest, LoadError, LoadOptions, WalkerConfig};
 
 fn test_dir() -> PathBuf {
     PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
@@ -43,13 +41,13 @@ fn empty_thresholds(path: &Path) -> usize {
 
 /// Load the cell's LightGBM JSON export, or `None` if the export is missing or has
 /// empty thresholds. Every other load error fails the test.
-fn load_json(dir: &Path, parse: &ParseConfig) -> Option<Forest> {
+fn load_json(dir: &Path, parse: &LoadOptions) -> Option<Forest> {
     let model = dir.join("lightgbm/model_treelite.json");
     if !model.exists() {
         eprintln!("Skipping: {} not found (run prepare.py)", model.display());
         return None;
     }
-    match Forest::try_load_with_config(&model, dir.join("walker_config.json"), parse) {
+    match Forest::load_with(&model, dir.join("walker_config.json"), parse) {
         Ok(forest) => Some(forest),
         Err(e) => {
             let empty = empty_thresholds(&model);
@@ -87,7 +85,7 @@ fn test_parse_model_basic() {
         return;
     }
 
-    let Some(forest) = load_json(&dir, &ParseConfig::default()) else {
+    let Some(forest) = load_json(&dir, &LoadOptions::default()) else {
         return;
     };
     assert!(!forest.trees().is_empty(), "should parse at least one tree");
@@ -117,10 +115,10 @@ fn test_tree_order_is_deterministic() {
         return;
     }
 
-    let Some(forest_a) = load_json(&dir, &ParseConfig::default()) else {
+    let Some(forest_a) = load_json(&dir, &LoadOptions::default()) else {
         return;
     };
-    let forest_b = load_json(&dir, &ParseConfig::default()).unwrap();
+    let forest_b = load_json(&dir, &LoadOptions::default()).unwrap();
 
     assert_eq!(forest_a.trees().len(), forest_b.trees().len());
     for (a, b) in forest_a.trees().iter().zip(forest_b.trees()) {
@@ -137,13 +135,13 @@ fn test_tree_ordering_changes_order_but_not_output() {
         return;
     }
 
-    let config = WalkerConfig::from_file(dir.join("walker_config.json"));
-    let Some(mut forest_ordered) = load_json(&dir, &ParseConfig::default()) else {
+    let config = WalkerConfig::from_file(dir.join("walker_config.json")).unwrap();
+    let Some(forest_ordered) = load_json(&dir, &LoadOptions::default()) else {
         return;
     };
-    let mut forest_original = load_json(
+    let forest_original = load_json(
         &dir,
-        &ParseConfig {
+        &LoadOptions {
             disable_tree_ordering: true,
             ..Default::default()
         },
@@ -152,8 +150,8 @@ fn test_tree_ordering_changes_order_but_not_output() {
 
     assert_eq!(forest_ordered.trees().len(), forest_original.trees().len());
 
-    let pl = config.max_group_width;
-    let n_features = config.n_features;
+    let pl = config.max_group_width();
+    let n_features = config.n_features();
     let n_obs = 2;
     let n_rows = n_obs * pl;
     let mut data = vec![0.5f64; n_rows * n_features];
@@ -167,12 +165,12 @@ fn test_tree_ordering_changes_order_but_not_output() {
     let mut results_ordered = vec![0.0f64; n_rows];
     let mut results_original = vec![0.0f64; n_rows];
 
-    for s in 0..n_obs {
-        let start = s * pl;
-        let end = start + pl;
-        forest_ordered.predict(&data, &mut results_ordered, start, end);
-        forest_original.predict(&data, &mut results_original, start, end);
-    }
+    forest_ordered
+        .predictor()
+        .predict_fixed(&data, pl, &mut results_ordered);
+    forest_original
+        .predictor()
+        .predict_fixed(&data, pl, &mut results_original);
 
     for (i, (a, b)) in results_ordered
         .iter()
@@ -190,7 +188,7 @@ fn test_lightgbm_json_matches_native() {
         return;
     }
 
-    let Some(mut forest) = load_json(&dir, &ParseConfig::default()) else {
+    let Some(forest) = load_json(&dir, &LoadOptions::default()) else {
         return;
     };
     let preds_path = dir.join("lightgbm/predictions.npy");
@@ -207,15 +205,11 @@ fn test_lightgbm_json_matches_native() {
     let mut results = vec![0.0f64; n_rows];
     let offsets = load_group_offsets_if_present(&dir);
 
+    let mut predictor = forest.predictor();
     if let Some(offs) = &offsets {
-        for pair in offs.windows(2) {
-            forest.predict(&data, &mut results, pair[0], pair[1]);
-        }
+        predictor.predict_groups(&data, offs, &mut results);
     } else {
-        let pl = forest.config.max_group_width;
-        for s in 0..(n_rows / pl) {
-            forest.predict(&data, &mut results, s * pl, (s + 1) * pl);
-        }
+        predictor.predict_fixed(&data, forest.config().max_group_width(), &mut results);
     }
 
     let max_diff = results
@@ -228,18 +222,22 @@ fn test_lightgbm_json_matches_native() {
 }
 
 #[test]
-#[should_panic(expected = "must end in .bin or .json")]
 fn test_reject_non_json() {
-    Forest::load("model.csv", temp_config("reject_non_json"));
+    let err = Forest::load("model.csv", temp_config("reject_non_json")).unwrap_err();
+    assert!(matches!(err, LoadError::Unsupported(_)), "{err}");
+    assert!(
+        err.to_string().contains("must end in .bin or .json"),
+        "{err}"
+    );
 }
 
 #[test]
-#[should_panic(expected = "unknown JSON field")]
 fn test_reject_unknown_json_schema() {
     let config = temp_config("reject_unknown_json_schema");
     let model = config.with_file_name("bad_model.json");
     std::fs::write(&model, r#"{"foo": "bar"}"#).unwrap();
-    Forest::load(&model, &config);
+    let err = Forest::load(&model, &config).unwrap_err();
+    assert!(err.to_string().contains("unknown JSON field"), "{err}");
 }
 
 fn load_test_bin(path: &Path) -> (Vec<f64>, usize) {

@@ -1,4 +1,4 @@
-use treewalker_gbdt::config::WalkerConfig;
+use treewalker_gbdt::WalkerConfig;
 
 fn test_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
@@ -21,11 +21,11 @@ fn test_load_walker_config() {
         );
         return;
     }
-    let config = WalkerConfig::from_file(&config_path);
+    let config = WalkerConfig::from_file(&config_path).unwrap();
     // Expedia nt500_md8 (a factorial-grid config): 21 features, 10 varying
     // (indices 11-20), widest test session 37 rows.
-    assert_eq!(config.n_features, 21);
-    assert_eq!(config.max_group_width, 37);
+    assert_eq!(config.n_features(), 21);
+    assert_eq!(config.max_group_width(), 37);
     for v in 11..=20 {
         assert!(config.is_varying(v), "feature {v} should be varying");
     }

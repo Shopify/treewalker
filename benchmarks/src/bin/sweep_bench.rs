@@ -25,17 +25,58 @@
 //! If --emit-extended is set, includes rss_kb, parse_time_us, model_bytes, ns_per_row
 //! in the JSON output.
 //!
-//! Outputs JSON to stdout with timing (median, p5, p95 µs) and PredictStats
+//! Outputs JSON to stdout with timing (median, p5, p95 µs) and work counters
 //! for each (ablation_mode, group_width) combination.
+//!
+//! Every mode, the unablated baseline included, is timed through the research
+//! predictor with the mode's runtime flags, so ratios between modes compare one build.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use treewalker_bench::get_rss_kb;
-use treewalker_gbdt::ParseConfig;
-use treewalker_gbdt::config::AblationMode;
-use treewalker_gbdt::forest::Forest;
-use treewalker_gbdt::predict::PredictStats;
+use treewalker_gbdt::research::{Ablation, ResearchPredictor, WorkCounters};
+use treewalker_gbdt::{Forest, LoadOptions};
+
+/// A loaded forest and the research predictor that times one mode, with the mode's
+/// runtime ablation flags.
+struct ModeForest {
+    forest: Forest,
+    predictor: ResearchPredictor,
+}
+
+impl ModeForest {
+    fn new(forest: Forest, ablation: Ablation) -> Self {
+        let predictor = forest.research_predictor(ablation);
+        Self { forest, predictor }
+    }
+
+    /// Predict the group of rows `start..end` of `data` into `results[start..end]`.
+    fn predict(&mut self, data: &[f64], results: &mut [f64], start: usize, end: usize) {
+        let nf = self.forest.config().n_features();
+        self.predictor
+            .predict_group(&data[start * nf..end * nf], &mut results[start..end]);
+    }
+
+    /// As [`Self::predict`], through the counted build.
+    fn predict_counted(
+        &mut self,
+        data: &[f64],
+        results: &mut [f64],
+        start: usize,
+        end: usize,
+    ) -> WorkCounters {
+        let nf = self.forest.config().n_features();
+        self.predictor
+            .predict_group_counted(&data[start * nf..end * nf], &mut results[start..end])
+    }
+}
+
+/// The full walk over the rows `start..end` of `data` into `results[start..end]`.
+fn predict_full(forest: &Forest, data: &[f64], results: &mut [f64], start: usize, end: usize) {
+    let nf = forest.config().n_features();
+    forest.predict_full_walk(&data[start * nf..end * nf], &mut results[start..end]);
+}
 
 /// Load variable-length group offsets from a binary file.
 ///
@@ -168,16 +209,15 @@ fn bench<F: FnMut()>(
     }
 }
 
-/// Collect stats across all observations.
-fn collect_stats(forest: &mut Forest, data: &[f64], groups: &Groups) -> PredictStats {
+/// Collect work counters across all observations.
+fn collect_stats(forest: &mut ModeForest, data: &[f64], groups: &Groups) -> WorkCounters {
     let n_obs = groups.n_obs();
-    let mut results = vec![0.0f64; data.len() / forest.config.n_features];
-    let mut total = PredictStats::default();
+    let mut results = vec![0.0f64; data.len() / forest.forest.config().n_features()];
+    let mut total = WorkCounters::default();
 
     for s in 0..n_obs {
         let (row_start, row_end) = groups.start_end(s);
-        let stats = forest.predict_with_stats(data, &mut results, row_start, row_end);
-        total += stats;
+        total += forest.predict_counted(data, &mut results, row_start, row_end);
     }
 
     total
@@ -247,7 +287,7 @@ fn bench_full_baseline(
     for w in 0..ctl.warmup {
         for s in 0..n_obs {
             let (start, end) = groups.start_end(s);
-            forest.predict_full(data, &mut results, start, end);
+            predict_full(forest, data, &mut results, start, end);
         }
         // Respect max_time budget during warmup.
         if let Some(budget) = ctl.max_time
@@ -265,7 +305,7 @@ fn bench_full_baseline(
         || {
             for s in 0..n_obs {
                 let (start, end) = groups.start_end(s);
-                forest.predict_full(data, &mut results, start, end);
+                predict_full(forest, data, &mut results, start, end);
             }
         },
         n_obs,
@@ -278,7 +318,7 @@ fn bench_full_baseline(
 /// Run one ablation mode: warmup, partial bench, stats, and produce a `BenchResult`.
 fn run_one_mode(
     mode_name: &str,
-    forest: &mut Forest,
+    forest: &mut ModeForest,
     full: &TimingSummary,
     data: &[f64],
     groups: &Groups,
@@ -324,7 +364,7 @@ fn run_one_mode(
 
     let rss_kb = get_rss_kb();
     let stats = if ctl.skip_stats {
-        PredictStats::default()
+        WorkCounters::default()
     } else {
         collect_stats(forest, data, groups)
     };
@@ -342,7 +382,7 @@ fn run_one_mode(
             Some(partial.median * 1000.0 / total_rows as f64 * n_obs as f64),
             Some(rss_kb),
             Some(ctl.parse_time_us),
-            Some(model_bytes(forest)),
+            Some(model_bytes(&forest.forest)),
         )
     } else {
         (None, None, None, None)
@@ -368,7 +408,7 @@ fn run_one_mode(
         partition_row_evals: stats.partition_row_evals,
         precompute_row_evals: stats.precompute_row_evals,
         n_obs,
-        n_trees: forest.trees().len(),
+        n_trees: forest.forest.trees().len(),
         ns_per_row,
         rss_kb: ext_rss,
         parse_time_us: ext_parse,
@@ -463,17 +503,18 @@ impl TuningFlags {
             || self.prefix_depth != d.prefix_depth
     }
 
-    const fn to_ablation_mode(&self) -> AblationMode {
-        AblationMode {
+    const fn to_ablation(&self) -> Ablation {
+        Ablation {
             disable_varying_precompute: self.precompute,
             disable_unsplit: self.unsplit,
             disable_monotonic: self.monotonic,
             disable_predicate_sweep: self.predicate_sweep,
+            disable_exact_sums: false,
         }
     }
 
-    const fn to_parse_config(&self) -> ParseConfig {
-        ParseConfig {
+    const fn to_options(&self) -> LoadOptions {
+        LoadOptions {
             disable_tree_ordering: self.tree_ordering,
             disable_bitset_intern: self.bitset_intern,
             prefix_depth: self.prefix_depth,
@@ -510,7 +551,7 @@ fn split_into_batches(pool: &[usize], n_batches: usize) -> Vec<Vec<usize>> {
 /// A named mode with its forest ready to predict.
 struct BlockMode {
     name: String,
-    forest: Forest,
+    forest: ModeForest,
 }
 
 /// Per-block per-mode timing record, emitted as one JSONL line.
@@ -528,7 +569,7 @@ struct BlockRecord {
 
 /// Calibrate inner_repeats so one timed sample ≈ target_ms.
 fn calibrate_repeats(
-    forest: &mut Forest,
+    forest: &mut ModeForest,
     data: &[f64],
     results: &mut [f64],
     batch_indices: &[usize],
@@ -651,7 +692,7 @@ fn run_block_mode(
                 for &g in batch {
                     let (s, e) = groups.start_end(g);
                     if is_full {
-                        m.forest.predict_full(data, &mut results, s, e);
+                        predict_full(&m.forest.forest, data, &mut results, s, e);
                     } else {
                         m.forest.predict(data, &mut results, s, e);
                     }
@@ -687,14 +728,14 @@ fn run_block_mode(
     }
 }
 
-/// Parse a comma-separated mode spec into (name, AblationMode, ParseConfig) triples.
+/// Parse a comma-separated mode spec into (name, Ablation, LoadOptions) triples.
 ///
 /// Modes prefixed with "p:" use non-default parse configs; others share the
 /// default forest.  Recognized names:
 ///   baseline, no_unsplit, no_precompute, no_monotonic, no_sweep, all_disabled,
 ///   full (full-walk baseline),
 ///   p:no_tree_ordering, p:no_bitset_intern, p:no_prefix_grouping
-fn parse_mode_specs(spec: &str) -> Vec<(String, AblationMode, ParseConfig)> {
+fn parse_mode_specs(spec: &str) -> Vec<(String, Ablation, LoadOptions)> {
     let mut modes = Vec::new();
     for name in spec.split(',') {
         let name = name.trim();
@@ -702,62 +743,63 @@ fn parse_mode_specs(spec: &str) -> Vec<(String, AblationMode, ParseConfig)> {
             continue;
         }
         let (ablation, parse) = match name {
-            "baseline" | "full" => (AblationMode::default(), ParseConfig::default()),
+            "baseline" | "full" => (Ablation::default(), LoadOptions::default()),
             "no_unsplit" => (
-                AblationMode {
+                Ablation {
                     disable_unsplit: true,
                     ..Default::default()
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "no_precompute" => (
-                AblationMode {
+                Ablation {
                     disable_varying_precompute: true,
                     ..Default::default()
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "no_monotonic" => (
-                AblationMode {
+                Ablation {
                     disable_monotonic: true,
                     disable_varying_precompute: true,
                     ..Default::default()
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "no_sweep" => (
-                AblationMode {
+                Ablation {
                     disable_predicate_sweep: true,
                     ..Default::default()
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "all_disabled" => (
-                AblationMode {
+                Ablation {
                     disable_monotonic: true,
                     disable_unsplit: true,
                     disable_varying_precompute: true,
                     disable_predicate_sweep: true,
+                    disable_exact_sums: false,
                 },
-                ParseConfig::default(),
+                LoadOptions::default(),
             ),
             "p:no_tree_ordering" => (
-                AblationMode::default(),
-                ParseConfig {
+                Ablation::default(),
+                LoadOptions {
                     disable_tree_ordering: true,
                     ..Default::default()
                 },
             ),
             "p:no_bitset_intern" => (
-                AblationMode::default(),
-                ParseConfig {
+                Ablation::default(),
+                LoadOptions {
                     disable_bitset_intern: true,
                     ..Default::default()
                 },
             ),
             "p:no_prefix_grouping" => (
-                AblationMode::default(),
-                ParseConfig {
+                Ablation::default(),
+                LoadOptions {
                     prefix_depth: 0,
                     ..Default::default()
                 },
@@ -1031,7 +1073,7 @@ fn main() {
         let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
 
         // Build groups (needed for index → row mapping).
-        let temp_forest = Forest::load(&model_path, &config_path);
+        let temp_forest = Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}"));
         let groups = build_groups(&temp_forest, n_rows, group_offsets_path.as_ref());
         let n_total_groups = groups.n_obs();
         drop(temp_forest);
@@ -1051,25 +1093,16 @@ fn main() {
             },
         );
 
-        // Build forests: group by ParseConfig to avoid redundant parses.
+        // Build forests: group by LoadOptions to avoid redundant parses.
         let mut modes: Vec<BlockMode> = Vec::with_capacity(mode_specs.len());
-        for (name, ablation, parse_config) in &mode_specs {
-            if name == "full" {
-                // Full-walk mode uses predict_full; handled specially.
-                // We still need a forest for it.
-                let f = Forest::load_with_config(&model_path, &config_path, parse_config);
-                modes.push(BlockMode {
-                    name: name.clone(),
-                    forest: f,
-                });
-            } else {
-                let mut f = Forest::load_with_config(&model_path, &config_path, parse_config);
-                f.config.ablation = *ablation;
-                modes.push(BlockMode {
-                    name: name.clone(),
-                    forest: f,
-                });
-            }
+        for (name, ablation, options) in &mode_specs {
+            // The full-walk mode uses only the forest; handled specially.
+            let f = Forest::load_with(&model_path, &config_path, options)
+                .unwrap_or_else(|e| panic!("{e}"));
+            modes.push(BlockMode {
+                name: name.clone(),
+                forest: ModeForest::new(f, *ablation),
+            });
         }
 
         eprintln!(
@@ -1105,22 +1138,23 @@ fn main() {
     if tuning.any_set() {
         // Composable single-config mode from --disable-* flags.
         let mode_name = compose_mode_name(&tuning);
-        let ablation = tuning.to_ablation_mode();
-        let parse_config = tuning.to_parse_config();
+        let ablation = tuning.to_ablation();
+        let options = tuning.to_options();
 
         let parse_start = Instant::now();
-        let mut forest = Forest::load_with_config(&model_path, &config_path, &parse_config);
+        let forest = Forest::load_with(&model_path, &config_path, &options)
+            .unwrap_or_else(|e| panic!("{e}"));
         let parse_time_us = parse_start.elapsed().as_nanos() as f64 / 1000.0;
-        forest.config.ablation = ablation;
+        let mut forest = ModeForest::new(forest, ablation);
 
         let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
-        let groups = build_groups(&forest, n_rows, group_offsets_path.as_ref());
+        let groups = build_groups(&forest.forest, n_rows, group_offsets_path.as_ref());
 
         eprintln!(
             "Loaded: {} trees, {} features, group_width={}, {} observations{}",
-            forest.trees().len(),
-            forest.config.n_features,
-            forest.config.max_group_width,
+            forest.forest.trees().len(),
+            forest.forest.config().n_features(),
+            forest.forest.config().max_group_width(),
             groups.n_obs(),
             if group_offsets_path.is_some() {
                 " (variable groups)"
@@ -1142,7 +1176,7 @@ fn main() {
                 actual_iters: 0,
             }
         } else {
-            bench_full_baseline(&forest, &data, &groups, &ctl)
+            bench_full_baseline(&forest.forest, &data, &groups, &ctl)
         };
 
         let result = run_one_mode(&mode_name, &mut forest, &full, &data, &groups, &ctl);
@@ -1151,7 +1185,7 @@ fn main() {
     } else {
         // Legacy mode: --mode filter or all 9 modes.
         let parse_start = Instant::now();
-        let forest = Forest::load(&model_path, &config_path);
+        let forest = Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}"));
         let default_parse_time_us = parse_start.elapsed().as_nanos() as f64 / 1000.0;
 
         let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
@@ -1160,8 +1194,8 @@ fn main() {
         eprintln!(
             "Loaded: {} trees, {} features, group_width={}, {} observations{}",
             forest.trees().len(),
-            forest.config.n_features,
-            forest.config.max_group_width,
+            forest.config().n_features(),
+            forest.config().max_group_width(),
             groups.n_obs(),
             if group_offsets_path.is_some() {
                 " (variable groups)"
@@ -1173,18 +1207,18 @@ fn main() {
 
         let should_run = |name: &str| -> bool { mode_filter.as_ref().is_none_or(|f| f == name) };
 
-        let runtime_modes: &[(&str, AblationMode)] = &[
-            ("baseline", AblationMode::default()),
+        let runtime_modes: &[(&str, Ablation)] = &[
+            ("baseline", Ablation::default()),
             (
                 "no_unsplit",
-                AblationMode {
+                Ablation {
                     disable_unsplit: true,
                     ..Default::default()
                 },
             ),
             (
                 "no_varying_precompute",
-                AblationMode {
+                Ablation {
                     disable_varying_precompute: true,
                     ..Default::default()
                 },
@@ -1193,7 +1227,7 @@ fn main() {
             // evaluates all predicates identically regardless of monotonicity).
             (
                 "no_monotonic",
-                AblationMode {
+                Ablation {
                     disable_monotonic: true,
                     disable_varying_precompute: true,
                     ..Default::default()
@@ -1201,33 +1235,34 @@ fn main() {
             ),
             (
                 "all_disabled",
-                AblationMode {
+                Ablation {
                     disable_monotonic: true,
                     disable_unsplit: true,
                     disable_varying_precompute: true,
                     disable_predicate_sweep: true,
+                    disable_exact_sums: false,
                 },
             ),
         ];
 
-        let parse_modes: &[(&str, ParseConfig)] = &[
+        let parse_modes: &[(&str, LoadOptions)] = &[
             (
                 "no_tree_ordering",
-                ParseConfig {
+                LoadOptions {
                     disable_tree_ordering: true,
                     ..Default::default()
                 },
             ),
             (
                 "no_bitset_intern",
-                ParseConfig {
+                LoadOptions {
                     disable_bitset_intern: true,
                     ..Default::default()
                 },
             ),
             (
                 "no_prefix_grouping",
-                ParseConfig {
+                LoadOptions {
                     prefix_depth: 0,
                     ..Default::default()
                 },
@@ -1247,7 +1282,8 @@ fn main() {
                 actual_iters: 0,
             }
         } else {
-            let full_forest = Forest::load(&model_path, &config_path);
+            let full_forest =
+                Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}"));
             bench_full_baseline(&full_forest, &data, &groups, &ctl)
         };
 
@@ -1257,8 +1293,10 @@ fn main() {
             if !should_run(name) {
                 continue;
             }
-            let mut f = Forest::load(&model_path, &config_path);
-            f.config.ablation = ablation;
+            let mut f = ModeForest::new(
+                Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}")),
+                ablation,
+            );
             json_results.push(run_one_mode(name, &mut f, &full, &data, &groups, &ctl));
         }
 
@@ -1267,7 +1305,10 @@ fn main() {
                 continue;
             }
             let pt_start = Instant::now();
-            let mut f = Forest::load_with_config(&model_path, &config_path, pc);
+            let mut f = ModeForest::new(
+                Forest::load_with(&model_path, &config_path, pc).unwrap_or_else(|e| panic!("{e}")),
+                Ablation::default(),
+            );
             let pt_us = pt_start.elapsed().as_nanos() as f64 / 1000.0;
             let mode_ctl = BenchControl {
                 parse_time_us: pt_us,
@@ -1281,7 +1322,7 @@ fn main() {
                     actual_iters: 0,
                 }
             } else {
-                bench_full_baseline(&f, &data, &groups, &mode_ctl)
+                bench_full_baseline(&f.forest, &data, &groups, &mode_ctl)
             };
             json_results.push(run_one_mode(
                 name, &mut f, &mode_full, &data, &groups, &mode_ctl,
@@ -1315,7 +1356,10 @@ fn main() {
 /// inner loop calls `score_fast` once per row, so QuickScorer pays the real
 /// per-group cost including loop and function-call overhead.
 #[cfg(feature = "quickscorer-bench")]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one CLI invocation's paths and timing settings"
+)]
 fn run_quickscorer_bench(
     qs_model_path: &std::path::Path,
     model_path: &std::path::Path,
@@ -1331,7 +1375,7 @@ fn run_quickscorer_bench(
     let (data, n_rows, n_cols) = treewalker_bench::load_raw_f64(&data_path);
 
     // Build groups so we iterate per-observation, not per-row.
-    let forest = Forest::load(model_path, config_path);
+    let forest = Forest::load(model_path, config_path).unwrap_or_else(|e| panic!("{e}"));
     let groups = build_groups(&forest, n_rows, group_offsets_path);
     let n_obs = groups.n_obs();
     drop(forest);
@@ -1420,8 +1464,10 @@ fn run_quickscorer_bench(
 }
 
 /// Build group iteration from forest config and optional offsets file.
-// Allow: the assert_eq! inside the Some branch makes map_or_else less readable.
-#[allow(clippy::option_if_let_else)]
+#[expect(
+    clippy::option_if_let_else,
+    reason = "the assert_eq! inside the Some branch makes map_or_else less readable"
+)]
 fn build_groups(forest: &Forest, n_rows: usize, group_offsets_path: Option<&PathBuf>) -> Groups {
     if let Some(gpath) = group_offsets_path {
         let offsets = load_group_offsets(gpath);
@@ -1433,7 +1479,7 @@ fn build_groups(forest: &Forest, n_rows: usize, group_offsets_path: Option<&Path
         );
         Groups::Variable { offsets }
     } else {
-        let pl = forest.config.max_group_width;
+        let pl = forest.config().max_group_width();
         assert_eq!(
             n_rows % pl,
             0,
@@ -1513,16 +1559,17 @@ fn run_validate_mode(args: &[String]) {
     let config_path = data_dir.join("walker_config.json");
     let data_path = data_dir.join("test_data.bin");
 
-    let mut forest = Forest::load(&model_path, &config_path);
-    let (data, n_rows, _n_cols) = treewalker_bench::load_raw_f64(&data_path);
+    let forest = Forest::load(&model_path, &config_path).unwrap_or_else(|e| panic!("{e}"));
+    let (data, n_rows, n_cols) = treewalker_bench::load_raw_f64(&data_path);
     let groups = build_groups(&forest, n_rows, group_offsets_path.as_ref());
     let n_obs = groups.n_obs();
 
     // Run TreeWalker over every group.
     let mut results = vec![0.0f64; n_rows];
+    let mut predictor = forest.predictor();
     for g in 0..n_obs {
         let (s, e) = groups.start_end(g);
-        forest.predict(&data, &mut results, s, e);
+        predictor.predict_group(&data[s * n_cols..e * n_cols], &mut results[s..e]);
     }
 
     // Load reference (write_raw_f64 layout: u64 n_rows, u64 n_cols, f64s).

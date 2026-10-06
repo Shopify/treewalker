@@ -3,37 +3,24 @@ members = ["benchmarks"]
 resolver = "3"
 
 [workspace.package]
-rust-version = "1.97"
-
-[package]
-name = "treewalker-gbdt"
-version = "1.0.0"
 edition = "2024"
-rust-version.workspace = true
-description = "Grouped tree-ensemble inference via recursive partial evaluation"
+rust-version = "1.97"
 license = "MIT"
 repository = "https://github.com/Shopify/treewalker"
-include = ["src/**", "tests/**", "docs/treelite-loading.md", "docs/treelite-loading-validation.md", "Cargo.toml", "README.md", "LICENSE"]
 
-[features]
-test-helpers = []  # expose internal precompute functions for artifact integration tests
-
-[dependencies]
+[workspace.dependencies]
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 simd-json = { version = "0.18", features = ["serde_impl"] }
-rustc-hash = "2.1.2"
 
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
-
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "allow"              # required for prefetch intrinsics + unchecked hot path
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
-# Intentional relaxations
+# Intentional relaxations, shared by both packages
 cast_possible_truncation = "allow"  # u64 → u32, usize → u16 are checked at parse time
 cast_precision_loss = "allow"       # f64 ↔ u32/usize for bitset offsets (by design)
 cast_sign_loss = "allow"            # i16 → usize for skip indices (always positive)
@@ -49,6 +36,46 @@ missing_errors_doc = "allow"
 struct_excessive_bools = "allow"    # AblationMode/ParseConfig are flag structs by design
 doc_markdown = "allow"              # LightGBM, XGBoost, etc. don't need backticks everywhere
 if_not_else = "allow"               # sometimes clearer to check the negative case first
+redundant_pub_crate = "allow"       # pub(crate) in private modules states that an item stays internal
+
+[package]
+name = "treewalker-gbdt"
+version = "2.0.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Grouped tree-ensemble inference via recursive partial evaluation"
+license.workspace = true
+repository.workspace = true
+include = ["src/**", "tests/**", "docs/treelite-loading.md", "docs/treelite-loading-validation.md", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[features]
+research = []  # ablations, work counters, prediction stages, full walk, introspection
+
+[dependencies]
+serde.workspace = true
+simd-json.workspace = true
+rustc-hash = "2.1.2"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+# Turns research on for this package's tests, so `cargo test` runs them.
+treewalker-gbdt = { path = ".", features = ["research"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[lints]
+workspace = true
+
+# These tests use the research API. The self dev-dependency above turns it on for
+# `cargo test` here; the published crate's tests need `--features research`.
+[[test]]
+name = "import"
+required-features = ["research"]
+
+[[test]]
+name = "research"
+required-features = ["research"]
 
 [profile.release]
 lto = "fat"
