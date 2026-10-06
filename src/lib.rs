@@ -19,7 +19,7 @@
 //!
 //! `TreeWalker` implements *recursive partial evaluation* that walks constant
 //! splits once, then partitions rows only at varying splits using generic
-//! bitmasks (u32/u64/u128, supporting up to 128 rows per entity).
+//! bitmasks (u16/u32/u64, and multi-word masks for wider groups).
 //!
 //! # Usage
 //!
@@ -38,15 +38,18 @@
 //! Supports scalar regression, ranking and binary classification with identity or
 //! sigmoid output, including averaging, base scores and positive sigmoid alpha.
 //! Import errors are returned as [`LoadError`]. Inputs have 1–64 features and groups
-//! have 1–128 rows. Group equality and monotonicity are caller contracts; loading
+//! any number of rows. Group equality and monotonicity are caller contracts; loading
 //! validates the configuration, and prediction guards dimensions and structural
-//! configuration mutations. Float32 models round inputs for comparisons and sum
-//! promoted leaves in float64. See the bundled `docs/treelite-loading.md` for the
+//! configuration mutations. Leaf values are summed exactly and rounded once, so a
+//! prediction is the float64 nearest to the true sum, whatever the tree order (see
+//! [`Forest::exact_sums`]). Float32 models round inputs for comparisons and promote
+//! leaves to float64. See the bundled `docs/treelite-loading.md` for the
 //! full compatibility boundary, memory limits and conversion examples.
 
 mod error;
 pub use error::LoadError;
 pub mod config;
+mod exact;
 pub mod forest;
 pub mod mask;
 pub mod parser;

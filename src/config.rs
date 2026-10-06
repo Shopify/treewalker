@@ -30,8 +30,8 @@ struct WalkerConfigFile {
 /// Ablation flags — disable individual optimizations for controlled experiments.
 ///
 /// Used by the paper's ablation study to measure each trick's contribution.
-/// Each flag becomes a const generic on `partial_eval` — the compiler monomorphizes
-/// a separate version per combination, eliminating all runtime ablation branches.
+/// Only [`Forest::predict_with_stats`](crate::Forest::predict_with_stats) reads the
+/// flags, at runtime; `predict` is compiled with every optimization on.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct AblationMode {
     /// Treat all monotonic varying features as non-monotonic (disable early-break scans).
@@ -100,9 +100,10 @@ impl Default for ParseConfig {
 #[derive(Clone)]
 pub struct WalkerConfig {
     pub n_features: usize,
-    /// Maximum rows per group. Hard limit 128 (u128 bitmask).
-    /// For fixed-width groups this equals the group width.
-    /// For variable-width groups, this is the upper bound.
+    /// Maximum rows per group: any positive number. It selects the row-mask width;
+    /// groups wider than [`MAX_PIECE_ROWS`](crate::predict::MAX_PIECE_ROWS) run in
+    /// pieces of that many rows. For fixed-width groups this equals the group width;
+    /// for variable-width groups, it is the upper bound.
     pub max_group_width: usize,
     /// Bit `i` is set if feature `i` is varying across rows.
     pub varying_mask: u128,
@@ -196,9 +197,9 @@ impl WalkerConfig {
     }
 
     pub(crate) fn validate(&self) -> Result<(), LoadError> {
-        if !(1..=64).contains(&self.n_features) || !(1..=128).contains(&self.max_group_width) {
+        if !(1..=64).contains(&self.n_features) || self.max_group_width == 0 {
             return Err(LoadError::MalformedConfig(format!(
-                "require n_features 1..=64 and max_group_width 1..=128; got {}, {}",
+                "require n_features 1..=64 and max_group_width >= 1; got {}, {}",
                 self.n_features, self.max_group_width
             )));
         }

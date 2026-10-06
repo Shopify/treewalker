@@ -71,7 +71,7 @@ fn independent_oracles_all_formats_paths_and_workspace_widths() {
                 continue;
             }
             let name = format!("{}.{extension}", case.name);
-            for width in [1, 32, 33, 64, 65, 128] {
+            for width in [1, 16, 17, 32, 33, 64, 65, 128] {
                 let mut forest = load(&name, format, width).unwrap();
                 let mut actual = vec![0.0; rows];
                 forest.predict_full(&data, &mut actual, 0, rows);
@@ -108,6 +108,140 @@ fn independent_oracles_all_formats_paths_and_workspace_widths() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn groups_of_any_width_match_single_rows() {
+    // A row's prediction depends only on its own features, so a row predicted in a
+    // group of any width, whole or in pieces, equals the row predicted alone.
+    let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
+    let data = raw("data.bin");
+    let rows = data.len() / 2;
+    for case in manifest.models {
+        let name = format!("{}.bin", case.name);
+        let mut single = load(&name, ModelFormat::TreeliteBinaryV4, 1).unwrap();
+        for width in [129, 300, 1024, 1025, 2500] {
+            let mut forest = load(&name, ModelFormat::TreeliteBinaryV4, width).unwrap();
+            for block in [0, rows / 128 - 1] {
+                // Varying feature cycles through every test value; the constant
+                // feature is the block's.
+                let constant = data[block * 128 * 2 + 1];
+                let group: Vec<f64> = (0..width)
+                    .flat_map(|r| [data[(r % rows) * 2], constant])
+                    .collect();
+                let mut alone = vec![0.0; width];
+                for r in 0..width {
+                    single.predict(&group, &mut alone, r, r + 1);
+                }
+                for ablation in [
+                    AblationMode::default(),
+                    AblationMode {
+                        disable_varying_precompute: true,
+                        ..Default::default()
+                    },
+                    AblationMode {
+                        disable_predicate_sweep: true,
+                        ..Default::default()
+                    },
+                ] {
+                    forest.config.ablation = ablation;
+                    let mut wide = vec![f64::NAN; width];
+                    if ablation.is_default() {
+                        forest.predict(&group, &mut wide, 0, width);
+                    } else {
+                        forest.predict_with_stats(&group, &mut wide, 0, width);
+                    }
+                    for r in 0..width {
+                        assert_eq!(
+                            wide[r].to_bits(),
+                            alone[r].to_bits(),
+                            "{name} width {width} block {block} row {r}: {} != {}",
+                            wide[r],
+                            alone[r]
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn exact_sums_make_layout_invisible() {
+    // Tree order, prefix sharing and bitset interning change the order in which
+    // leaves are added; exact sums make the predictions bit-identical anyway.
+    let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
+    let data = raw("data.bin");
+    let rows = data.len() / 2;
+    for case in manifest.models {
+        let name = format!("{}.bin", case.name);
+        let predict_with = |parse: &ParseConfig| {
+            let mut forest = Forest::from_bytes(
+                &bytes(&name),
+                ModelFormat::TreeliteBinaryV4,
+                config(128),
+                parse,
+            )
+            .unwrap();
+            assert!(forest.exact_sums(), "{name}");
+            let mut out = vec![0.0; rows];
+            for s in (0..rows).step_by(128) {
+                forest.predict(&data, &mut out, s, s + 128);
+            }
+            out
+        };
+        let reference = predict_with(&ParseConfig::default());
+        for parse in [
+            ParseConfig {
+                disable_tree_ordering: true,
+                ..Default::default()
+            },
+            ParseConfig {
+                prefix_depth: 0,
+                ..Default::default()
+            },
+            ParseConfig {
+                disable_tree_ordering: true,
+                disable_bitset_intern: true,
+                prefix_depth: 0,
+                ..Default::default()
+            },
+        ] {
+            let out = predict_with(&parse);
+            for r in 0..rows {
+                assert_eq!(out[r].to_bits(), reference[r].to_bits(), "{name} row {r}");
+            }
+        }
+    }
+}
+
+#[test]
+fn leaves_without_a_common_scale_add_in_tree_order() {
+    // Leaf exponents 2^-997 apart leave no 126-bit fixed point: prediction adds in
+    // f64 in tree order, exactly as the full walk does.
+    let mut model = simd_json::to_owned_value(&mut bytes("identity.json")).unwrap();
+    model["trees"][0]["nodes"][1]["leaf_value"] = 1e300.into();
+    model["trees"][1]["nodes"][1]["leaf_value"] = 1e-300.into();
+    let json = simd_json::to_vec(&model).unwrap();
+    let mut forest = Forest::from_bytes(
+        &json,
+        ModelFormat::TreeliteJson,
+        config(128),
+        &ParseConfig::default(),
+    )
+    .unwrap();
+    assert!(!forest.exact_sums());
+    let data = raw("data.bin");
+    let rows = data.len() / 2;
+    let (mut partial, mut full) = (vec![0.0; rows], vec![0.0; rows]);
+    for s in (0..rows).step_by(128) {
+        forest.predict(&data, &mut partial, s, s + 128);
+    }
+    forest.predict_full(&data, &mut full, 0, rows);
+    assert!(partial.iter().any(|&v| v == 1e300));
+    for r in 0..rows {
+        assert_eq!(partial[r].to_bits(), full[r].to_bits(), "row {r}");
     }
 }
 
@@ -192,8 +326,9 @@ fn grouping_schema_and_configuration_validation() {
     for nf in [0, 65, 128, usize::MAX] {
         assert!(WalkerConfig::try_new(nf, 1, &[], &[], &[]).is_err());
     }
-    for width in [0, 129, usize::MAX] {
-        assert!(WalkerConfig::try_new(1, width, &[], &[], &[]).is_err());
+    assert!(WalkerConfig::try_new(1, 0, &[], &[], &[]).is_err());
+    for width in [129, 1_000_000, usize::MAX] {
+        assert!(WalkerConfig::try_new(1, width, &[], &[], &[]).is_ok());
     }
     for (v, i, d) in [
         (&[0, 0][..], &[][..], &[][..]),

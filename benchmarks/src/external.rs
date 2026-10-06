@@ -220,6 +220,11 @@ pub struct LightGBMBench {
 }
 
 impl LightGBMBench {
+    /// Output of the most recent `predict_group` call.
+    pub fn last_output(&self, n: usize) -> &[f64] {
+        &self.result_buf[..n]
+    }
+
     /// Load LightGBM from a shared library and a model file.
     ///
     /// `max_group_width` controls the result buffer size (one prediction per row).
@@ -298,7 +303,7 @@ impl ExternalMethod for LightGBMBench {
         let data_ptr = unsafe { data.as_ptr().add(start * n_cols) };
         let mut out_len: i64 = 0;
         unsafe {
-            (self.predict_fn)(
+            let rc = (self.predict_fn)(
                 self.handle,
                 data_ptr.cast::<c_void>(),
                 1,    // C_API_DTYPE_FLOAT64
@@ -312,6 +317,7 @@ impl ExternalMethod for LightGBMBench {
                 &raw mut out_len,
                 self.result_buf.as_mut_ptr(),
             );
+            assert_eq!(rc, 0, "LGBM_BoosterPredictForMat failed (rc={rc})");
         }
     }
 
@@ -358,6 +364,18 @@ pub struct XGBoostBench {
     f32_buf: Vec<f32>,
     // Pre-allocated JSON config string (reused across calls).
     predict_config: CString,
+    last_out: *const f32,
+    last_n: usize,
+}
+
+impl XGBoostBench {
+    /// Output of the most recent `predict_group` call (valid until the next call).
+    pub fn last_output(&self) -> Vec<f32> {
+        if self.last_out.is_null() {
+            return Vec::new();
+        }
+        unsafe { std::slice::from_raw_parts(self.last_out, self.last_n).to_vec() }
+    }
 }
 
 impl XGBoostBench {
@@ -444,7 +462,7 @@ impl XGBoostBench {
             let f32_buf = vec![0.0f32; 128 * n_cols];
             // Prediction config: normal prediction, no iteration limit.
             let predict_config = CString::new(
-                r#"{"type":0,"training":false,"iteration_range":[0,0],"strict_shape":false}"#,
+                r#"{"type":0,"training":false,"iteration_begin":0,"iteration_end":0,"strict_shape":false,"missing":NaN}"#,
             )
             .unwrap();
 
@@ -457,6 +475,8 @@ impl XGBoostBench {
                 free_booster_fn,
                 f32_buf,
                 predict_config,
+                last_out: std::ptr::null(),
+                last_n: 0,
             })
         }
     }
@@ -492,7 +512,7 @@ impl ExternalMethod for XGBoostBench {
             let mut out_shape: *const u64 = std::ptr::null();
             let mut out_dim: u64 = 0;
             let mut out_result: *const f32 = std::ptr::null();
-            (self.predict_from_dense_fn)(
+            let rc = (self.predict_from_dense_fn)(
                 self.handle,
                 array_cstr.as_ptr(),
                 self.predict_config.as_ptr(),
@@ -501,6 +521,9 @@ impl ExternalMethod for XGBoostBench {
                 &raw mut out_dim,
                 &raw mut out_result,
             );
+            assert_eq!(rc, 0, "XGBoosterPredictFromDense failed (rc={rc})");
+            self.last_out = out_result;
+            self.last_n = nrow;
         }
     }
 
