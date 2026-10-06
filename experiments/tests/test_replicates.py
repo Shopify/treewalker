@@ -1,4 +1,4 @@
-"""Seed replicates, and the identities of every existing model and cell."""
+"""Seed replicates, expedia-filled, and the identities of every existing model and cell."""
 
 import hashlib
 from pathlib import Path
@@ -16,6 +16,7 @@ from treewalker_exp.paths import Paths
 
 GRIDS = Path(__file__).resolve().parents[1] / "grids.toml"
 NEW_WORKLOADS = {"panel-replicates", "whatif-credit-replicates", "ranking-replicates"}
+NEW_WORKLOADS.add("ranking-filled")
 
 
 def replicate(model: Model, k: int = 1) -> Model:
@@ -237,6 +238,76 @@ def test_a_replicate_is_a_new_model_with_its_own_key(ctx):
     }
 
 
+# --- expedia-filled ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("lo", "fill"),
+    [(0.0, -1.0), (0.25, -0.75), (-0.5, -1.5), (5.0, 0.0), (-3.0, -6.0), (16777217.0, 0.0)],
+)
+def test_fill_constant_is_below_the_minimum_in_f32(lo, fill):
+    X = np.array([[lo], [lo + 2.0], [np.nan]])
+    got = ds.fill_constants(X, ["c"])
+    assert got[0] == fill
+    assert np.float32(got[0]) < np.float32(lo)
+
+
+def test_fill_constants_reject_what_cannot_be_encoded():
+    with pytest.raises(ValueError):
+        ds.fill_constants(np.array([[np.nan], [np.nan]]), ["empty"])
+    with pytest.raises(ValueError):
+        ds.fill_constants(np.array([[-2e38]]), ["f32 overflow"])
+
+
+def test_fill_missing_replaces_only_missing_values():
+    X = np.array([[1.0, np.nan], [np.nan, -9.0]])
+    got = ds.fill_missing(X, np.array([-1.0, -2.0]))
+    assert np.array_equal(got, [[1.0, -2.0], [-1.0, -9.0]]) and np.isnan(X[0, 1])
+
+
+def test_expedia_filled_uses_the_training_minimum(ctx):
+    released = ctx.train_data(Model("expedia", 5, 2))
+    filled = ctx.train_data(Model("expedia-filled", 5, 2))
+    assert not np.isnan(filled.X).any()
+    nan = np.isnan(released.X)
+    assert np.array_equal(filled.X[~nan], released.X[~nan])
+    fills, record = ctx.expedia_fills()
+    for name in ("prop_location_score2", "prop_review_score"):
+        j = ds.EXPEDIA_FEATURES.index(name)
+        lo = np.nanmin(released.X[:, j])
+        assert fills[j] == lo - max(1.0, abs(lo)) == record["fill"][name]
+        assert np.all(filled.X[nan[:, j], j] == fills[j])
+        assert np.float32(fills[j]) < np.float32(lo)  # distinct after XGBoost's f32 conversion
+    assert set(record["fill"]) == {"prop_location_score2", "prop_review_score"}
+    assert filled.identity == {"missing_values": record}
+    a = prep.model_identity(Model("expedia", 5, 2), "xgboost", released)
+    b = prep.model_identity(Model("expedia-filled", 5, 2), "xgboost", filled)
+    assert set(b) - set(a) == {"missing_values"} and b["split"] == a["split"]
+
+
+def test_expedia_filled_sessions_are_expedias_filled(ctx):
+    base, filled = ctx.sessions("expedia"), ctx.sessions("expedia-filled")
+    fills, record = ctx.expedia_fills()
+    j = ds.EXPEDIA_FEATURES.index("prop_location_score2")
+    test = ctx.ranking().test_df["prop_location_score2"].to_numpy()
+    assert np.nanmin(test) == -5.0 < fills[j]  # the constant is the training split's
+    nan = np.isnan(base.X)
+    assert nan.any() and not np.isnan(filled.X).any()
+    assert np.array_equal(filled.X[~nan], base.X[~nan])  # -5 kept
+    assert np.array_equal(filled.X[nan], fills[np.nonzero(nan)[1]])
+    assert np.array_equal(filled.offsets, base.offsets)
+    assert np.array_equal(filled.entities, base.entities)
+    assert filled.config == base.config  # the varying features carry over
+    assert filled.meta["missing_values"] == record
+    assert wl.contracts(filled)["ok"]
+
+
+def test_expedia_filled_has_no_whatif(ctx):
+    m = Model("expedia-filled", 5, 2)
+    with pytest.raises(ValueError):
+        ctx.whatif_draws(m, ctx.train_data(m))
+
+
 # --- identities of the existing models and cells -----------------------------------------
 
 
@@ -283,12 +354,12 @@ def test_existing_cells_keep_their_ids_and_order():
         assert all(c.model.replicate == 0 and c.model.replicate_fraction == 0.0 for c in cells)
 
 
-def test_factorial_adds_the_replicates():
+def test_factorial_adds_the_replicates_and_expedia_filled():
     s = grids.suite(grids.load(GRIDS), "factorial")
     new = [c for c in s.cells if c.workload in NEW_WORKLOADS]
     assert s.cells[-len(new) :] == new  # appended: existing cells keep their order
     models = {(c.model, c.framework) for c in new}
-    assert len(new) == len(models) == 24
+    assert len(new) == len(models) == 40
     reps = [c for c in new if c.model.replicate]
     assert len(reps) == 24
     assert {c.model.released.id for c in reps} == {
@@ -301,6 +372,11 @@ def test_factorial_adds_the_replicates():
     released_ids = {c.id for c in s.cells if c.workload not in NEW_WORKLOADS}
     for c in reps:  # the released cell is in the suite
         assert c.id.replace(f"_r{c.model.replicate}/", "/") in released_ids
+    filled = [c for c in new if c.model.dataset == "expedia-filled"]
+    assert len(filled) == 16 and {c.workload_id for c in filled} == {"sessions"}
+    assert {(c.model.n_trees, c.model.max_depth) for c in filled} == {
+        (t, d) for t in (50, 500, 1000, 2000) for d in (2, 4)
+    }
 
 
 @pytest.mark.parametrize(
