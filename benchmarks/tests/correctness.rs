@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use treewalker_gbdt::AblationMode;
 use treewalker_gbdt::config::WalkerConfig;
 use treewalker_gbdt::forest::{Forest, ThresholdType};
+use treewalker_gbdt::{AblationMode, LoadError};
 
 // ---------------------------------------------------------------------------
 // Tolerances
@@ -35,6 +35,23 @@ fn model_file(param_dir: &Path, framework: &str) -> PathBuf {
     } else {
         param_dir.join(format!("{framework}/model_treelite.json"))
     }
+}
+
+/// Number of `"threshold": ,` entries in a Treelite JSON export, found without the
+/// parser under test. Treelite writes an empty value for nonfinite thresholds, and
+/// the loader rejects such dumps rather than repairing them (docs/treelite-loading.md).
+fn empty_thresholds(path: &Path) -> usize {
+    const KEY: &[u8] = b"\"threshold\":";
+    let bytes = std::fs::read(path).unwrap();
+    (0..bytes.len().saturating_sub(KEY.len()))
+        .filter(|&i| bytes[i..].starts_with(KEY))
+        .filter(|&i| {
+            bytes[i + KEY.len()..]
+                .iter()
+                .find(|b| !b.is_ascii_whitespace())
+                .is_some_and(|&b| b == b',' || b == b'}')
+        })
+        .count()
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +103,7 @@ fn all_configs() -> Vec<TestConfig> {
                 let model = model_file(&param_dir, fw);
                 let preds = param_dir.join(format!("{fw}/predictions.npy"));
                 if !model.exists() || !preds.exists() {
+                    eprintln!("{dataset}/{param}/{fw}: no model or predictions; skipped");
                     continue;
                 }
                 let forest = Forest::load(&model, param_dir.join("walker_config.json"));
@@ -600,6 +618,7 @@ fn test_binary_matches_json() {
             .param_dir
             .join(format!("{}/model_treelite.json", cfg.framework));
         if !bin_path.exists() || !json_path.exists() {
+            eprintln!("{}: no binary or JSON export; skipped", cfg.label);
             continue;
         }
         if std::fs::metadata(&json_path).unwrap().len() > SIMD_JSON_MAX_BYTES {
@@ -610,7 +629,26 @@ fn test_binary_matches_json() {
             continue;
         }
 
-        let mut forest_json = Forest::load(&json_path, cfg.param_dir.join("walker_config.json"));
+        let mut forest_json = match Forest::try_load(
+            &json_path,
+            cfg.param_dir.join("walker_config.json"),
+        ) {
+            Ok(forest) => forest,
+            Err(e) => {
+                let empty = empty_thresholds(&json_path);
+                assert!(
+                    empty > 0
+                        && matches!(&e, LoadError::MalformedModel(m) if m.starts_with("JSON: ")),
+                    "{}: {e}",
+                    json_path.display()
+                );
+                eprintln!(
+                    "{}: {empty} empty thresholds ({e}); skipped",
+                    json_path.display()
+                );
+                continue;
+            }
+        };
         let mut forest_bin = Forest::load(&bin_path, cfg.param_dir.join("walker_config.json"));
 
         assert_eq!(
