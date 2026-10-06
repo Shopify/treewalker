@@ -1,12 +1,15 @@
-use treewalker::ParseConfig;
-use treewalker::config::WalkerConfig;
-use treewalker::forest::Forest;
+use treewalker_gbdt::ParseConfig;
+use treewalker_gbdt::config::WalkerConfig;
+use treewalker_gbdt::forest::Forest;
 
 fn test_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(
-        std::env::var("TEST_ARTIFACTS")
-            .unwrap_or_else(|_| "paper/experiments/artifacts/expedia/nt50_md8".into()),
-    )
+    std::path::PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../paper/experiments/artifacts/expedia/nt50_md8"
+        )
+        .into()
+    }))
 }
 
 /// Guard: skip tests that require artifacts not present on this machine.
@@ -22,9 +25,14 @@ fn require_artifacts(dir: &std::path::Path) -> bool {
 #[test]
 fn test_parse_model_basic() {
     let dir = test_dir();
-    if !require_artifacts(&dir) { return; }
+    if !require_artifacts(&dir) {
+        return;
+    }
 
-    let forest = Forest::load(dir.join("lightgbm/model_treelite.json"), dir.join("walker_config.json"));
+    let forest = Forest::load(
+        dir.join("lightgbm/model_treelite.json"),
+        dir.join("walker_config.json"),
+    );
     assert!(!forest.trees().is_empty(), "should parse at least one tree");
 
     let t0 = &forest.trees()[0];
@@ -34,7 +42,11 @@ fn test_parse_model_basic() {
 
     let n_leaves = t0_nodes.iter().filter(|n| n.is_leaf()).count();
     let n_internal = t0_nodes.iter().filter(|n| !n.is_leaf()).count();
-    assert_eq!(n_leaves, n_internal + 1, "binary tree: leaves = internal + 1");
+    assert_eq!(
+        n_leaves,
+        n_internal + 1,
+        "binary tree: leaves = internal + 1"
+    );
 
     for node in t0_nodes.iter().filter(|n| !n.is_leaf()) {
         assert!((node.skip as usize) < t0_nodes.len(), "skip out of range");
@@ -44,10 +56,18 @@ fn test_parse_model_basic() {
 #[test]
 fn test_tree_order_is_deterministic() {
     let dir = test_dir();
-    if !require_artifacts(&dir) { return; }
+    if !require_artifacts(&dir) {
+        return;
+    }
 
-    let forest_a = Forest::load(dir.join("lightgbm/model_treelite.json"), dir.join("walker_config.json"));
-    let forest_b = Forest::load(dir.join("lightgbm/model_treelite.json"), dir.join("walker_config.json"));
+    let forest_a = Forest::load(
+        dir.join("lightgbm/model_treelite.json"),
+        dir.join("walker_config.json"),
+    );
+    let forest_b = Forest::load(
+        dir.join("lightgbm/model_treelite.json"),
+        dir.join("walker_config.json"),
+    );
 
     assert_eq!(forest_a.trees().len(), forest_b.trees().len());
     for (a, b) in forest_a.trees().iter().zip(forest_b.trees()) {
@@ -60,14 +80,22 @@ fn test_tree_order_is_deterministic() {
 #[test]
 fn test_tree_ordering_changes_order_but_not_output() {
     let dir = test_dir();
-    if !require_artifacts(&dir) { return; }
+    if !require_artifacts(&dir) {
+        return;
+    }
 
     let config = WalkerConfig::from_file(dir.join("walker_config.json"));
-    let mut forest_ordered = Forest::load(dir.join("lightgbm/model_treelite.json"), dir.join("walker_config.json"));
+    let mut forest_ordered = Forest::load(
+        dir.join("lightgbm/model_treelite.json"),
+        dir.join("walker_config.json"),
+    );
     let mut forest_original = Forest::load_with_config(
         dir.join("lightgbm/model_treelite.json"),
         dir.join("walker_config.json"),
-        &ParseConfig { disable_tree_ordering: true, ..Default::default() },
+        &ParseConfig {
+            disable_tree_ordering: true,
+            ..Default::default()
+        },
     );
 
     assert_eq!(forest_ordered.trees().len(), forest_original.trees().len());
@@ -94,7 +122,11 @@ fn test_tree_ordering_changes_order_but_not_output() {
         forest_original.predict(&data, &mut results_original, start, end);
     }
 
-    for (i, (a, b)) in results_ordered.iter().zip(results_original.iter()).enumerate() {
+    for (i, (a, b)) in results_ordered
+        .iter()
+        .zip(results_original.iter())
+        .enumerate()
+    {
         assert!((a - b).abs() < 1e-10, "row {i}: ordered={a}, original={b}");
     }
 }
@@ -102,9 +134,14 @@ fn test_tree_ordering_changes_order_but_not_output() {
 #[test]
 fn test_lightgbm_json_matches_native() {
     let dir = test_dir();
-    if !require_artifacts(&dir) { return; }
+    if !require_artifacts(&dir) {
+        return;
+    }
 
-    let mut forest = Forest::load(dir.join("lightgbm/model_treelite.json"), dir.join("walker_config.json"));
+    let mut forest = Forest::load(
+        dir.join("lightgbm/model_treelite.json"),
+        dir.join("walker_config.json"),
+    );
     let preds_path = dir.join("lightgbm/predictions.npy");
     if !preds_path.exists() {
         eprintln!("Skipping: {} not found", preds_path.display());
@@ -130,35 +167,43 @@ fn test_lightgbm_json_matches_native() {
         }
     }
 
-    let max_diff = results.iter().zip(&reference).map(|(a, b)| (a - b).abs()).fold(0.0f64, f64::max);
+    let max_diff = results
+        .iter()
+        .zip(&reference)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f64, f64::max);
     eprintln!("LightGBM JSON vs native max_diff: {max_diff:.2e}");
     assert!(max_diff < 1e-10, "JSON vs native max_diff={max_diff:.2e}");
 }
 
 #[test]
-#[should_panic(expected = "Model file must be .json or .bin")]
+#[should_panic(expected = "must end in .bin or .json")]
 fn test_reject_non_json() {
     let dir = test_dir();
     Forest::load("model.csv", dir.join("walker_config.json"));
 }
 
 #[test]
-#[should_panic(expected = "Only binary-logistic (sigmoid) models supported")]
+#[should_panic(expected = "unknown JSON field")]
 fn test_reject_unknown_json_schema() {
     let dir = test_dir();
-    if !require_artifacts(&dir) { return; }
+    if !require_artifacts(&dir) {
+        return;
+    }
     std::fs::write("/tmp/bad_model.json", r#"{"foo": "bar"}"#).unwrap();
     Forest::load("/tmp/bad_model.json", dir.join("walker_config.json"));
 }
 
 fn load_test_bin(path: &std::path::Path) -> (Vec<f64>, usize) {
-    let (data, n_rows, _) = treewalker::load_raw_f64(path);
+    let (data, n_rows, _) = treewalker_bench::load_raw_f64(path);
     (data, n_rows)
 }
 
 fn load_group_offsets_if_present(dir: &std::path::Path) -> Option<Vec<usize>> {
     let path = dir.join("group_offsets.bin");
-    if !path.exists() { return None; }
+    if !path.exists() {
+        return None;
+    }
     let bytes = std::fs::read(&path).expect("failed to read group_offsets.bin");
     let n_groups = u64::from_le_bytes(bytes[0..8].try_into().unwrap()) as usize;
     let offsets: Vec<usize> = bytes[8..]

@@ -6,11 +6,13 @@
 
 use rustc_hash::FxHashMap as HashMap;
 
+use super::validation::{MAX_DEPTH, MAX_NODES, MAX_POOL_BYTES};
+use crate::LoadError;
 use crate::config::WalkerConfig;
 use crate::forest::{
     FLAG_CATEGORICAL, FLAG_DEFAULT_LEFT, FLAG_HEAVY_IS_LEFT, FLAG_INLINE_CAT,
-    FLAG_VARYING_TYPE_SHIFT, FLAG_WALKABLE, Node, ThresholdType, Tree, SPLIT_CONSTANT, SPLIT_MONO_DEC,
-    SPLIT_MONO_INC, SPLIT_NON_MONO,
+    FLAG_VARYING_TYPE_SHIFT, FLAG_WALKABLE, Node, SPLIT_CONSTANT, SPLIT_MONO_DEC, SPLIT_MONO_INC,
+    SPLIT_NON_MONO, ThresholdType, Tree,
 };
 
 // ---------------------------------------------------------------------------
@@ -41,7 +43,6 @@ pub struct ParseContext<'a> {
     pub bitsets: &'a mut Vec<u8>,
     pub bitset_intern: Option<&'a mut HashMap<Vec<u32>, usize>>,
     pub config: &'a WalkerConfig,
-    pub leaf_bias: f64,
     pub threshold_type: ThresholdType,
 }
 
@@ -51,6 +52,8 @@ pub struct ReorderScratch {
     pub heavy_is_left: Vec<bool>,
     pub old_to_new: Vec<i16>,
     pub stack: Vec<usize>,
+    validation_seen: Vec<bool>,
+    validation_stack: Vec<(usize, usize)>,
 }
 
 impl ReorderScratch {
@@ -60,6 +63,8 @@ impl ReorderScratch {
             heavy_is_left: Vec::new(),
             old_to_new: Vec::new(),
             stack: Vec::new(),
+            validation_seen: Vec::new(),
+            validation_stack: Vec::new(),
         }
     }
 }
@@ -128,30 +133,30 @@ pub fn build_flags(default_left: bool, is_cat: bool, inline: bool, varying_type:
 /// - Pool: `value` is the byte offset into `ctx.bitsets`, `cat_n_words` = number of u32 words.
 pub fn encode_categories(
     categories: &[u32],
-    invert: bool,
     ctx: &mut ParseContext<'_>,
-) -> (f64, bool, u8) {
+) -> Result<(f64, bool, u8), LoadError> {
     let max_cat = categories.iter().copied().max().unwrap_or(0);
     let n_words_needed = (max_cat / 32 + 1) as usize;
+
+    if n_words_needed > usize::from(u8::MAX) {
+        return Err(LoadError::Limit(format!(
+            "category {max_cat} requires {n_words_needed} words; maximum 255 (category <= 8159)"
+        )));
+    }
+    if ctx.bitsets.len() + n_words_needed * 4 > MAX_POOL_BYTES {
+        return Err(LoadError::Limit("categorical pool exceeds 256 MiB".into()));
+    }
 
     if n_words_needed == 1 {
         let mut word = 0u32;
         for &cat in categories {
             word |= 1u32 << cat;
         }
-        if invert {
-            word = !word;
-        }
-        (f64::from(word), true, 0u8)
+        Ok((f64::from(word), true, 0u8))
     } else {
         let mut words = vec![0u32; n_words_needed];
         for &cat in categories {
             words[(cat / 32) as usize] |= 1u32 << (cat % 32);
-        }
-        if invert {
-            for w in &mut words {
-                *w = !*w;
-            }
         }
 
         let offset = if let Some(intern) = ctx.bitset_intern.as_mut() {
@@ -172,8 +177,7 @@ pub fn encode_categories(
             }
             offset
         };
-        assert!(u8::try_from(n_words_needed).is_ok());
-        (offset as f64, false, n_words_needed as u8)
+        Ok((offset as f64, false, n_words_needed as u8))
     }
 }
 
@@ -196,7 +200,21 @@ pub fn reorder_and_emit(
     bitset_start: u32,
     ctx: &mut ParseContext<'_>,
     scratch: &mut ReorderScratch,
-) -> Tree {
+) -> Result<Tree, LoadError> {
+    validate_tree(temp, root_idx, scratch)?;
+    if ctx
+        .nodes
+        .len()
+        .checked_add(temp.len())
+        .is_none_or(|n| n > MAX_NODES)
+    {
+        return Err(LoadError::Limit(
+            "node pool exceeds 32 million nodes".into(),
+        ));
+    }
+    ctx.nodes
+        .try_reserve(temp.len())
+        .map_err(|e| LoadError::Limit(e.to_string()))?;
     let total = temp.len();
 
     scratch.visit_order.clear();
@@ -260,9 +278,68 @@ pub fn reorder_and_emit(
         }
     }
 
-    Tree {
+    Ok(Tree {
         node_start,
         node_count: scratch.visit_order.len() as u32,
         bitset_start,
+    })
+}
+
+/// Validate topology iteratively before layout or recursive inference sees it.
+fn validate_tree(
+    nodes: &[TempNode],
+    root: usize,
+    scratch: &mut ReorderScratch,
+) -> Result<(), LoadError> {
+    if nodes.is_empty() || nodes.len() > i16::MAX as usize {
+        return Err(LoadError::Limit(format!(
+            "num_nodes {} must be 1..=32767",
+            nodes.len()
+        )));
     }
+    let visited = &mut scratch.validation_seen;
+    visited.clear();
+    visited.resize(nodes.len(), false);
+    let stack = &mut scratch.validation_stack;
+    stack.clear();
+    stack.push((root, 0));
+    let mut count = 0;
+    while let Some((i, depth)) = stack.pop() {
+        if i >= nodes.len() {
+            return Err(LoadError::MalformedModel(format!(
+                "child/root index {i} out of range"
+            )));
+        }
+        if visited[i] {
+            return Err(LoadError::MalformedModel(format!(
+                "node {i}: cycle or shared child"
+            )));
+        }
+        if depth > MAX_DEPTH {
+            return Err(LoadError::Limit(format!(
+                "node {i}: tree depth exceeds {MAX_DEPTH}"
+            )));
+        }
+        visited[i] = true;
+        count += 1;
+        let n = &nodes[i];
+        if n.left == -1 && n.right == -1 {
+            continue;
+        }
+        if n.left < 0 || n.right < 0 {
+            return Err(LoadError::MalformedModel(format!(
+                "node {i}: invalid children {}, {}",
+                n.left, n.right
+            )));
+        }
+        stack.push((n.right as usize, depth + 1));
+        stack.push((n.left as usize, depth + 1));
+    }
+    if count != nodes.len() {
+        return Err(LoadError::MalformedModel(format!(
+            "{} unreachable nodes",
+            nodes.len() - count
+        )));
+    }
+    Ok(())
 }

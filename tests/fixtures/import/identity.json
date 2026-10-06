@@ -1,0 +1,56 @@
+{
+    "threshold_type": "float64",
+    "leaf_output_type": "float64",
+    "num_feature": 2,
+    "task_type": "kRegressor",
+    "average_tree_output": false,
+    "num_target": 1,
+    "num_class": [1],
+    "leaf_vector_shape": [1, 1],
+    "target_id": [0, 0],
+    "class_id": [0, 0],
+    "postprocessor": "identity",
+    "sigmoid_alpha": 1.0,
+    "ratio_c": 1.0,
+    "base_scores": [3.0],
+    "attributes": "{}",
+    "trees": [{
+            "num_nodes": 3,
+            "has_categorical_split": false,
+            "nodes": [{
+                    "node_id": 0,
+                    "split_feature_id": 0,
+                    "default_left": true,
+                    "node_type": "numerical_test_node",
+                    "comparison_op": "<=",
+                    "threshold": 1.0,
+                    "left_child": 1,
+                    "right_child": 2
+                }, {
+                    "node_id": 1,
+                    "leaf_value": 0.25
+                }, {
+                    "node_id": 2,
+                    "leaf_value": -0.5
+                }]
+        }, {
+            "num_nodes": 3,
+            "has_categorical_split": false,
+            "nodes": [{
+                    "node_id": 0,
+                    "split_feature_id": 1,
+                    "default_left": false,
+                    "node_type": "numerical_test_node",
+                    "comparison_op": "<=",
+                    "threshold": 1.0,
+                    "left_child": 1,
+                    "right_child": 2
+                }, {
+                    "node_id": 1,
+                    "leaf_value": 0.5
+                }, {
+                    "node_id": 2,
+                    "leaf_value": -1.0
+                }]
+        }]
+}

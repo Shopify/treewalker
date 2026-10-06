@@ -32,50 +32,98 @@
 //! - F64 (`<=`): thresholds stored as-is. `<` converted to `<=` via `next_down`.
 //! - F32 (`<`): thresholds stored as-is. Runtime comparison uses `(val as f32) < (thr as f32)`.
 
-pub(crate) mod common;
 mod binary;
+pub(crate) mod common;
 mod json;
+mod validation;
+use crate::LoadError;
+use std::io::Read;
+pub(crate) use validation::{Output, ParsedModel, Postprocessor, validate_json_depth};
 
 use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;
 
 use crate::config::{ParseConfig, WalkerConfig};
-use crate::forest::{
-    FeatureRange, Node, PrefixGroup, ThresholdType, Tree, VaryingPredicate,
-};
+use crate::forest::{FeatureRange, Node, PrefixGroup, ThresholdType, Tree, VaryingPredicate};
 
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-/// Parse a treelite model file into global node/bitset pools.
+/// Explicit format for loading models from memory or readers.
+#[derive(Clone, Copy, Debug)]
+pub enum ModelFormat {
+    TreeliteBinaryV4,
+    TreeliteJson,
+}
+
+impl ModelFormat {
+    pub(crate) fn from_path(path: &Path) -> Result<Self, LoadError> {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("bin") => Ok(Self::TreeliteBinaryV4),
+            Some("json") => Ok(Self::TreeliteJson),
+            _ => Err(LoadError::Unsupported(format!(
+                "model path {} must end in .bin or .json; use Forest::from_reader with an explicit ModelFormat",
+                path.display()
+            ))),
+        }
+    }
+}
+
+/// Legacy tuple API for summed, alpha=1 sigmoid models only.
 ///
-/// Auto-detects format by file extension: `.bin` for treelite binary v4,
-/// `.json` (or anything else) for treelite JSON.
-///
-/// Returns `(trees, nodes, bitsets, threshold_type)` where all trees share the contiguous pools.
-/// Each tree's nodes are reordered by heavy-path DFS for cache-optimal traversal.
-/// Trees are auto-ordered so trees with similar early-path behavior are adjacent.
+/// This preserves historical leaf-bias distribution. Panics for other output
+/// semantics, malformed inputs or unsupported models. Prefer [`crate::Forest`]'s
+/// fallible loaders, which retain output metadata and support identity/averaging.
+#[allow(clippy::float_cmp)] // Exact output mode, not an approximate numerical comparison.
 pub fn parse_model(
     path: impl AsRef<Path>,
     config: &WalkerConfig,
     parse_config: &ParseConfig,
 ) -> (Vec<Tree>, Vec<Node>, Vec<u8>, ThresholdType) {
     let path = path.as_ref();
-
-    let (mut trees, mut nodes, mut bitsets, threshold_type) = match path
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        Some("bin") => binary::parse(path, config, parse_config),
-        _ => json::parse(path, config, parse_config),
-    };
-
-    if !parse_config.disable_tree_ordering {
-        (trees, nodes, bitsets) = auto_order_trees(trees, nodes, bitsets);
+    let parsed = (|| {
+        let format = ModelFormat::from_path(path)?;
+        parse_reader(std::fs::File::open(path)?, format, config, parse_config)
+    })()
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        parsed.output.divisor == 1.0 && parsed.output.postprocessor == Postprocessor::Sigmoid(1.0),
+        "legacy parse_model cannot carry this model's output metadata; use Forest::try_load or Forest::from_reader"
+    );
+    let mut nodes = parsed.nodes;
+    let bias = parsed.output.base_score / parsed.trees.len() as f64;
+    for node in &mut nodes {
+        if node.is_leaf() {
+            node.value += bias;
+        }
     }
+    (parsed.trees, nodes, parsed.bitsets, parsed.threshold_type)
+}
 
-    (trees, nodes, bitsets, threshold_type)
+pub(crate) fn parse_reader(
+    reader: impl Read,
+    format: ModelFormat,
+    config: &WalkerConfig,
+    parse_config: &ParseConfig,
+) -> Result<ParsedModel, LoadError> {
+    config.validate()?;
+    if parse_config.prefix_depth > validation::MAX_DEPTH {
+        return Err(LoadError::Limit(format!(
+            "prefix_depth {} exceeds {}",
+            parse_config.prefix_depth,
+            validation::MAX_DEPTH
+        )));
+    }
+    let mut parsed = match format {
+        ModelFormat::TreeliteBinaryV4 => binary::parse(reader, config, parse_config)?,
+        ModelFormat::TreeliteJson => json::parse(reader, config, parse_config)?,
+    };
+    if !parse_config.disable_tree_ordering {
+        (parsed.trees, parsed.nodes, parsed.bitsets) =
+            auto_order_trees(parsed.trees, parsed.nodes, parsed.bitsets);
+    }
+    Ok(parsed)
 }
 
 // ---------------------------------------------------------------------------
@@ -93,14 +141,18 @@ pub fn parse_model(
 /// Uses `f64::to_bits()` for threshold hashing (handles -0.0 and NaN correctly).
 /// `CatPool` dedup relies on bitset interning: content-identical bitsets share the
 /// same pool offset, so offset equality implies content equality.
-pub(crate) fn build_varying_predicates(nodes: &mut [Node]) -> Vec<VaryingPredicate> {
+pub(crate) fn build_varying_predicates(
+    nodes: &mut [Node],
+) -> Result<Vec<VaryingPredicate>, LoadError> {
     let n_varying_nodes = nodes
         .iter()
         .filter(|n| !n.is_leaf() && !n.is_constant())
         .count();
-    let mut pred_to_id: HashMap<VaryingPredicate, u16> =
-        HashMap::with_capacity_and_hasher(n_varying_nodes / 2, rustc_hash::FxBuildHasher);
-    let mut predicates = Vec::with_capacity(n_varying_nodes / 2);
+    let mut pred_to_id: HashMap<VaryingPredicate, u16> = HashMap::with_capacity_and_hasher(
+        (n_varying_nodes / 2).min(65535),
+        rustc_hash::FxBuildHasher,
+    );
+    let mut predicates = Vec::with_capacity((n_varying_nodes / 2).min(65535));
 
     for node in nodes.iter_mut() {
         if node.is_leaf() || node.is_constant() {
@@ -137,10 +189,11 @@ pub(crate) fn build_varying_predicates(nodes: &mut [Node]) -> Vec<VaryingPredica
             id
         } else {
             let new_id = predicates.len();
-            assert!(
-                new_id < u16::MAX as usize,
-                "too many unique varying predicates: {new_id}"
-            );
+            if new_id >= usize::from(u16::MAX) {
+                return Err(LoadError::Limit(format!(
+                    "varying predicate ID {new_id} reaches u16 sentinel"
+                )));
+            }
             let new_id = new_id as u16;
             pred_to_id.insert(pred, new_id);
             predicates.push(pred);
@@ -149,7 +202,7 @@ pub(crate) fn build_varying_predicates(nodes: &mut [Node]) -> Vec<VaryingPredica
         node.varying_pred_id = pred_id;
     }
 
-    predicates
+    Ok(predicates)
 }
 
 /// Build varying predicates WITHOUT deduplication (ablation baseline).
@@ -157,7 +210,9 @@ pub(crate) fn build_varying_predicates(nodes: &mut [Node]) -> Vec<VaryingPredica
 /// Every varying node gets its own unique predicate ID. This inflates the
 /// predicates vec from ~5K (deduplicated) to ~50K (one per varying node),
 /// measuring the contribution of predicate deduplication to precompute cost.
-pub(crate) fn build_varying_predicates_no_dedup(nodes: &mut [Node]) -> Vec<VaryingPredicate> {
+pub(crate) fn build_varying_predicates_no_dedup(
+    nodes: &mut [Node],
+) -> Result<Vec<VaryingPredicate>, LoadError> {
     let mut predicates = Vec::new();
 
     for node in nodes.iter_mut() {
@@ -170,28 +225,38 @@ pub(crate) fn build_varying_predicates_no_dedup(nodes: &mut [Node]) -> Vec<Varyi
 
         let pred = if node.is_categorical() {
             if node.inline_cat() {
-                VaryingPredicate::CatInline { feature, default_left, word: node.value as u32 }
+                VaryingPredicate::CatInline {
+                    feature,
+                    default_left,
+                    word: node.value as u32,
+                }
             } else {
                 VaryingPredicate::CatPool {
-                    feature, default_left,
-                    offset: node.value as u32, n_words: node.cat_n_words,
+                    feature,
+                    default_left,
+                    offset: node.value as u32,
+                    n_words: node.cat_n_words,
                 }
             }
         } else {
-            VaryingPredicate::Num { feature, threshold: node.value, default_left }
+            VaryingPredicate::Num {
+                feature,
+                threshold: node.value,
+                default_left,
+            }
         };
 
         let new_id = predicates.len();
-        assert!(
-            new_id < u16::MAX as usize,
-            "too many varying predicates without dedup ({new_id}): model too large for \
-             disable_predicate_dedup (u16 limit). Use dedup or a smaller model.",
-        );
+        if new_id >= usize::from(u16::MAX) {
+            return Err(LoadError::Limit(format!(
+                "varying predicate ID {new_id} reaches u16 sentinel; enable deduplication or use a smaller model"
+            )));
+        }
         node.varying_pred_id = new_id as u16;
         predicates.push(pred);
     }
 
-    predicates
+    Ok(predicates)
 }
 
 // ---------------------------------------------------------------------------
@@ -213,10 +278,7 @@ const fn pred_kind_ordinal(pred: &VaryingPredicate) -> u8 {
 /// After sorting, all predicates for the same feature are contiguous, with
 /// numerical predicates (sorted by ascending threshold) before categoricals.
 /// This layout enables the two-pointer sweep in `precompute_varying_masks`.
-pub(crate) fn sort_varying_predicates(
-    predicates: &mut Vec<VaryingPredicate>,
-    nodes: &mut [Node],
-) {
+pub(crate) fn sort_varying_predicates(predicates: &mut Vec<VaryingPredicate>, nodes: &mut [Node]) {
     if predicates.is_empty() {
         return;
     }
@@ -226,7 +288,8 @@ pub(crate) fn sort_varying_predicates(
     sorted_indices.sort_unstable_by(|&a, &b| {
         let pa = &predicates[a];
         let pb = &predicates[b];
-        pa.feature().cmp(&pb.feature())
+        pa.feature()
+            .cmp(&pb.feature())
             .then_with(|| pred_kind_ordinal(pa).cmp(&pred_kind_ordinal(pb)))
             .then_with(|| {
                 // For numerical predicates: sort by threshold ascending.
@@ -248,8 +311,7 @@ pub(crate) fn sort_varying_predicates(
     }
 
     // Reorder predicates vec.
-    let reordered: Vec<VaryingPredicate> =
-        sorted_indices.iter().map(|&i| predicates[i]).collect();
+    let reordered: Vec<VaryingPredicate> = sorted_indices.iter().map(|&i| predicates[i]).collect();
     *predicates = reordered;
 
     // Remap all nodes' varying_pred_id.
@@ -296,7 +358,10 @@ pub(crate) fn build_feature_ranges(predicates: &[VaryingPredicate]) -> Vec<Featu
         }
         let cat_end = i;
 
-        debug_assert!(i > group_start, "empty feature group at index {group_start}");
+        debug_assert!(
+            i > group_start,
+            "empty feature group at index {group_start}"
+        );
 
         ranges.push(FeatureRange {
             feature,
@@ -344,7 +409,12 @@ pub(crate) fn build_prefix_groups(
                 valid = false;
                 break;
             }
-            key.push((node.value.to_bits(), node.feature, node.flags, node.cat_n_words));
+            key.push((
+                node.value.to_bits(),
+                node.feature,
+                node.flags,
+                node.cat_n_words,
+            ));
         }
 
         if valid {
@@ -430,7 +500,7 @@ fn auto_order_trees(
         .map(|(i, tree)| (tree_path_summary(tree, &nodes), i))
         .collect();
 
-    indexed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    indexed.sort_unstable_by_key(|a| a.0);
 
     let order: Vec<usize> = indexed.iter().map(|&(_, idx)| idx).collect();
 
@@ -519,3 +589,33 @@ fn tree_path_summary(tree: &Tree, nodes: &[Node]) -> TreePathSummary {
     }
 }
 
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+
+    #[test]
+    fn varying_predicate_sentinel_is_never_assigned() {
+        let make = |i: usize| Node {
+            value: i as f64,
+            skip: 1,
+            varying_pred_id: u16::MAX,
+            feature: 0,
+            flags: crate::forest::SPLIT_NON_MONO << crate::forest::FLAG_VARYING_TYPE_SHIFT,
+            cat_n_words: 0,
+        };
+        let mut nodes: Vec<_> = (0..=usize::from(u16::MAX)).map(make).collect();
+        assert!(matches!(
+            build_varying_predicates(&mut nodes),
+            Err(LoadError::Limit(_))
+        ));
+        assert!(matches!(
+            build_varying_predicates_no_dedup(&mut nodes),
+            Err(LoadError::Limit(_))
+        ));
+        nodes.pop();
+        assert_eq!(
+            build_varying_predicates(&mut nodes).unwrap().len(),
+            usize::from(u16::MAX)
+        );
+    }
+}

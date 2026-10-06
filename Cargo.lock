@@ -731,14 +731,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "treewalker"
-version = "1.0.0"
+name = "treewalker-bench"
+version = "0.1.0"
 dependencies = [
  "libc",
  "libloading",
  "ndarray",
  "ndarray-npy",
  "quickscorer",
+ "serde",
+ "simd-json",
+ "treewalker-gbdt",
+]
+
+[[package]]
+name = "treewalker-gbdt"
+version = "1.0.0"
+dependencies = [
+ "libc",
  "rustc-hash",
  "serde",
  "simd-json",

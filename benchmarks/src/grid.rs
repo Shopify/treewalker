@@ -26,10 +26,7 @@ pub const ABLATION_ANCHORS_B: &[(usize, usize, usize)] = &[
 ];
 
 /// Grid 3 ablation anchors (B' set — full 64-combo cross).
-pub const ABLATION_ANCHORS_B_PRIME: &[(usize, usize, usize)] = &[
-    (500, 8, 16),
-    (1000, 16, 32),
-];
+pub const ABLATION_ANCHORS_B_PRIME: &[(usize, usize, usize)] = &[(500, 8, 16), (1000, 16, 32)];
 
 /// External baselines run on the B set anchors.
 pub const EXTERNAL_BASELINE_ANCHORS: &[(usize, usize, usize)] = ABLATION_ANCHORS_B;

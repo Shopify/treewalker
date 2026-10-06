@@ -30,7 +30,7 @@ Construction (deterministic, np.random.default_rng(42)):
   Same total row count R per cell so per-row latencies are comparable.
 
 Engine cap: the binary asserts every offset group width is in 1..=128
-(load_group_offsets in src/bin/sweep_bench.rs), and Forest::predict asserts
+(load_group_offsets in benchmarks/src/bin/sweep_bench.rs), and Forest::predict asserts
 n <= MAX_GROUP_WIDTH (128). PredictWorkspace dispatches G32/G64/G128 by
 max_group_width; we set max_group_width=128 to reuse the G128 (u128 mask)
 workspace. max_group_width does not affect parsing or predictions (it only
@@ -38,7 +38,7 @@ selects the mask width at predict time) — confirmed by the correctness check.
 
 Correctness: one check — TreeWalker chunked predictions vs LightGBM reference
 (GTIL) within TOL_F64=1e-14. sweep_bench emits only timing, not predictions, so
-we reuse the EXISTING tests/correctness.rs::test_reference_match harness (no
+we reuse the EXISTING benchmarks/tests/correctness.rs::test_reference_match harness (no
 Rust edits): each chunked cell is written as a self-contained artifact dir
 under paper/experiments/artifacts/support/e2_chunked_g{G}/ with walker_config.json,
 test_data.bin, group_offsets.bin, lightgbm/model_treelite.json (copied) and
@@ -233,11 +233,11 @@ def cell_is_complete(cell_dir: Path) -> tuple[bool, list[Path]]:
 
 
 # ---------------------------------------------------------------------------
-# Correctness — reuse the existing tests/correctness.rs harness (no Rust edits)
+# Correctness — reuse the existing benchmarks/tests/correctness.rs harness
 # ---------------------------------------------------------------------------
 
 def run_correctness(cells: list[int]) -> bool:
-    """Run tests/correctness.rs::test_reference_match via cargo test, fail-closed.
+    """Run benchmarks/tests/correctness.rs::test_reference_match via cargo test, fail-closed.
 
     The harness discovers every artifact dir (including our e2_chunked_g{G}
     dirs) and checks TreeWalker per-offset-group predictions vs predictions.npy
@@ -252,7 +252,8 @@ def run_correctness(cells: list[int]) -> bool:
         **os.environ,
         "PATH": f"{Path.home() / '.cargo/bin'}:{os.environ.get('PATH', '')}",
     }
-    cmd = ["cargo", "test", "--release", "--features", "test-helpers",
+    cmd = ["cargo", "test", "--manifest-path", "benchmarks/Cargo.toml",
+            "--target-dir", "target", "--release", "--features", "test-helpers",
             "--test", "correctness", "test_reference_match", "--", "--nocapture"]
     print(f"\n[correctness] {' '.join(cmd)}", file=sys.stderr)
     proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env,

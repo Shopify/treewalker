@@ -1,417 +1,490 @@
-//! Treelite v4 binary format reader — streaming with reusable buffers.
-//!
-//! Reads from a `BufReader` sequentially. Per-tree field arrays are read into
-//! reusable buffers that are cleared and refilled for each tree. After the first
-//! tree, no further allocations occur for field data — only the global `nodes`
-//! and `bitsets` pools grow.
-//!
-//! Format spec: <https://treelite.readthedocs.io/en/latest/serialization/v4.html>
-
-use rustc_hash::FxHashMap as HashMap;
-use std::io::{BufReader, Read};
-use std::path::Path;
-
-use crate::config::{ParseConfig, WalkerConfig};
-use crate::forest::{Node, ThresholdType, Tree};
-
+//! Streaming Treelite v4 reader with reusable, length-checked per-tree buffers.
 use super::common::{
     ParseContext, ReorderScratch, TempNode, build_flags, classify_feature, encode_categories,
-    next_down, reorder_and_emit,
+    reorder_and_emit,
 };
+use super::validation::{self, MAX_TREES, Metadata, ParsedModel};
+use crate::forest::{ThresholdType, Tree};
+use crate::{LoadError, ParseConfig, WalkerConfig};
+use rustc_hash::FxHashMap;
+use std::io::{BufReader, Read};
 
-// ---------------------------------------------------------------------------
-// Reusable per-tree field buffers
-// ---------------------------------------------------------------------------
+trait Element: Copy {
+    const SIZE: usize;
+    fn decode(bytes: &[u8]) -> Self;
+}
+macro_rules! element {
+    ($($t:ty),*) => { $(impl Element for $t {
+        const SIZE: usize = size_of::<Self>();
+        fn decode(bytes: &[u8]) -> Self { Self::from_le_bytes(bytes.try_into().unwrap()) }
+    })* };
+}
+element!(u8, i8, i32, u32, u64, f32, f64);
 
-/// Pre-allocated buffers for per-tree field arrays. Cleared and reused across trees.
-/// After the first tree (~240 nodes), no further allocations occur.
+#[derive(Clone, Copy)]
+enum Length {
+    Exact(usize),
+    Optional(usize),
+    Max(usize),
+}
+struct Reader<R> {
+    input: R,
+    raw: Vec<u8>,
+    consumed: u64,
+}
+impl<R: Read> Reader<R> {
+    fn account(&mut self, n: usize, field: &str) -> Result<(), LoadError> {
+        self.consumed = self
+            .consumed
+            .checked_add(n as u64)
+            .filter(|&n| n <= 4 * 1024 * 1024 * 1024)
+            .ok_or_else(|| LoadError::Limit("binary input exceeds 4 GiB".into()))?;
+        if n > 64 * 1024 * 1024 {
+            return Err(LoadError::Limit(format!("{field}: array exceeds 64 MiB")));
+        }
+        Ok(())
+    }
+    fn bytes(&mut self, n: usize, field: &str) -> Result<(), LoadError> {
+        self.account(n, field)?;
+        self.raw
+            .try_reserve(n.saturating_sub(self.raw.len()))
+            .map_err(|e| LoadError::Limit(e.to_string()))?;
+        self.raw.resize(n, 0);
+        read_exact(&mut self.input, &mut self.raw, field)
+    }
+    fn scalar<T: Element>(&mut self, field: &str) -> Result<T, LoadError> {
+        self.account(T::SIZE, field)?;
+        // Keep the array buffer's length intact across scalar/length reads.
+        // All supported Element types fit in eight bytes.
+        let mut buf = [0; 8];
+        let bytes = &mut buf[..T::SIZE];
+        read_exact(&mut self.input, bytes, field)?;
+        Ok(T::decode(bytes))
+    }
+    fn boolean(&mut self, field: &str) -> Result<bool, LoadError> {
+        match self.scalar::<u8>(field)? {
+            0 => Ok(false),
+            1 => Ok(true),
+            v => Err(LoadError::MalformedModel(format!(
+                "{field}: invalid bool {v}"
+            ))),
+        }
+    }
+    fn array<T: Element>(
+        &mut self,
+        out: &mut Vec<T>,
+        length: Length,
+        field: &str,
+    ) -> Result<(), LoadError> {
+        let declared = self.scalar::<u64>(field)?;
+        let n = usize::try_from(declared)
+            .map_err(|_| LoadError::Limit(format!("{field}: length {declared}")))?;
+        let valid = match length {
+            Length::Exact(x) => n == x,
+            Length::Optional(x) => n == 0 || n == x,
+            Length::Max(x) => n <= x,
+        };
+        if !valid {
+            return Err(LoadError::MalformedModel(format!(
+                "{field}: invalid declared length {declared}"
+            )));
+        }
+        let bytes = n
+            .checked_mul(T::SIZE)
+            .ok_or_else(|| LoadError::Limit(format!("{field}: byte length overflow")))?;
+        self.bytes(bytes, field)?;
+        out.clear();
+        out.try_reserve(n)
+            .map_err(|e| LoadError::Limit(e.to_string()))?;
+        out.extend(self.raw.chunks_exact(T::SIZE).map(T::decode));
+        Ok(())
+    }
+    fn bools(&mut self, out: &mut Vec<u8>, length: Length, field: &str) -> Result<(), LoadError> {
+        self.array(out, length, field)?;
+        if out.iter().any(|&v| v > 1) {
+            return Err(LoadError::MalformedModel(format!("{field}: invalid bool")));
+        }
+        Ok(())
+    }
+    fn values(
+        &mut self,
+        out: &mut Vec<f64>,
+        n: usize,
+        kind: ThresholdType,
+        field: &str,
+    ) -> Result<(), LoadError> {
+        if kind == ThresholdType::F64 {
+            self.array(out, Length::Exact(n), field)
+        } else {
+            let len = self.scalar::<u64>(field)?;
+            if len != n as u64 {
+                return Err(LoadError::MalformedModel(format!(
+                    "{field}: length {len}, expected {n}"
+                )));
+            }
+            self.bytes(n * 4, field)?;
+            out.clear();
+            out.extend(self.raw.chunks_exact(4).map(|c| f64::from(f32::decode(c))));
+            Ok(())
+        }
+    }
+    fn string(&mut self, max: usize, field: &str) -> Result<String, LoadError> {
+        let mut s = Vec::new();
+        self.array(&mut s, Length::Max(max), field)?;
+        if s.last() == Some(&0) {
+            s.pop();
+        }
+        String::from_utf8(s).map_err(|e| LoadError::MalformedModel(format!("{field}: {e}")))
+    }
+    fn extension(&mut self, field: &str) -> Result<(), LoadError> {
+        let n = self.scalar::<i32>(field)?;
+        if n != 0 {
+            return Err(LoadError::Unsupported(format!(
+                "{field}={n}; extensions are unsupported"
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn read_exact(reader: &mut impl Read, bytes: &mut [u8], field: &str) -> Result<(), LoadError> {
+    reader.read_exact(bytes).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            LoadError::MalformedModel(format!("{field}: truncated binary field"))
+        } else {
+            LoadError::Io(e)
+        }
+    })
+}
+
+#[derive(Default)]
 struct TreeBufs {
     node_type: Vec<i8>,
     cleft: Vec<i32>,
     cright: Vec<i32>,
     split_index: Vec<i32>,
-    default_left: Vec<bool>,
+    default_left: Vec<u8>,
     leaf_value: Vec<f64>,
     threshold: Vec<f64>,
     cmp: Vec<i8>,
-    cat_right_child: Vec<bool>,
-    category_list: Vec<u32>,
-    cat_list_begin: Vec<u64>,
-    cat_list_end: Vec<u64>,
+    cat_right: Vec<u8>,
+    leaf_begin: Vec<u64>,
+    leaf_end: Vec<u64>,
+    categories: Vec<u32>,
+    cat_begin: Vec<u64>,
+    cat_end: Vec<u64>,
     data_count: Vec<u64>,
-    data_count_present: Vec<bool>,
+    data_present: Vec<u8>,
     sum_hess: Vec<f64>,
-    sum_hess_present: Vec<bool>,
-    temp_nodes: Vec<TempNode>,
-    // Shared byte buffer for raw reads (avoids per-read_array allocation)
-    raw: Vec<u8>,
+    hess_present: Vec<u8>,
+    gain: Vec<f64>,
+    gain_present: Vec<u8>,
+    temp: Vec<TempNode>,
 }
 
-impl TreeBufs {
-    const fn new() -> Self {
-        Self {
-            node_type: Vec::new(),
-            cleft: Vec::new(),
-            cright: Vec::new(),
-            split_index: Vec::new(),
-            default_left: Vec::new(),
-            leaf_value: Vec::new(),
-            threshold: Vec::new(),
-            cmp: Vec::new(),
-            cat_right_child: Vec::new(),
-            category_list: Vec::new(),
-            cat_list_begin: Vec::new(),
-            cat_list_end: Vec::new(),
-            data_count: Vec::new(),
-            data_count_present: Vec::new(),
-            sum_hess: Vec::new(),
-            sum_hess_present: Vec::new(),
-            temp_nodes: Vec::new(),
-            raw: Vec::new(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Buffered read helpers — read into reusable Vec
-// ---------------------------------------------------------------------------
-
-fn read_exact(r: &mut impl Read, buf: &mut [u8]) {
-    r.read_exact(buf)
-        .unwrap_or_else(|e| panic!("unexpected EOF reading binary model: {e}"));
-}
-
-fn read_u8(r: &mut impl Read) -> u8 {
-    let mut b = [0u8; 1];
-    read_exact(r, &mut b);
-    b[0]
-}
-
-fn read_bool(r: &mut impl Read) -> bool { read_u8(r) != 0 }
-
-fn read_i32(r: &mut impl Read) -> i32 {
-    let mut b = [0u8; 4];
-    read_exact(r, &mut b);
-    i32::from_le_bytes(b)
-}
-
-fn read_f32(r: &mut impl Read) -> f32 {
-    let mut b = [0u8; 4];
-    read_exact(r, &mut b);
-    f32::from_le_bytes(b)
-}
-
-fn read_u64(r: &mut impl Read) -> u64 {
-    let mut b = [0u8; 8];
-    read_exact(r, &mut b);
-    u64::from_le_bytes(b)
-}
-
-/// Read a length-prefixed array into a reusable raw byte buffer, then decode into `out`.
-fn read_into_i8(r: &mut impl Read, raw: &mut Vec<u8>, out: &mut Vec<i8>) {
-    let len = read_u64(r) as usize;
-    raw.resize(len, 0);
-    read_exact(r, raw);
-    out.clear();
-    out.extend(raw.iter().map(|&b| b as i8));
-}
-
-fn read_into_bool(r: &mut impl Read, raw: &mut Vec<u8>, out: &mut Vec<bool>) {
-    let len = read_u64(r) as usize;
-    raw.resize(len, 0);
-    read_exact(r, raw);
-    out.clear();
-    out.extend(raw.iter().map(|&b| b != 0));
-}
-
-fn read_into_i32(r: &mut impl Read, raw: &mut Vec<u8>, out: &mut Vec<i32>) {
-    let len = read_u64(r) as usize;
-    raw.resize(len * 4, 0);
-    read_exact(r, raw);
-    out.clear();
-    out.extend(raw.chunks_exact(4).map(|c| i32::from_le_bytes(c.try_into().unwrap())));
-}
-
-fn read_into_u32(r: &mut impl Read, raw: &mut Vec<u8>, out: &mut Vec<u32>) {
-    let len = read_u64(r) as usize;
-    raw.resize(len * 4, 0);
-    read_exact(r, raw);
-    out.clear();
-    out.extend(raw.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())));
-}
-
-fn read_into_u64(r: &mut impl Read, raw: &mut Vec<u8>, out: &mut Vec<u64>) {
-    let len = read_u64(r) as usize;
-    raw.resize(len * 8, 0);
-    read_exact(r, raw);
-    out.clear();
-    out.extend(raw.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().unwrap())));
-}
-
-fn read_into_f64(r: &mut impl Read, raw: &mut Vec<u8>, out: &mut Vec<f64>) {
-    let len = read_u64(r) as usize;
-    raw.resize(len * 8, 0);
-    read_exact(r, raw);
-    out.clear();
-    out.extend(raw.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap())));
-}
-
-fn read_into_f64_from_f32(r: &mut impl Read, raw: &mut Vec<u8>, out: &mut Vec<f64>) {
-    let len = read_u64(r) as usize;
-    raw.resize(len * 4, 0);
-    read_exact(r, raw);
-    out.clear();
-    out.extend(raw.chunks_exact(4).map(|c| f64::from(f32::from_le_bytes(c.try_into().unwrap()))));
-}
-
-/// Skip a length-prefixed array.
-fn skip_array(r: &mut impl Read, elem_size: usize, raw: &mut Vec<u8>) {
-    let len = read_u64(r) as usize;
-    raw.resize(len * elem_size, 0);
-    read_exact(r, raw);
-}
-
-/// Read a length-prefixed string (allocates — only used for header, not per-tree).
-fn read_string(r: &mut impl Read) -> String {
-    let len = read_u64(r) as usize;
-    let mut buf = vec![0u8; len];
-    read_exact(r, &mut buf);
-    if buf.last() == Some(&0) { buf.pop(); }
-    String::from_utf8(buf).expect("invalid UTF-8 in binary model string")
-}
-
-// Temporary Vec for header arrays that we read once and discard.
-fn skip_header_array(r: &mut impl Read, elem_size: usize) {
-    let len = read_u64(r) as usize;
-    let mut buf = vec![0u8; len * elem_size];
-    read_exact(r, &mut buf);
-}
-
-fn read_header_f64(r: &mut impl Read) -> Vec<f64> {
-    let len = read_u64(r) as usize;
-    let mut buf = vec![0u8; len * 8];
-    read_exact(r, &mut buf);
-    buf.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap())).collect()
-}
-
-// ---------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------
-
-pub fn parse(
-    path: &Path,
+pub(super) fn parse(
+    reader: impl Read,
     config: &WalkerConfig,
-    parse_config: &ParseConfig,
-) -> (Vec<Tree>, Vec<Node>, Vec<u8>, ThresholdType) {
-    let file = std::fs::File::open(path)
-        .unwrap_or_else(|e| panic!("failed to open binary model {}: {e}", path.display()));
-    let mut r = BufReader::with_capacity(128 * 1024, file);
-
-    // -- Header --
-    let major = read_i32(&mut r);
-    assert!(major == 4, "Expected treelite binary v4, got v{major}");
-    let _minor = read_i32(&mut r);
-    let _patch = read_i32(&mut r);
-
-    let thr_type_raw = read_u8(&mut r);
-    let _leaf_type_raw = read_u8(&mut r);
-
-    let threshold_type = match thr_type_raw {
-        2 => ThresholdType::F32,
-        3 => ThresholdType::F64,
-        _ => panic!("unsupported threshold_type: {thr_type_raw}"),
+    parse: &ParseConfig,
+) -> Result<ParsedModel, LoadError> {
+    let mut r = Reader {
+        input: BufReader::with_capacity(128 * 1024, reader),
+        raw: Vec::new(),
+        consumed: 0,
     };
-
-    let num_tree = read_u64(&mut r) as usize;
-    let _num_feature = read_i32(&mut r);
-    let _task_type = read_u8(&mut r);
-    let _average_tree_output = read_bool(&mut r);
-
-    let _num_target = read_i32(&mut r);
-    skip_header_array(&mut r, 4); // num_class
-    skip_header_array(&mut r, 4); // leaf_vector_shape
-    skip_header_array(&mut r, 4); // target_id
-    skip_header_array(&mut r, 4); // class_id
-
-    let postprocessor = read_string(&mut r);
-    assert!(
-        postprocessor.contains("sigmoid"),
-        "unsupported postprocessor: '{postprocessor}'. Only binary-logistic (sigmoid) models supported."
-    );
-    let _sigmoid_alpha = read_f32(&mut r);
-    let _ratio_c = read_f32(&mut r);
-
-    let base_scores = read_header_f64(&mut r);
-    let _attributes = read_string(&mut r);
-    let _num_opt_field_per_model = read_i32(&mut r);
-
-    let base_score = if base_scores.is_empty() { 0.0 } else { base_scores[0] };
-    let leaf_bias = base_score / num_tree as f64;
-
-    // -- Per-tree parsing with reusable buffers --
-    let mut trees = Vec::with_capacity(num_tree);
-    let mut nodes: Vec<Node> = Vec::new();
-    let mut bitsets: Vec<u8> = Vec::new();
-    let mut bitset_intern: HashMap<Vec<u32>, usize> = HashMap::default();
-    let mut bufs = TreeBufs::new();
-    let mut scratch = ReorderScratch::new();
-
-    {
-        let mut ctx = ParseContext {
-            nodes: &mut nodes,
-            bitsets: &mut bitsets,
-            bitset_intern: if parse_config.disable_bitset_intern {
-                None
-            } else {
-                Some(&mut bitset_intern)
-            },
-            config,
-            leaf_bias,
-            threshold_type,
-        };
-
-        for _ in 0..num_tree {
-            trees.push(read_tree(&mut r, &mut ctx, &mut bufs, &mut scratch));
-        }
+    let major = r.scalar::<i32>("major_ver")?;
+    let minor = r.scalar::<i32>("minor_ver")?;
+    let patch = r.scalar::<i32>("patch_ver")?;
+    if major != 4 || !(0..=7).contains(&minor) || patch < 0 {
+        return Err(LoadError::Unsupported(format!(
+            "Treelite version {major}.{minor}.{patch}; supported 4.0 through 4.7"
+        )));
     }
-
-    (trees, nodes, bitsets, threshold_type)
+    let thr = r.scalar::<u8>("threshold_type")?;
+    let leaf = r.scalar::<u8>("leaf_output_type")?;
+    let threshold_type = match (thr, leaf) {
+        (2, 2) => ThresholdType::F32,
+        (3, 3) => ThresholdType::F64,
+        _ => {
+            return Err(LoadError::Unsupported(format!(
+                "threshold_type={thr}, leaf_output_type={leaf}"
+            )));
+        }
+    };
+    let count = r.scalar::<u64>("num_tree")?;
+    if count == 0 || count > MAX_TREES as u64 {
+        return Err(LoadError::Limit(format!(
+            "num_tree={count}; require 1..={MAX_TREES}"
+        )));
+    }
+    let num_tree = count as usize;
+    let num_feature = i64::from(r.scalar::<i32>("num_feature")?);
+    let task = r.scalar::<u8>("task_type")?;
+    let task_type = match task {
+        0 => "kBinaryClf",
+        1 => "kRegressor",
+        3 => "kLearningToRank",
+        _ => return Err(LoadError::Unsupported(format!("task_type={task}"))),
+    }
+    .into();
+    let average = r.boolean("average_tree_output")?;
+    let num_target = i64::from(r.scalar::<i32>("num_target")?);
+    if num_target != 1 {
+        return Err(LoadError::Unsupported(format!(
+            "num_target={num_target}; require scalar output"
+        )));
+    }
+    let (mut num_class, mut leaf_shape, mut target_id, mut class_id) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    r.array(&mut num_class, Length::Exact(1), "num_class")?;
+    r.array(&mut leaf_shape, Length::Exact(2), "leaf_vector_shape")?;
+    r.array(&mut target_id, Length::Exact(num_tree), "target_id")?;
+    r.array(&mut class_id, Length::Exact(num_tree), "class_id")?;
+    let postprocessor = r.string(64, "postprocessor")?;
+    let sigmoid_alpha = f64::from(r.scalar::<f32>("sigmoid_alpha")?);
+    let _ratio_c = r.scalar::<f32>("ratio_c")?;
+    let mut base_scores = Vec::new();
+    r.array(&mut base_scores, Length::Exact(1), "base_scores")?;
+    validation::attributes(&r.string(16 * 1024 * 1024, "attributes")?)?;
+    r.extension("num_opt_field_per_model")?;
+    let meta = Metadata {
+        num_tree,
+        num_feature,
+        task_type,
+        average,
+        num_target,
+        num_class,
+        leaf_shape,
+        target_id,
+        class_id,
+        postprocessor,
+        sigmoid_alpha,
+        base_scores,
+    };
+    let output = meta.validate(config)?;
+    let (mut trees, mut nodes, mut bitsets) = (Vec::new(), Vec::new(), Vec::new());
+    let mut intern = FxHashMap::default();
+    let mut ctx = ParseContext {
+        nodes: &mut nodes,
+        bitsets: &mut bitsets,
+        bitset_intern: if parse.disable_bitset_intern {
+            None
+        } else {
+            Some(&mut intern)
+        },
+        config,
+        threshold_type,
+    };
+    let mut b = TreeBufs::default();
+    let mut scratch = ReorderScratch::new();
+    for i in 0..num_tree {
+        trees.push(
+            read_tree(&mut r, &mut ctx, &mut b, &mut scratch)
+                .map_err(|e| e.at(&format!("tree {i}")))?,
+        );
+    }
+    let mut trailing = [0];
+    if r.input.read(&mut trailing)? != 0 {
+        return Err(LoadError::Unsupported(
+            "trailing bytes after final tree".into(),
+        ));
+    }
+    Ok(ParsedModel {
+        trees,
+        nodes,
+        bitsets,
+        threshold_type,
+        output,
+    })
 }
 
-// ---------------------------------------------------------------------------
-// Per-tree reading — streaming with reusable buffers
-// ---------------------------------------------------------------------------
-
-fn read_tree(
-    r: &mut impl Read,
+fn read_tree<R: Read>(
+    r: &mut Reader<R>,
     ctx: &mut ParseContext<'_>,
     b: &mut TreeBufs,
     scratch: &mut ReorderScratch,
-) -> Tree {
-    let num_nodes = read_i32(r) as usize;
-    let _has_categorical_split = read_bool(r);
-
-    assert!(
-        i16::try_from(num_nodes).is_ok(),
-        "tree has {num_nodes} nodes, exceeds i16 capacity"
-    );
-
-    // Read field arrays into reusable buffers.
-    read_into_i8(r, &mut b.raw, &mut b.node_type);
-    read_into_i32(r, &mut b.raw, &mut b.cleft);
-    read_into_i32(r, &mut b.raw, &mut b.cright);
-    read_into_i32(r, &mut b.raw, &mut b.split_index);
-    read_into_bool(r, &mut b.raw, &mut b.default_left);
-
-    match ctx.threshold_type {
-        ThresholdType::F64 => {
-            read_into_f64(r, &mut b.raw, &mut b.leaf_value);
-            read_into_f64(r, &mut b.raw, &mut b.threshold);
+) -> Result<Tree, LoadError> {
+    let count = r.scalar::<i32>("num_nodes")?;
+    if !(1..=i32::from(i16::MAX)).contains(&count) {
+        return Err(LoadError::Limit(format!(
+            "num_nodes={count}; require 1..=32767"
+        )));
+    }
+    let n = count as usize;
+    let has_cat = r.boolean("has_categorical_split")?;
+    r.array(&mut b.node_type, Length::Exact(n), "node_type")?;
+    r.array(&mut b.cleft, Length::Exact(n), "cleft")?;
+    r.array(&mut b.cright, Length::Exact(n), "cright")?;
+    r.array(&mut b.split_index, Length::Exact(n), "split_index")?;
+    r.bools(&mut b.default_left, Length::Exact(n), "default_left")?;
+    r.values(&mut b.leaf_value, n, ctx.threshold_type, "leaf_value")?;
+    r.values(&mut b.threshold, n, ctx.threshold_type, "threshold")?;
+    r.array(&mut b.cmp, Length::Exact(n), "cmp")?;
+    r.bools(
+        &mut b.cat_right,
+        Length::Exact(n),
+        "category_list_right_child",
+    )?;
+    // Scalar models have no vector payload; reject before allocating any.
+    let vector_len = r.scalar::<u64>("leaf_vector")?;
+    if vector_len != 0 {
+        return Err(LoadError::Unsupported(format!(
+            "leaf_vector length {vector_len}; vector leaves are unsupported"
+        )));
+    }
+    r.array(&mut b.leaf_begin, Length::Optional(n), "leaf_vector_begin")?;
+    r.array(&mut b.leaf_end, Length::Optional(n), "leaf_vector_end")?;
+    if b.leaf_begin.len() != b.leaf_end.len()
+        || b.leaf_begin.iter().chain(&b.leaf_end).any(|&x| x != 0)
+    {
+        return Err(LoadError::MalformedModel(
+            "leaf_vector offsets must be zero for scalar leaves".into(),
+        ));
+    }
+    r.array(
+        &mut b.categories,
+        Length::Max(16 * 1024 * 1024),
+        "category_list",
+    )?;
+    r.array(&mut b.cat_begin, Length::Exact(n), "category_list_begin")?;
+    r.array(&mut b.cat_end, Length::Exact(n), "category_list_end")?;
+    r.array(&mut b.data_count, Length::Optional(n), "data_count")?;
+    r.bools(
+        &mut b.data_present,
+        Length::Exact(b.data_count.len()),
+        "data_count_present",
+    )?;
+    r.array(&mut b.sum_hess, Length::Optional(n), "sum_hess")?;
+    r.bools(
+        &mut b.hess_present,
+        Length::Exact(b.sum_hess.len()),
+        "sum_hess_present",
+    )?;
+    r.array(&mut b.gain, Length::Optional(n), "gain")?;
+    r.bools(
+        &mut b.gain_present,
+        Length::Exact(b.gain.len()),
+        "gain_present",
+    )?;
+    r.extension("num_opt_field_per_tree")?;
+    r.extension("num_opt_field_per_node")?;
+    if has_cat != b.node_type.contains(&2) {
+        return Err(LoadError::MalformedModel(
+            "has_categorical_split disagrees with node_type".into(),
+        ));
+    }
+    // Bound total decoding work even if several valid segments overlap.
+    let mut category_items = 0u64;
+    for (&begin, &end) in b.cat_begin.iter().zip(&b.cat_end) {
+        if begin > end || end > b.categories.len() as u64 {
+            return Err(LoadError::MalformedModel(format!(
+                "invalid category segment {begin}..{end}"
+            )));
         }
-        ThresholdType::F32 => {
-            read_into_f64_from_f32(r, &mut b.raw, &mut b.leaf_value);
-            read_into_f64_from_f32(r, &mut b.raw, &mut b.threshold);
+        category_items += end - begin;
+        if category_items > 16 * 1024 * 1024 {
+            return Err(LoadError::Limit(
+                "more than 16 million referenced category entries in one tree".into(),
+            ));
         }
     }
-
-    read_into_i8(r, &mut b.raw, &mut b.cmp);
-    read_into_bool(r, &mut b.raw, &mut b.cat_right_child);
-
-    // Leaf vectors (skip)
-    match ctx.threshold_type {
-        ThresholdType::F64 => skip_array(r, 8, &mut b.raw),
-        ThresholdType::F32 => skip_array(r, 4, &mut b.raw),
-    }
-    skip_array(r, 8, &mut b.raw); // leaf_vector_begin
-    skip_array(r, 8, &mut b.raw); // leaf_vector_end
-
-    read_into_u32(r, &mut b.raw, &mut b.category_list);
-    read_into_u64(r, &mut b.raw, &mut b.cat_list_begin);
-    read_into_u64(r, &mut b.raw, &mut b.cat_list_end);
-
-    read_into_u64(r, &mut b.raw, &mut b.data_count);
-    read_into_bool(r, &mut b.raw, &mut b.data_count_present);
-    read_into_f64(r, &mut b.raw, &mut b.sum_hess);
-    read_into_bool(r, &mut b.raw, &mut b.sum_hess_present);
-    skip_array(r, 8, &mut b.raw); // gain
-    skip_array(r, 1, &mut b.raw); // gain_present
-
-    let _num_opt_field_per_tree = read_i32(r);
-    let _num_opt_field_per_node = read_i32(r);
-
-    let is_f32 = ctx.threshold_type == ThresholdType::F32;
-
-    // -- Build TempNodes into reusable buffer --
-    b.temp_nodes.clear();
     let bitset_start = ctx.bitsets.len() as u32;
+    b.temp.clear();
+    for i in 0..n {
+        let node = decode_node(i, n, ctx, b).map_err(|e| e.at(&format!("node {i}")))?;
+        b.temp.push(node);
+    }
+    reorder_and_emit(&b.temp, 0, bitset_start, ctx, scratch)
+}
 
-    for i in 0..num_nodes {
-        let nt = b.node_type[i];
-
-        let weight = if i < b.data_count_present.len() && b.data_count_present[i] {
-            b.data_count[i] as f64
-        } else if i < b.sum_hess_present.len() && b.sum_hess_present[i] {
-            b.sum_hess[i]
-        } else {
-            1.0
-        };
-
-        assert!(
-            nt == 0 || nt == 1 || nt == 2,
-            "unknown node_type {nt} at node {i} (expected 0=leaf, 1=numerical, 2=categorical)",
-        );
-
-        if nt == 0 {
-            b.temp_nodes.push(TempNode {
-                value: b.leaf_value[i] + ctx.leaf_bias,
-                left: -1, right: -1, feature: 0, flags: 0, cat_n_words: 0, weight,
-            });
-            continue;
+fn decode_node(
+    i: usize,
+    n: usize,
+    ctx: &mut ParseContext<'_>,
+    b: &TreeBufs,
+) -> Result<TempNode, LoadError> {
+    let kind = b.node_type[i];
+    if !(0..=2).contains(&kind) {
+        return Err(LoadError::Unsupported(format!("node_type={kind}")));
+    }
+    let weight = if b.data_present.get(i) == Some(&1) {
+        b.data_count[i] as f64
+    } else if b.hess_present.get(i) == Some(&1) {
+        b.sum_hess[i]
+    } else {
+        1.0
+    };
+    if !weight.is_finite() || weight < 0.0 {
+        return Err(LoadError::MalformedModel(format!(
+            "invalid node statistic {weight}"
+        )));
+    }
+    let (begin, end) = (b.cat_begin[i], b.cat_end[i]);
+    if begin > end || end > b.categories.len() as u64 || (kind != 2 && begin != end) {
+        return Err(LoadError::MalformedModel(format!(
+            "category segment {begin}..{end} is invalid"
+        )));
+    }
+    if kind == 0 {
+        if b.cleft[i] != -1 || b.cright[i] != -1 || b.split_index[i] != -1 {
+            return Err(LoadError::MalformedModel(
+                "leaf has children or split_index".into(),
+            ));
         }
-
-        let split_feature = b.split_index[i] as u16;
-        assert!(
-            (split_feature as usize) < ctx.config.n_features,
-            "split_index {} >= n_features {}", split_feature, ctx.config.n_features,
-        );
-        let dl = b.default_left[i];
-        let left_idx = b.cleft[i] as i16;
-        let right_idx = b.cright[i] as i16;
-        let is_cat = nt == 2;
-
-        let (value, inline, n_words) = if is_cat {
-            let begin = b.cat_list_begin[i] as usize;
-            let end = b.cat_list_end[i] as usize;
-            let categories: Vec<u32> = b.category_list[begin..end].to_vec();
-            let invert = b.cat_right_child[i];
-            encode_categories(&categories, invert, ctx)
-        } else {
-            let raw_threshold = b.threshold[i];
-            let comparison_op = b.cmp[i];
-
-            let thr = if raw_threshold.is_nan() {
-                if dl { f64::NEG_INFINITY } else { f64::INFINITY }
-            } else {
-                raw_threshold
-            };
-
-            let adjusted = match (comparison_op, ctx.threshold_type) {
-                (2, ThresholdType::F64) => next_down(thr),
-                (3, ThresholdType::F64) | (2, ThresholdType::F32) => thr,
-                (3, ThresholdType::F32) => panic!("F32 model with LE comparison not supported"),
-                _ => panic!("unsupported comparison_op: {comparison_op}"),
-            };
-            (adjusted, false, 0u8)
-        };
-
-        let varying_type = classify_feature(ctx.config, split_feature as usize);
-        let flags = build_flags(dl, is_cat, inline, varying_type);
-
-        b.temp_nodes.push(TempNode {
-            value, left: left_idx, right: right_idx,
-            feature: split_feature, flags, cat_n_words: n_words, weight,
+        return Ok(TempNode {
+            value: validation::leaf(b.leaf_value[i], ctx.threshold_type)?,
+            left: -1,
+            right: -1,
+            feature: 0,
+            flags: 0,
+            cat_n_words: 0,
+            weight,
         });
     }
-
-    reorder_and_emit(&b.temp_nodes, 0, bitset_start, ctx, scratch)
+    let feature = b.split_index[i];
+    if feature < 0 || feature as usize >= ctx.config.n_features {
+        return Err(LoadError::MalformedModel(format!(
+            "split_index={feature} out of range"
+        )));
+    }
+    let (mut left, mut right) = (b.cleft[i], b.cright[i]);
+    if left < 0 || right < 0 || left as usize >= n || right as usize >= n {
+        return Err(LoadError::MalformedModel(format!(
+            "invalid children {left}, {right}"
+        )));
+    }
+    let mut dl = b.default_left[i] != 0;
+    let (value, inline, words) = if kind == 2 {
+        // Normalize membership-right into membership-left, including missing routing.
+        if b.cat_right[i] != 0 {
+            std::mem::swap(&mut left, &mut right);
+            dl = !dl;
+        }
+        encode_categories(&b.categories[begin as usize..end as usize], ctx)?
+    } else {
+        let op = match b.cmp[i] {
+            2 => "<",
+            3 => "<=",
+            x => return Err(LoadError::Unsupported(format!("comparison_op={x}"))),
+        };
+        (
+            validation::threshold(b.threshold[i], op, ctx.threshold_type)?,
+            false,
+            0,
+        )
+    };
+    Ok(TempNode {
+        value,
+        left: left as i16,
+        right: right as i16,
+        feature: feature as u16,
+        flags: build_flags(
+            dl,
+            kind == 2,
+            inline,
+            classify_feature(ctx.config, feature as usize),
+        ),
+        cat_n_words: words,
+        weight,
+    })
 }

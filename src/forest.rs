@@ -34,6 +34,8 @@ use std::path::Path;
 
 use crate::config::{ParseConfig, WalkerConfig};
 use crate::parser;
+use crate::{LoadError, ModelFormat};
+use std::io::{Cursor, Read};
 
 // ---------------------------------------------------------------------------
 // Node
@@ -45,7 +47,7 @@ use crate::parser;
 /// - **Numerical split**: f64 threshold. `val <= value` → go left.
 /// - **Categorical split (inline)**: u32 bitset word stored as f64.
 /// - **Categorical split (pool)**: byte offset into `Forest.bitsets` stored as f64.
-/// - **Leaf**: f64 raw log-odds output.
+/// - **Leaf**: f64 scalar leaf output.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Node {
@@ -176,17 +178,30 @@ impl std::hash::Hash for VaryingPredicate {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match *self {
-            Self::Num { feature, threshold, default_left } => {
+            Self::Num {
+                feature,
+                threshold,
+                default_left,
+            } => {
                 feature.hash(state);
                 threshold.to_bits().hash(state);
                 default_left.hash(state);
             }
-            Self::CatInline { feature, default_left, word } => {
+            Self::CatInline {
+                feature,
+                default_left,
+                word,
+            } => {
                 feature.hash(state);
                 default_left.hash(state);
                 word.hash(state);
             }
-            Self::CatPool { feature, default_left, offset, n_words } => {
+            Self::CatPool {
+                feature,
+                default_left,
+                offset,
+                n_words,
+            } => {
                 feature.hash(state);
                 default_left.hash(state);
                 offset.hash(state);
@@ -200,16 +215,42 @@ impl PartialEq for VaryingPredicate {
     fn eq(&self, other: &Self) -> bool {
         match (*self, *other) {
             (
-                Self::Num { feature: f1, threshold: t1, default_left: d1 },
-                Self::Num { feature: f2, threshold: t2, default_left: d2 },
+                Self::Num {
+                    feature: f1,
+                    threshold: t1,
+                    default_left: d1,
+                },
+                Self::Num {
+                    feature: f2,
+                    threshold: t2,
+                    default_left: d2,
+                },
             ) => f1 == f2 && t1.to_bits() == t2.to_bits() && d1 == d2,
             (
-                Self::CatInline { feature: f1, default_left: d1, word: w1 },
-                Self::CatInline { feature: f2, default_left: d2, word: w2 },
+                Self::CatInline {
+                    feature: f1,
+                    default_left: d1,
+                    word: w1,
+                },
+                Self::CatInline {
+                    feature: f2,
+                    default_left: d2,
+                    word: w2,
+                },
             ) => f1 == f2 && d1 == d2 && w1 == w2,
             (
-                Self::CatPool { feature: f1, default_left: d1, offset: o1, n_words: n1 },
-                Self::CatPool { feature: f2, default_left: d2, offset: o2, n_words: n2 },
+                Self::CatPool {
+                    feature: f1,
+                    default_left: d1,
+                    offset: o1,
+                    n_words: n1,
+                },
+                Self::CatPool {
+                    feature: f2,
+                    default_left: d2,
+                    offset: o2,
+                    n_words: n2,
+                },
             ) => f1 == f2 && d1 == d2 && o1 == o2 && n1 == n2,
             _ => false,
         }
@@ -233,29 +274,56 @@ impl VaryingPredicate {
     #[inline]
     pub(crate) fn goes_left<const F32: bool>(&self, val: f64, bitsets: &[u8]) -> bool {
         match *self {
-            Self::Num { threshold, default_left, .. } => {
-                if val.is_nan() { default_left } else { threshold_go_left::<F32>(val, threshold) }
-            }
-            Self::CatInline { default_left, word, .. } => {
+            Self::Num {
+                threshold,
+                default_left,
+                ..
+            } => {
                 if val.is_nan() {
                     default_left
                 } else {
+                    threshold_go_left::<F32>(val, threshold)
+                }
+            }
+            Self::CatInline {
+                default_left, word, ..
+            } => {
+                if val.is_nan() {
+                    default_left
+                } else {
+                    let val = if F32 { f64::from(val as f32) } else { val };
                     let cat = val as i32;
-                    if !(0..32).contains(&cat) { return default_left; }
+                    if val < 0.0 || !(0..32).contains(&cat) {
+                        return false;
+                    }
                     (word >> cat as u32) & 1 != 0
                 }
             }
-            Self::CatPool { default_left, offset, n_words, .. } => {
+            Self::CatPool {
+                default_left,
+                offset,
+                n_words,
+                ..
+            } => {
                 if val.is_nan() {
                     default_left
                 } else {
+                    let val = if F32 { f64::from(val as f32) } else { val };
                     let cat = val as i32;
-                    if cat < 0 { return default_left; }
+                    if val < 0.0 || cat < 0 {
+                        return false;
+                    }
                     let word_idx = (cat / 32) as usize;
-                    if word_idx >= n_words as usize { return default_left; }
+                    if word_idx >= n_words as usize {
+                        return false;
+                    }
                     let byte_offset = offset as usize + word_idx * 4;
                     let word = unsafe {
-                        bitsets.as_ptr().add(byte_offset).cast::<u32>().read_unaligned()
+                        bitsets
+                            .as_ptr()
+                            .add(byte_offset)
+                            .cast::<u32>()
+                            .read_unaligned()
                     };
                     (word >> (cat as u32 % 32)) & 1 != 0
                 }
@@ -287,7 +355,7 @@ pub struct Tree {
 pub enum ThresholdType {
     /// LightGBM: thresholds are native f64, compare `val <= threshold` in f64.
     F64,
-    /// XGBoost: thresholds are f32-promoted-to-f64. Compare `(val as f32) <= (threshold as f32)`
+    /// XGBoost: thresholds are f32-promoted-to-f64. Compare `(val as f32) < (threshold as f32)`
     /// to match the original framework's split decisions.
     F32,
 }
@@ -338,6 +406,8 @@ pub(crate) struct PrefixGroup {
 }
 
 pub struct Forest {
+    pub(crate) output: parser::Output,
+    pub(crate) compiled_config: WalkerConfig,
     pub(crate) trees: Vec<Tree>,
     pub config: WalkerConfig,
     pub(crate) nodes: Vec<Node>,
@@ -368,36 +438,82 @@ impl std::fmt::Debug for Forest {
 }
 
 impl Forest {
+    /// Compatibility wrapper; panics on I/O, malformed or unsupported models.
+    /// Prefer [`Self::try_load`].
     pub fn load(model_path: impl AsRef<Path>, config_path: impl AsRef<Path>) -> Self {
-        Self::load_with_config(model_path, config_path, &ParseConfig::default())
+        Self::try_load(model_path, config_path).unwrap_or_else(|e| panic!("{e}"))
     }
 
+    /// Compatibility wrapper; panics on load errors. Prefer [`Self::try_load_with_config`].
     pub fn load_with_config(
         model_path: impl AsRef<Path>,
         config_path: impl AsRef<Path>,
         parse_config: &ParseConfig,
     ) -> Self {
-        let config = WalkerConfig::from_file(config_path);
-        let model_path = model_path.as_ref();
-        let ext = model_path.extension().and_then(|e| e.to_str());
-        assert!(
-            matches!(ext, Some("json" | "bin")),
-            "Model file must be .json or .bin (treelite format). Got: {}",
-            model_path.display(),
-        );
-        let (trees, mut nodes, bitsets, threshold_type) =
-            parser::parse_model(model_path, &config, parse_config);
+        Self::try_load_with_config(model_path, config_path, parse_config)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// Load a supported Treelite `.bin` or `.json` model and grouping configuration.
+    pub fn try_load(
+        model_path: impl AsRef<Path>,
+        config_path: impl AsRef<Path>,
+    ) -> Result<Self, LoadError> {
+        Self::try_load_with_config(model_path, config_path, &ParseConfig::default())
+    }
+
+    /// Load model/configuration files with explicit parse-time optimization options.
+    pub fn try_load_with_config(
+        model_path: impl AsRef<Path>,
+        config_path: impl AsRef<Path>,
+        parse_config: &ParseConfig,
+    ) -> Result<Self, LoadError> {
+        let config = WalkerConfig::try_from_file(config_path)?;
+        let format = ModelFormat::from_path(model_path.as_ref())?;
+        Self::from_reader(
+            std::fs::File::open(model_path)?,
+            format,
+            config,
+            parse_config,
+        )
+    }
+
+    /// Load a model from memory with explicit format and validated grouping metadata.
+    pub fn from_bytes(
+        bytes: &[u8],
+        format: ModelFormat,
+        config: WalkerConfig,
+        parse_config: &ParseConfig,
+    ) -> Result<Self, LoadError> {
+        Self::from_reader(Cursor::new(bytes), format, config, parse_config)
+    }
+
+    /// Load a model from a reader. Binary decoding streams with reusable tree buffers;
+    /// JSON decoding materializes a bounded document. Structural validation precedes
+    /// optimized layout, and unsupported prediction semantics return an error.
+    pub fn from_reader(
+        reader: impl Read,
+        format: ModelFormat,
+        config: WalkerConfig,
+        parse_config: &ParseConfig,
+    ) -> Result<Self, LoadError> {
+        let parser::ParsedModel {
+            trees,
+            mut nodes,
+            bitsets,
+            threshold_type,
+            output,
+        } = parser::parse_reader(reader, format, &config, parse_config)?;
         let mut varying_predicates = if parse_config.disable_predicate_dedup {
-            parser::build_varying_predicates_no_dedup(&mut nodes)
+            parser::build_varying_predicates_no_dedup(&mut nodes)?
         } else {
-            parser::build_varying_predicates(&mut nodes)
+            parser::build_varying_predicates(&mut nodes)?
         };
         parser::sort_varying_predicates(&mut varying_predicates, &mut nodes);
         let feature_ranges = parser::build_feature_ranges(&varying_predicates);
         let (prefix_groups, prefix_depth) = if parse_config.prefix_depth > 0 {
-            let (groups, _ungrouped) = parser::build_prefix_groups(
-                &trees, &nodes, &config, parse_config.prefix_depth,
-            );
+            let (groups, _ungrouped) =
+                parser::build_prefix_groups(&trees, &nodes, &config, parse_config.prefix_depth);
             (groups, parse_config.prefix_depth)
         } else {
             (Vec::new(), 0)
@@ -408,7 +524,9 @@ impl Forest {
             libc::malloc_trim(0);
         }
 
-        Self {
+        Ok(Self {
+            compiled_config: config.clone(),
+            output,
             trees,
             config,
             nodes,
@@ -419,7 +537,7 @@ impl Forest {
             prefix_groups,
             prefix_depth,
             workspace: None,
-        }
+        })
     }
 
     #[inline]
@@ -430,48 +548,62 @@ impl Forest {
 
     #[inline]
     #[must_use]
-    pub fn nodes(&self) -> &[Node] { &self.nodes }
+    pub fn nodes(&self) -> &[Node] {
+        &self.nodes
+    }
 
     #[inline]
     #[must_use]
-    pub fn trees(&self) -> &[Tree] { &self.trees }
+    pub fn trees(&self) -> &[Tree] {
+        &self.trees
+    }
 
     #[inline]
     #[must_use]
-    pub const fn bitset_bytes(&self) -> usize { self.bitsets.len() }
+    pub const fn bitset_bytes(&self) -> usize {
+        self.bitsets.len()
+    }
 
     #[inline]
     #[must_use]
-    pub const fn threshold_type(&self) -> ThresholdType { self.threshold_type }
+    pub const fn threshold_type(&self) -> ThresholdType {
+        self.threshold_type
+    }
 
     /// Test if `category` belongs to a categorical node's split set.
     ///
     /// For inline nodes the bitset word is in `node.value`. For pool nodes
     /// the packed u32 words start at `node.value` (byte offset) in `self.bitsets`.
     ///
-    /// Out-of-range categories (negative, or beyond the bitset width) return
-    /// `default_left`. This is correct for both normal and inverted bitsets
-    /// (XGBoost `category_list_right_child=true`): unseen categories follow
-    /// the model's default direction, matching treelite/XGBoost semantics.
+    /// Out-of-range categories return false (non-membership). The parser normalizes
+    /// membership-right splits by swapping children and missing routing. The last
+    /// argument is retained for source compatibility; only NaN uses missing routing.
     #[inline]
     #[must_use]
-    pub const fn cat_test(&self, node: &Node, category: i32, default_left: bool) -> bool {
+    pub const fn cat_test(&self, node: &Node, category: i32, _default_left: bool) -> bool {
         if category < 0 {
-            return default_left;
+            return false;
         }
         if node.inline_cat() {
-            if category >= 32 { return default_left; }
+            if category >= 32 {
+                return false;
+            }
             (node.value as u32 >> category) & 1 != 0
         } else {
             let word_idx = (category / 32) as usize;
             if word_idx >= node.cat_n_words as usize {
-                return default_left;
+                return false;
             }
             let offset = node.value as usize + word_idx * 4;
             // SAFETY: offset + 4 is within bitsets — guaranteed by the parser which
             // writes exactly cat_n_words × 4 bytes at the stored offset.
-            let word =
-                unsafe { self.bitsets.as_ptr().add(offset).cast::<u32>().read_unaligned() };
+            let word = unsafe {
+                self.bitsets
+                    .as_ptr()
+                    .add(offset)
+                    .cast::<u32>()
+                    .read_unaligned()
+            };
             (word >> (category as u32 % 32)) & 1 != 0
         }
     }

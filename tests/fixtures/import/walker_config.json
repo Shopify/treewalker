@@ -1,0 +1,9 @@
+{
+  "n_features": 2,
+  "max_group_width": 128,
+  "varying_features": [
+    0
+  ],
+  "mono_inc_features": [],
+  "mono_dec_features": []
+}

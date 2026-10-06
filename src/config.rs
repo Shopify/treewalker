@@ -10,8 +10,9 @@
 //!
 //! Feature classification is stored as u128 bitmasks for O(1) lookup on the hot path.
 //! A single `AND` + compare replaces what would otherwise be an array lookup or hash
-//! check on every split node. Supports up to 64 features (enforced by assert at load time).
+//! check on every split node. Supports up to 64 features (validated at load time).
 
+use crate::LoadError;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -96,6 +97,7 @@ impl Default for ParseConfig {
 ///   Values sorted descending. Partition via suffix scan.
 /// - **Varying, non-monotonic**: in `varying_mask` but neither mono mask.
 ///   Each row evaluated independently (most expensive case, but rare).
+#[derive(Clone)]
 pub struct WalkerConfig {
     pub n_features: usize,
     /// Maximum rows per group. Hard limit 128 (u128 bitmask).
@@ -113,44 +115,120 @@ pub struct WalkerConfig {
 }
 
 impl WalkerConfig {
+    /// Compatibility wrapper. Panics on invalid or unreadable configuration.
+    /// Prefer [`Self::try_from_file`].
     pub fn from_file(path: impl AsRef<Path>) -> Self {
-        let mut data = std::fs::read(path).expect("failed to read walker config");
-        let f: WalkerConfigFile =
-            simd_json::serde::from_slice(&mut data).expect("failed to parse walker config");
+        Self::try_from_file(path).unwrap_or_else(|e| panic!("{e}"))
+    }
 
-        // Hard limits: feature bitmask width (u128) and row mask width (u128).
-        assert!(
-            f.n_features <= 128,
-            "treewalker supports at most 128 features (got {})",
-            f.n_features,
-        );
-        assert!(
-            f.max_group_width <= 128,
-            "treewalker supports at most 128 rows per entity (got {})",
-            f.max_group_width,
-        );
+    /// Read and validate the five-field grouping JSON schema from a file.
+    pub fn try_from_file(path: impl AsRef<Path>) -> Result<Self, LoadError> {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take(65_537)
+            .read_to_end(&mut bytes)?;
+        Self::try_from_json(&bytes)
+    }
 
-        // Convert feature index lists to bitmasks. Each feature index becomes
-        // a set bit in the corresponding u128 mask.
-        let to_mask = |indices: &[usize], label: &str| -> u128 {
-            indices.iter().fold(0u128, |m, &i| {
-                assert!(
-                    i < f.n_features,
-                    "{label} contains feature index {i}, but n_features is {}",
-                    f.n_features,
-                );
-                m | (1u128 << i)
-            })
-        };
-
-        Self {
-            n_features: f.n_features,
-            max_group_width: f.max_group_width,
-            varying_mask: to_mask(&f.varying_features, "varying_features"),
-            mono_inc_mask: to_mask(&f.mono_inc_features, "mono_inc_features"),
-            mono_dec_mask: to_mask(&f.mono_dec_features, "mono_dec_features"),
-            ablation: AblationMode::default(),
+    /// Parse and validate grouping JSON, bounded to 64 KiB.
+    pub fn try_from_json(bytes: &[u8]) -> Result<Self, LoadError> {
+        if bytes.len() > 65_536 {
+            return Err(LoadError::Limit("configuration exceeds 64 KiB".into()));
         }
+        crate::parser::validate_json_depth(bytes)
+            .map_err(|e| LoadError::MalformedConfig(e.to_string()))?;
+        let mut data = bytes.to_vec();
+        let f: WalkerConfigFile = simd_json::serde::from_slice(&mut data)
+            .map_err(|e| LoadError::MalformedConfig(e.to_string()))?;
+        Self::try_new(
+            f.n_features,
+            f.max_group_width,
+            &f.varying_features,
+            &f.mono_inc_features,
+            &f.mono_dec_features,
+        )
+    }
+
+    /// Validate dimensions and feature lists, treating non-varying features as constant.
+    /// The caller must preserve trained column order and satisfy the declared
+    /// equality and monotonicity contracts within each prediction group.
+    pub fn try_new(
+        n_features: usize,
+        max_group_width: usize,
+        varying_features: &[usize],
+        mono_inc_features: &[usize],
+        mono_dec_features: &[usize],
+    ) -> Result<Self, LoadError> {
+        if !(1..=64).contains(&n_features) {
+            return Err(LoadError::MalformedConfig(format!(
+                "n_features must be 1..=64, got {n_features}"
+            )));
+        }
+        let to_mask = |indices: &[usize], label: &str| -> Result<u128, LoadError> {
+            let mut mask = 0;
+            for &i in indices {
+                if i >= n_features {
+                    return Err(LoadError::MalformedConfig(format!(
+                        "{label}: index {i} >= n_features {n_features}"
+                    )));
+                }
+                let bit = 1u128 << i;
+                if mask & bit != 0 {
+                    return Err(LoadError::MalformedConfig(format!(
+                        "{label}: duplicate index {i}"
+                    )));
+                }
+                mask |= bit;
+            }
+            Ok(mask)
+        };
+        let config = Self {
+            n_features,
+            max_group_width,
+            varying_mask: to_mask(varying_features, "varying_features")?,
+            mono_inc_mask: to_mask(mono_inc_features, "mono_inc_features")?,
+            mono_dec_mask: to_mask(mono_dec_features, "mono_dec_features")?,
+            ablation: AblationMode::default(),
+        };
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), LoadError> {
+        if !(1..=64).contains(&self.n_features) || !(1..=128).contains(&self.max_group_width) {
+            return Err(LoadError::MalformedConfig(format!(
+                "require n_features 1..=64 and max_group_width 1..=128; got {}, {}",
+                self.n_features, self.max_group_width
+            )));
+        }
+        let valid = (1u128 << self.n_features) - 1;
+        if (self.varying_mask | self.mono_inc_mask | self.mono_dec_mask) & !valid != 0 {
+            return Err(LoadError::MalformedConfig(
+                "feature mask contains out-of-range bits".into(),
+            ));
+        }
+        if self.mono_inc_mask & self.mono_dec_mask != 0 {
+            return Err(LoadError::MalformedConfig(
+                "increasing and decreasing features overlap".into(),
+            ));
+        }
+        if (self.mono_inc_mask | self.mono_dec_mask) & !self.varying_mask != 0 {
+            return Err(LoadError::MalformedConfig(
+                "monotonic features must be varying".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) const fn structural_key(&self) -> (usize, usize, u128, u128, u128) {
+        (
+            self.n_features,
+            self.max_group_width,
+            self.varying_mask,
+            self.mono_inc_mask,
+            self.mono_dec_mask,
+        )
     }
 
     /// Check if feature `feat` is varying. Single AND + compare.

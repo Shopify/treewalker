@@ -10,20 +10,64 @@ the engine, the benchmark harness, the scripts that turn public datasets into
 models and benchmark runs, the result CSVs behind every number in the paper,
 and the cloud setup used for the measurements.
 
-The engine sources (`src/predict.rs`, `src/forest.rs`, `src/parser/`,
-`src/mask.rs`, `src/config.rs`) are identical to the revision that produced
-the factorial-grid results; later changes only extend the benchmark harness
-(scenario grid, `--validate`).
+The released results use the engine preserved under the `neurips2026` tag.
+The current library adds validated scalar Treelite loading. These changes are
+separate from the archived paper measurements.
+
+This repository serves two purposes: as a source for the library and as a
+permanent archive of the code at time of submission. The latter can always be
+found [under the neurips2026 tag](https://github.com/Shopify/treewalker/releases/tag/neurips2026).
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `src/` | engine, treelite model parser, benchmark harness, `sweep_bench` binary |
-| `tests/` | correctness tests against treelite GTIL (f64) and native predictions (f32) |
+| `src/` | inference library and treelite model parser |
+| `benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
 | `paper/experiments/scripts/` | dataset preparation, baseline compilation, figures, tables |
 | `paper/experiments/data/` | released result CSVs and machine descriptions |
 | `infra/` | Terraform and VM startup script for the two GCE benchmark machines |
+
+## Building and packaging the library
+
+The root crate, `treewalker-gbdt`, contains the inference library. Rust imports
+use `treewalker_gbdt`, for example `use treewalker_gbdt::forest::Forest;`.
+These commands build, test, and package it without the benchmark dependencies:
+
+```bash
+cargo build
+cargo test --release
+cargo package
+```
+
+The package includes the Rust library sources, loading documentation, README,
+license, and small independent compatibility fixtures with their optional Python
+generators. Benchmark sources, result data, experiment scripts, Terraform files,
+and the repository's native CPU build settings are excluded.
+
+The benchmark crate has its own manifest and lockfile. Build it explicitly;
+`--target-dir target` preserves the binary path used by the experiment scripts:
+
+```bash
+cargo build --manifest-path benchmarks/Cargo.toml --target-dir target \
+  --release --features external-bench
+```
+
+The `external-bench` feature enables the C FFI baselines and QuickScorer.
+`quickscorer-bench` enables the legacy CLI's QuickScorer baseline.
+
+## Loading models
+
+Use `Forest::try_load("model.bin", "walker_config.json")` for fallible loading.
+`Forest::from_reader` and `from_bytes` accept an explicit `ModelFormat` and a
+validated `WalkerConfig`. The existing panic-based loaders remain available.
+
+The supported subset includes scalar regression, ranking and binary
+classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base
+scores. Binary Treelite v4 is recommended; native XGBoost JSON must first be
+converted through Treelite. Limits are 64 features and 128 rows per group.
+See [Treelite loading](docs/treelite-loading.md) for export examples, the exact
+output and precision policy, errors, limits, and the caller's grouping contract.
 
 ## Datasets
 
@@ -61,7 +105,7 @@ blocks.
 
 ## Reproducing the tables and figures
 
-This needs only Python (3.12+) and [uv](https://docs.astral.sh/uv/), not the
+This needs only Python 3.14 (`.python-version`) and [uv](https://docs.astral.sh/uv/), not the
 benchmark machines. From the repository root:
 
 ```bash
@@ -94,8 +138,9 @@ The paper's measurements ran on two Google Compute Engine VMs in
 performance governor, ASLR off, pinned to one core with `taskset -c 0`.
 LightGBM 4.6.0 and XGBoost 3.2.0 were built from source with `-march=native`,
 TreeWalker with `-C target-cpu=native` (`.cargo/config.toml`). The factorial
-grid used Rust 1.94.1 (`rust-toolchain.toml`); the scenario and chunked runs
-used Rust 1.97.1. `infra/scripts/startup.sh` is the full machine recipe.
+grid used Rust 1.94.1; the scenario and chunked runs used Rust 1.97.1, the
+version now pinned in `rust-toolchain.toml`. `infra/scripts/startup.sh` is the
+full machine recipe.
 
 ### On GCE with Terraform
 
@@ -120,7 +165,8 @@ uv sync
 uv run python3 paper/experiments/scripts/fetch_expedia.py --train-csv PATH/data.zip
 uv run python3 paper/experiments/scripts/prepare.py --grid all --prepare-groups --skip-compiled
 uv run python3 paper/experiments/scripts/prepare.py --grid all --compile-only   # tl2cgen, lleaves, sweep_bench
-cargo test --release --features test-helpers
+cargo test --manifest-path benchmarks/Cargo.toml --target-dir target \
+  --release --features test-helpers
 
 taskset -c 0 ./target/release/sweep_bench paper/experiments/artifacts --grid all \
   --output-dir paper/experiments/data --warmup 3 --iters 21 --min-iters 11 \
@@ -156,7 +202,7 @@ only on the released CSVs.
 ## Correctness
 
 LightGBM (f64) predictions match treelite GTIL within 1e-14; XGBoost (f32)
-predictions match native XGBoost within 1e-5 (`tests/correctness.rs`).
+predictions match native XGBoost within 1e-5 (`benchmarks/tests/correctness.rs`).
 Partial evaluation and the full walk agree within 1e-15.
 
 ## Citation

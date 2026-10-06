@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use treewalker::AblationMode;
-use treewalker::forest::{Forest, ThresholdType};
-use treewalker::config::WalkerConfig;
+use treewalker_gbdt::AblationMode;
+use treewalker_gbdt::config::WalkerConfig;
+use treewalker_gbdt::forest::{Forest, ThresholdType};
 
 // ---------------------------------------------------------------------------
 // Tolerances
@@ -18,22 +18,29 @@ const TOL_F32: f64 = 1e-5;
 /// Partial eval vs full walk: must be bitwise identical (same code path, same precision).
 const TOL_EXACT: f64 = 1e-15;
 
-/// simd-json addresses documents with 32-bit offsets.
-const SIMD_JSON_MAX_BYTES: u64 = u32::MAX as u64;
+/// Current importer bounds JSON memory; larger models use streaming binary.
+const SIMD_JSON_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Treelite model for a config: the binary export when present (the benchmark
 /// harness prefers it), else JSON. The largest grid model's JSON export
 /// (Expedia, T=2000, L=16, LightGBM) exceeds the simd-json size limit.
 fn model_file(param_dir: &Path, framework: &str) -> PathBuf {
     let bin = param_dir.join(format!("{framework}/model_treelite.bin"));
-    if bin.exists() { bin } else { param_dir.join(format!("{framework}/model_treelite.json")) }
+    if bin.exists() {
+        bin
+    } else {
+        param_dir.join(format!("{framework}/model_treelite.json"))
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Config discovery — test every artifact
 // ---------------------------------------------------------------------------
 
-const ARTIFACTS_BASE: &str = "paper/experiments/artifacts";
+const ARTIFACTS_BASE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../paper/experiments/artifacts"
+);
 const FRAMEWORKS: &[&str] = &["lightgbm", "xgboost"];
 
 struct TestConfig {
@@ -47,7 +54,8 @@ struct TestConfig {
 
 /// Discover all (dataset, params, framework) combos that have artifacts.
 fn all_configs() -> Vec<TestConfig> {
-    let base = PathBuf::from(ARTIFACTS_BASE);
+    let base = std::env::var_os("TEST_ARTIFACTS_BASE")
+        .map_or_else(|| PathBuf::from(ARTIFACTS_BASE), PathBuf::from);
     let mut configs = Vec::new();
 
     let mut datasets: Vec<_> = std::fs::read_dir(&base)
@@ -93,7 +101,10 @@ fn all_configs() -> Vec<TestConfig> {
         }
     }
 
-    assert!(!configs.is_empty(), "No artifact configs found. Run prepare.py first.");
+    assert!(
+        !configs.is_empty(),
+        "No artifact configs found. Run prepare.py first."
+    );
     configs
 }
 
@@ -102,11 +113,32 @@ fn all_configs() -> Vec<TestConfig> {
 // ---------------------------------------------------------------------------
 
 fn load_forest(param_dir: &Path, framework: &str) -> Forest {
-    Forest::load(model_file(param_dir, framework), param_dir.join("walker_config.json"))
+    Forest::load(
+        model_file(param_dir, framework),
+        param_dir.join("walker_config.json"),
+    )
+}
+
+fn load_forest_at_width(param_dir: &Path, framework: &str, width: usize) -> Forest {
+    let mut config = WalkerConfig::from_file(param_dir.join("walker_config.json"));
+    config.max_group_width = width;
+    let path = model_file(param_dir, framework);
+    let format = if path.extension().is_some_and(|e| e == "bin") {
+        treewalker_gbdt::ModelFormat::TreeliteBinaryV4
+    } else {
+        treewalker_gbdt::ModelFormat::TreeliteJson
+    };
+    Forest::from_reader(
+        std::fs::File::open(path).unwrap(),
+        format,
+        config,
+        &treewalker_gbdt::ParseConfig::default(),
+    )
+    .unwrap()
 }
 
 fn load_test_data(param_dir: &Path) -> (Vec<f64>, usize) {
-    let (data, n_rows, _) = treewalker::load_raw_f64(param_dir.join("test_data.bin"));
+    let (data, n_rows, _) = treewalker_bench::load_raw_f64(param_dir.join("test_data.bin"));
     (data, n_rows)
 }
 
@@ -134,7 +166,9 @@ fn load_reference(param_dir: &Path, framework: &str) -> Vec<f64> {
 
 /// Iterate groups: fixed panel_length stride or variable offsets.
 fn for_each_group(
-    group_width: usize, n_rows: usize, offsets: Option<&[usize]>,
+    group_width: usize,
+    n_rows: usize,
+    offsets: Option<&[usize]>,
     mut f: impl FnMut(usize, usize),
 ) {
     if let Some(offs) = offsets {
@@ -148,7 +182,12 @@ fn for_each_group(
     }
 }
 
-fn predict_all(forest: &mut Forest, data: &[f64], n_rows: usize, offsets: Option<&[usize]>) -> Vec<f64> {
+fn predict_all(
+    forest: &mut Forest,
+    data: &[f64],
+    n_rows: usize,
+    offsets: Option<&[usize]>,
+) -> Vec<f64> {
     let mut results = vec![0.0f64; n_rows];
     let h = forest.config.max_group_width;
     if let Some(offs) = offsets {
@@ -163,7 +202,12 @@ fn predict_all(forest: &mut Forest, data: &[f64], n_rows: usize, offsets: Option
     results
 }
 
-fn predict_full_all(forest: &Forest, data: &[f64], n_rows: usize, offsets: Option<&[usize]>) -> Vec<f64> {
+fn predict_full_all(
+    forest: &Forest,
+    data: &[f64],
+    n_rows: usize,
+    offsets: Option<&[usize]>,
+) -> Vec<f64> {
     let mut results = vec![0.0f64; n_rows];
     let h = forest.config.max_group_width;
     for_each_group(h, n_rows, offsets, |start, end| {
@@ -173,7 +217,10 @@ fn predict_full_all(forest: &Forest, data: &[f64], n_rows: usize, offsets: Optio
 }
 
 fn max_diff(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0f64, f64::max)
 }
 
 // ---------------------------------------------------------------------------
@@ -194,10 +241,18 @@ fn test_reference_match() {
         let d_full = max_diff(&full, &reference);
         eprintln!("{}: partial={d_partial:.2e} full={d_full:.2e}", cfg.label);
 
-        assert!(d_partial < cfg.tol,
-            "{} partial vs ref: {d_partial:.2e} exceeds {:.0e}", cfg.label, cfg.tol);
-        assert!(d_full < cfg.tol,
-            "{} full vs ref: {d_full:.2e} exceeds {:.0e}", cfg.label, cfg.tol);
+        assert!(
+            d_partial < cfg.tol,
+            "{} partial vs ref: {d_partial:.2e} exceeds {:.0e}",
+            cfg.label,
+            cfg.tol
+        );
+        assert!(
+            d_full < cfg.tol,
+            "{} full vs ref: {d_full:.2e} exceeds {:.0e}",
+            cfg.label,
+            cfg.tol
+        );
     }
 }
 
@@ -241,7 +296,8 @@ fn first_config() -> TestConfig {
         .into_iter()
         .find(|c| {
             c.group_offsets.is_none()
-                && WalkerConfig::from_file(c.param_dir.join("walker_config.json")).max_group_width > 1
+                && WalkerConfig::from_file(c.param_dir.join("walker_config.json")).max_group_width
+                    > 1
         })
         .unwrap()
 }
@@ -257,7 +313,10 @@ fn assert_partial_matches_full_on_obs(forest: &mut Forest, data: &[f64], obs: us
     forest.predict(data, &mut partial, start, end);
 
     let d = max_diff(&full[start..end], &partial[start..end]);
-    assert!(d < TOL_EXACT, "Partial vs full max_diff={d:.2e} on observation {obs}");
+    assert!(
+        d < TOL_EXACT,
+        "Partial vs full max_diff={d:.2e} on observation {obs}"
+    );
 }
 
 #[test]
@@ -340,12 +399,47 @@ fn test_extreme_feature_values() {
 #[test]
 fn test_ablation_all_configs() {
     let ablations: &[(&str, AblationMode)] = &[
-        ("no_unsplit", AblationMode { disable_unsplit: true, ..Default::default() }),
-        ("no_varying_precompute", AblationMode { disable_varying_precompute: true, ..Default::default() }),
+        (
+            "no_unsplit",
+            AblationMode {
+                disable_unsplit: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "no_varying_precompute",
+            AblationMode {
+                disable_varying_precompute: true,
+                ..Default::default()
+            },
+        ),
         // Monotonic only has effect when precompute is also disabled.
-        ("no_monotonic", AblationMode { disable_monotonic: true, disable_varying_precompute: true, ..Default::default() }),
-        ("no_mono_no_unsplit", AblationMode { disable_monotonic: true, disable_unsplit: true, disable_varying_precompute: true, ..Default::default() }),
-        ("all_disabled", AblationMode { disable_monotonic: true, disable_unsplit: true, disable_varying_precompute: true, disable_predicate_sweep: true }),
+        (
+            "no_monotonic",
+            AblationMode {
+                disable_monotonic: true,
+                disable_varying_precompute: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "no_mono_no_unsplit",
+            AblationMode {
+                disable_monotonic: true,
+                disable_unsplit: true,
+                disable_varying_precompute: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "all_disabled",
+            AblationMode {
+                disable_monotonic: true,
+                disable_unsplit: true,
+                disable_varying_precompute: true,
+                disable_predicate_sweep: true,
+            },
+        ),
     ];
 
     for cfg in &all_configs() {
@@ -368,18 +462,39 @@ fn test_ablation_all_configs() {
 
 #[test]
 fn test_parse_configs() {
-    use treewalker::ParseConfig;
+    use treewalker_gbdt::ParseConfig;
 
     let parse_configs: &[(&str, ParseConfig)] = &[
-        ("no_tree_ordering", ParseConfig { disable_tree_ordering: true, ..Default::default() }),
-        ("no_bitset_intern", ParseConfig { disable_bitset_intern: true, ..Default::default() }),
-        ("no_prefix_grouping", ParseConfig { prefix_depth: 0, ..Default::default() }),
-        ("all_parse_disabled", ParseConfig {
-            disable_tree_ordering: true,
-            disable_bitset_intern: true,
-            prefix_depth: 0,
-            ..Default::default()
-        }),
+        (
+            "no_tree_ordering",
+            ParseConfig {
+                disable_tree_ordering: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "no_bitset_intern",
+            ParseConfig {
+                disable_bitset_intern: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "no_prefix_grouping",
+            ParseConfig {
+                prefix_depth: 0,
+                ..Default::default()
+            },
+        ),
+        (
+            "all_parse_disabled",
+            ParseConfig {
+                disable_tree_ordering: true,
+                disable_bitset_intern: true,
+                prefix_depth: 0,
+                ..Default::default()
+            },
+        ),
         // disable_predicate_dedup tested separately — large models exceed u16 limit.
     ];
 
@@ -406,21 +521,25 @@ fn test_parse_configs() {
 fn test_binary_matches_json() {
     let mut tested = 0;
     for cfg in &all_configs() {
-        let bin_path = cfg.param_dir.join(format!("{}/model_treelite.bin", cfg.framework));
-        let json_path = cfg.param_dir.join(format!("{}/model_treelite.json", cfg.framework));
+        let bin_path = cfg
+            .param_dir
+            .join(format!("{}/model_treelite.bin", cfg.framework));
+        let json_path = cfg
+            .param_dir
+            .join(format!("{}/model_treelite.json", cfg.framework));
         if !bin_path.exists() || !json_path.exists() {
             continue;
         }
         if std::fs::metadata(&json_path).unwrap().len() > SIMD_JSON_MAX_BYTES {
-            eprintln!("{}: JSON export exceeds the simd-json size limit; skipped", cfg.label);
+            eprintln!(
+                "{}: JSON export exceeds the simd-json size limit; skipped",
+                cfg.label
+            );
             continue;
         }
 
         let mut forest_json = Forest::load(&json_path, cfg.param_dir.join("walker_config.json"));
-        let mut forest_bin = Forest::load(
-            &bin_path,
-            cfg.param_dir.join("walker_config.json"),
-        );
+        let mut forest_bin = Forest::load(&bin_path, cfg.param_dir.join("walker_config.json"));
 
         assert_eq!(
             forest_json.trees().len(),
@@ -430,7 +549,12 @@ fn test_binary_matches_json() {
         );
 
         let (data, n_rows) = load_test_data(&cfg.param_dir);
-        let pred_json = predict_all(&mut forest_json, &data, n_rows, cfg.group_offsets.as_deref());
+        let pred_json = predict_all(
+            &mut forest_json,
+            &data,
+            n_rows,
+            cfg.group_offsets.as_deref(),
+        );
         let pred_bin = predict_all(&mut forest_bin, &data, n_rows, cfg.group_offsets.as_deref());
 
         let d = max_diff(&pred_json, &pred_bin);
@@ -442,7 +566,10 @@ fn test_binary_matches_json() {
         tested += 1;
     }
     eprintln!("test_binary_matches_json: {tested} configs tested");
-    assert!(tested > 0, "No .bin files found — run prepare.py or generate test binaries");
+    assert!(
+        tested > 0,
+        "No .bin files found — run prepare.py or generate test binaries"
+    );
 }
 
 // --- Out-of-range categorical values ---
@@ -455,14 +582,15 @@ fn test_binary_matches_json() {
 #[test]
 fn test_cat_out_of_range_partial_matches_full() {
     // Find an XGBoost config with categorical splits.
-    let cfg = all_configs()
-        .into_iter()
-        .find(|c| {
-            c.framework == "xgboost" && c.group_offsets.is_none() && {
-                let forest = load_forest(&c.param_dir, c.framework);
-                forest.nodes().iter().any(|n| n.is_categorical() && !n.is_leaf())
-            }
-        });
+    let cfg = all_configs().into_iter().find(|c| {
+        c.framework == "xgboost" && c.group_offsets.is_none() && {
+            let forest = load_forest(&c.param_dir, c.framework);
+            forest
+                .nodes()
+                .iter()
+                .any(|n| n.is_categorical() && !n.is_leaf())
+        }
+    });
     let Some(cfg) = cfg else {
         eprintln!("No XGBoost config with categorical splits found, skipping");
         return;
@@ -474,7 +602,9 @@ fn test_cat_out_of_range_partial_matches_full() {
     let h = forest.config.max_group_width;
 
     // Find a categorical feature by scanning nodes.
-    let cat_feature = forest.nodes().iter()
+    let cat_feature = forest
+        .nodes()
+        .iter()
         .find(|n| n.is_categorical() && !n.is_leaf())
         .map(|n| n.feature as usize)
         .unwrap();
@@ -495,8 +625,11 @@ fn test_cat_out_of_range_partial_matches_full() {
 
     let d = max_diff(&full_results[start..end], &partial_results[start..end]);
     eprintln!("{}: cat_out_of_range partial_vs_full={d:.2e}", cfg.label);
-    assert!(d < TOL_EXACT,
-        "{}: cat out-of-range partial vs full max_diff={d:.2e}", cfg.label);
+    assert!(
+        d < TOL_EXACT,
+        "{}: cat out-of-range partial vs full max_diff={d:.2e}",
+        cfg.label
+    );
 }
 
 // --- Width-32 boundary test ---
@@ -506,13 +639,10 @@ fn test_cat_out_of_range_partial_matches_full() {
 /// overflow bug at width=16 (where `(1u16 << 16) - 1` wrapped to 0).
 #[test]
 fn test_width_32_boundary() {
-    // Find any config with a real model. We'll override max_group_width to 32.
+    // Load a real model with max_group_width set to the u32 boundary.
     let base_cfg = first_config();
-    let mut forest = load_forest(&base_cfg.param_dir, base_cfg.framework);
+    let mut forest = load_forest_at_width(&base_cfg.param_dir, base_cfg.framework, 32);
     let nf = forest.config.n_features;
-
-    // Override max_group_width to 32 (the u32 boundary).
-    forest.config.max_group_width = 32;
 
     // Build synthetic test data: 32 rows × n_features.
     // Use the first observation's constant features, vary the TV features linearly.
@@ -545,24 +675,29 @@ fn test_width_32_boundary() {
     let d = max_diff(&full_results, &partial_results);
     eprintln!(
         "width_32_boundary: partial_vs_full max_diff={d:.2e} ({} trees, {} features)",
-        forest.trees().len(), nf,
+        forest.trees().len(),
+        nf,
     );
-    assert!(d < TOL_EXACT,
-        "Width-32 boundary: partial vs full max_diff={d:.2e} — u32 mask arithmetic may be wrong");
+    assert!(
+        d < TOL_EXACT,
+        "Width-32 boundary: partial vs full max_diff={d:.2e} — u32 mask arithmetic may be wrong"
+    );
 
     // Also verify that predict (with internal workspace) matches.
     let mut ws_results = vec![0.0f64; 32];
     forest.predict(&data, &mut ws_results, 0, 32);
     let d2 = max_diff(&full_results, &ws_results);
-    assert!(d2 < TOL_EXACT,
-        "Width-32 boundary (workspace): max_diff={d2:.2e}");
+    assert!(
+        d2 < TOL_EXACT,
+        "Width-32 boundary (workspace): max_diff={d2:.2e}"
+    );
 }
 
 // --- Stats (first config) ---
 
 #[test]
 fn test_node_visit_stats() {
-    use treewalker::PredictStats;
+    use treewalker_gbdt::PredictStats;
 
     let cfg = first_config();
     let mut forest = load_forest(&cfg.param_dir, cfg.framework);
@@ -590,6 +725,14 @@ fn test_node_visit_stats() {
 /// the brute-force O(P × n) precompute for every observation in every config.
 #[test]
 fn test_sweep_matches_bruteforce() {
+    // precompute_sweep/precompute_bruteforce are width-32 test helpers: they
+    // build u32 row masks and store columns in [[f64; 32]; 64]. Groups wider
+    // than 32 rows (e.g. E2's 128-row chunks) use the u64/u128 mask path,
+    // which these helpers do not exercise. Skip them here; the wider mask
+    // paths are validated by test_reference_match / test_partial_matches_full
+    // / test_wide_group_{48,64,96,128}. Validating only n <= 32 avoids an
+    // out-of-bounds index into the width-32 column buffer.
+    const SWEEP_HELPER_WIDTH: usize = 32;
     for cfg in &all_configs() {
         let forest = load_forest(&cfg.param_dir, cfg.framework);
         let (data, n_rows) = load_test_data(&cfg.param_dir);
@@ -599,14 +742,6 @@ fn test_sweep_matches_bruteforce() {
         let mut n_obs_tested = 0usize;
         let mut n_obs_skipped_wide = 0usize;
         let gw = forest.config.max_group_width;
-        // precompute_sweep/precompute_bruteforce are width-32 test helpers: they
-        // build u32 row masks and store columns in [[f64; 32]; 64]. Groups wider
-        // than 32 rows (e.g. E2's 128-row chunks) use the u64/u128 mask path,
-        // which these helpers do not exercise. Skip them here; the wider mask
-        // paths are validated by test_reference_match / test_partial_matches_full
-        // / test_wide_group_{48,64,96,128}. Validating only n <= 32 avoids an
-        // out-of-bounds index into the width-32 column buffer.
-        const SWEEP_HELPER_WIDTH: usize = 32;
         for_each_group(gw, n_rows, cfg.group_offsets.as_deref(), |start, end| {
             let n = end - start;
             if n > SWEEP_HELPER_WIDTH {
@@ -629,8 +764,10 @@ fn test_sweep_matches_bruteforce() {
             let brute = forest.precompute_bruteforce(&varying_cols, n, f32_mode);
 
             assert_eq!(
-                sweep.len(), brute.len(),
-                "{}: mask vec lengths differ", cfg.label
+                sweep.len(),
+                brute.len(),
+                "{}: mask vec lengths differ",
+                cfg.label
             );
             for (pred_id, (s, b)) in sweep.iter().zip(brute.iter()).enumerate() {
                 assert_eq!(
@@ -646,7 +783,9 @@ fn test_sweep_matches_bruteforce() {
             "{}: sweep matches bruteforce on {n_obs_tested} observations{}",
             cfg.label,
             if n_obs_skipped_wide > 0 {
-                format!(" ({n_obs_skipped_wide} skipped: groups > {SWEEP_HELPER_WIDTH} rows use u64/u128 masks, not the width-32 helpers)")
+                format!(
+                    " ({n_obs_skipped_wide} skipped: groups > {SWEEP_HELPER_WIDTH} rows use u64/u128 masks, not the width-32 helpers)"
+                )
             } else {
                 String::new()
             },
@@ -667,16 +806,16 @@ fn test_sweep_matches_bruteforce() {
 /// produces the same predictions as `predict_full` (full walk, no masks).
 fn test_wide_group_partial_matches_full(target_width: usize) {
     // Use first available config.
-    let first_cfg = all_configs().into_iter().next()
+    let first_cfg = all_configs()
+        .into_iter()
+        .next()
         .expect("No configs found — run prepare.py");
 
-    let mut forest = load_forest(&first_cfg.param_dir, first_cfg.framework);
+    let mut forest = load_forest_at_width(&first_cfg.param_dir, first_cfg.framework, target_width);
     let (orig_data, orig_n_rows) = load_test_data(&first_cfg.param_dir);
     let nf = forest.config.n_features;
-    let orig_gw = forest.config.max_group_width;
-
-    // Override max_group_width to test the wider mask path.
-    forest.config.max_group_width = target_width;
+    let orig_gw =
+        WalkerConfig::from_file(first_cfg.param_dir.join("walker_config.json")).max_group_width;
 
     // Build synthetic groups: take the first 10 original groups' constant
     // features, expand each to `target_width` rows by cycling varying features
@@ -687,12 +826,16 @@ fn test_wide_group_partial_matches_full(target_width: usize) {
     for g in 0..n_synthetic_groups {
         // Source group's first row (for constant features).
         let src_start = if let Some(offs) = &first_cfg.group_offsets {
-            if g >= offs.len() - 1 { break; }
+            if g >= offs.len() - 1 {
+                break;
+            }
             offs[g]
         } else {
             g * orig_gw
         };
-        if (src_start + 1) * nf > orig_data.len() { break; }
+        if (src_start + 1) * nf > orig_data.len() {
+            break;
+        }
         let const_row = &orig_data[src_start * nf..(src_start + 1) * nf];
 
         // Build `target_width` rows. Row 0 gets the original constant features.
