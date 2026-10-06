@@ -110,6 +110,13 @@ class TrainData:
     horizon: dict[str, int] | None
     sha256: str  # of train_data.bin: features plus the label column
     extra: dict[str, Any] = field(default_factory=dict)
+    # Fields only some models' identities have (IDENTITY_EXTRAS), added only when
+    # present, so every other model keeps its key.
+    identity: dict[str, Any] = field(default_factory=dict)
+
+
+# replicate: a seed replicate's entity sample.
+IDENTITY_EXTRAS = ("replicate",)
 
 
 class Context:
@@ -161,10 +168,15 @@ class Context:
         return self._tl[bin_path]
 
     def train_data(self, model: Model) -> TrainData:
-        key = (model.dataset, model.horizon)
+        key = (model.dataset, model.horizon, model.replicate, model.replicate_fraction)
         source: dict[str, Any]
         if key in self._train:
             return self._train[key]
+        if model.replicate:
+            td = self.replicate_data(model)
+            self._train[key] = td
+            return td
+        identity: dict[str, Any] = {}
         if model.dataset in SURVIVAL:
             assert model.horizon is not None
             split = self.survival(model.dataset)
@@ -201,11 +213,59 @@ class Context:
             source = ds.source_record("credit")
             horizon, extra = None, {}
         sha = hashlib.sha256(matrix_bytes(np.column_stack([X, y]))).hexdigest()
-        td = TrainData(X, y, names, cat, split_rec, source, horizon, sha, extra)
+        td = TrainData(X, y, names, cat, split_rec, source, horizon, sha, extra, identity)
         self._train[key] = td
         return td
 
+    def train_entities(self, model: Model, td: TrainData) -> np.ndarray:
+        """Each training row's entity: patient, session or row."""
+        if model.dataset in SURVIVAL:
+            return ds.train_patients(td.extra["train_cov"], td.extra["edges"])
+        if model.dataset == "expedia":
+            return self.ranking().train_df["srch_id"].to_numpy().astype(np.int64)
+        return np.arange(len(td.X), dtype=np.int64)
+
+    def replicate_data(self, model: Model) -> TrainData:
+        """A seed replicate's training data: the released model's rows of a seeded
+        sample of the training split's entities, without replacement. The split,
+        the survival time bins and the test data are the released model's."""
+        released = self.train_data(model.released)
+        rows = self.train_entities(model.released, released)
+        if len(rows) != len(released.X):
+            raise AssertionError(f"{model.id}: {len(rows)} entity labels, {len(released.X)} rows")
+        entities = np.unique(rows)
+        seed = ds.replicate_seed(int(released.split["seed"]), model.replicate)
+        chosen = entities[ds.sample_entities(len(entities), model.replicate_fraction, seed)]
+        keep = np.isin(rows, chosen)
+        X, y = released.X[keep], released.y[keep]
+        sha = hashlib.sha256(matrix_bytes(np.column_stack([X, y]))).hexdigest()
+        replicate = {
+            "index": model.replicate,
+            "fraction": model.replicate_fraction,
+            "seed": seed,
+            "unit": released.split["unit"],
+            "entities": len(entities),
+            "sampled": len(chosen),
+            "rows": int(keep.sum()),
+            "released_train_data_sha256": released.sha256,
+        }
+        return TrainData(
+            X,
+            y,
+            released.names,
+            released.cat,
+            released.split,
+            released.source,
+            released.horizon,
+            sha,
+            released.extra,
+            {**released.identity, "replicate": replicate},
+        )
+
     def whatif_draws(self, model: Model, td: TrainData) -> wl.WhatIfDraws:
+        if model.replicate:  # a replicate times the released model's cells
+            model = model.released
+            td = self.train_data(model)
         horizon = td.horizon["realized"] if td.horizon else None
         key = (model.dataset, horizon)
         if key in self._draws:
@@ -268,6 +328,7 @@ def model_identity(model: Model, fw: str, td: TrainData) -> dict[str, Any]:
         "feature_order": td.names,
         "libraries": tr.library_versions(fw),
         "train_data_sha256": td.sha256,
+        **{k: td.identity[k] for k in IDENTITY_EXTRAS if k in td.identity},
     }
 
 
@@ -435,10 +496,17 @@ def build_workload(ctx: Context, cell: Cell, td: TrainData, mdoc: dict[str, Any]
             )
         case "whatif-v2":
             draws = ctx.whatif_draws(cell.model, td)
-            native = model_dir / cell.framework / tr.NATIVE_NAME[cell.framework]
+            # A replicate times its released cell's data: the features are the
+            # released model's most-split ones, so that model must exist.
+            released = cell.model.released
+            if cell.model.replicate:
+                ensure_model(ctx, released, cell.framework, ctx.train_data(released), False)
+            native = released.dir(art) / cell.framework / tr.NATIVE_NAME[cell.framework]
             counts = tr.split_counts(cell.framework, native, len(td.names))
             features = wl.whatif_v2_features(draws, counts, p["k"])
             w = wl.whatif_v2(draws, features, p["k"], p["G"])
+            if cell.model.replicate:
+                w.meta["perturbation"]["ranked_by"] = f"{released.id}/{cell.framework}"
             if td.horizon:
                 w.meta["horizon"] = td.horizon
             w.meta["perturbation"]["split_counts"] = {
@@ -616,6 +684,7 @@ def ensure_cell(
         "seeds": {"split": mdoc["split"]["seed"], **w.meta.get("seeds", {})},
         "split": mdoc["split"],
         "train": mdoc["train"],
+        **{k: mdoc[k] for k in IDENTITY_EXTRAS if k in mdoc},
         "libraries": mdoc["libraries"],
         "model": {
             "key": mdoc["key"],

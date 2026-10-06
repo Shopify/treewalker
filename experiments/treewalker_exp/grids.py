@@ -1,13 +1,15 @@
 """``experiments/grids.toml``, resolved into models and cells."""
 
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import product
 from pathlib import Path
 from typing import Any
 
 SURVIVAL = {"support", "flchain"}
 GENERATORS = {"panel-v2", "ranking-sessions-v2", "ranking-cohort-v2", "whatif-v1", "whatif-v2"}
+# Generators whose models can be seed replicates: the scenario layout cannot.
+REPLICABLE = {"panel-v2", "ranking-sessions-v2", "ranking-cohort-v2", "whatif-v2"}
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -17,11 +19,21 @@ class Model:
     max_depth: int
     horizon: int | None = None  # requested; survival only
     layout: str = "standard"  # "scenario-v1": the released artifacts/scenario_credit
+    # A seed replicate: k >= 1 trains on a seeded sample of this fraction of the
+    # training split's entities; 0 is the released model, on all of them.
+    replicate: int = 0
+    replicate_fraction: float = 0.0
 
     @property
     def name(self) -> str:
         base = f"nt{self.n_trees}_md{self.max_depth}"
-        return base if self.horizon is None else f"{base}_h{self.horizon}"
+        base = base if self.horizon is None else f"{base}_h{self.horizon}"
+        return f"{base}_r{self.replicate}" if self.replicate else base
+
+    @property
+    def released(self) -> Model:
+        """The released model a replicate resamples; a released model itself."""
+        return replace(self, replicate=0, replicate_fraction=0.0)
 
     @property
     def id(self) -> str:
@@ -102,14 +114,15 @@ def _workload_cells(name: str, w: dict[str, Any], defaults: dict[str, Any]) -> l
     if gen not in GENERATORS:
         raise ValueError(f"workload {name}: unknown generator {gen}")
     frameworks = w.get("frameworks", defaults["frameworks"])
+    replicates, fraction = _replicates(name, w)
     out = []
-    for dataset, nt, md in product(w["datasets"], w["n_trees"], w["max_depth"]):
+    for dataset, nt, md, r in product(w["datasets"], w["n_trees"], w["max_depth"], replicates):
         horizons: list[int | None] = [None]
         if dataset in SURVIVAL:
             horizons = list(w.get("horizon", [16]))
         for h in horizons:
             layout = "scenario-v1" if gen == "whatif-v1" else "standard"
-            model = Model(dataset, nt, md, h, layout)
+            model = Model(dataset, nt, md, h, layout, replicate=r, replicate_fraction=fraction)
             params: list[tuple[tuple[str, Any], ...]]
             if gen.startswith("whatif"):
                 params = [(("k", k), ("G", g)) for k, g in product(w["k"], w["G"])]
@@ -122,6 +135,23 @@ def _workload_cells(name: str, w: dict[str, Any], defaults: dict[str, Any]) -> l
             for fw, p in product(frameworks, params):
                 out.append(Cell(name, gen, model, fw, p))
     return out
+
+
+def _replicates(name: str, w: dict[str, Any]) -> tuple[list[int], float]:
+    """A workload's replicates (``replicates``, ``replicate_fraction``), or the
+    released models alone, [0] at fraction 0."""
+    if "replicates" not in w:
+        if "replicate_fraction" in w:
+            raise ValueError(f"workload {name}: replicate_fraction without replicates")
+        return [0], 0.0
+    ks, fraction = w["replicates"], w.get("replicate_fraction")
+    if w["generator"] not in REPLICABLE:
+        raise ValueError(f"workload {name}: {w['generator']} has no replicates")
+    if not ks or any(type(k) is not int or k < 1 for k in ks) or len(set(ks)) != len(ks):
+        raise ValueError(f"workload {name}: replicates must be distinct integers >= 1")
+    if type(fraction) is not float or not 0.0 < fraction < 1.0:
+        raise ValueError(f"workload {name}: replicate_fraction must be a float in (0, 1)")
+    return list(ks), fraction
 
 
 def workload_cells(doc: dict[str, Any], name: str) -> list[Cell]:
@@ -138,7 +168,9 @@ def suite(doc: dict[str, Any], name: str) -> Suite:
     memberships: dict[str, tuple[str, ...]] = {}
     for w in s["workloads"]:
         for c in workload_cells(doc, w):
-            cells.setdefault(c.id, c)  # overlapping workloads share a cell
+            first = cells.setdefault(c.id, c)  # overlapping workloads share a cell
+            if first.model != c.model:
+                raise ValueError(f"suite {name}: {c.id} names two models: {first.model}, {c.model}")
             if w not in memberships.get(c.id, ()):
                 memberships[c.id] = (*memberships.get(c.id, ()), w)
     return Suite(name, s["description"], list(cells.values()), memberships=memberships)
