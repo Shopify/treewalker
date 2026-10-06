@@ -300,6 +300,15 @@ def feature_names(cov: Covariates) -> list[str]:
     return [sanitize(c) for c in cov.names] + TV_FEATURE_NAMES
 
 
+def train_patients(cov: Covariates, edges: np.ndarray) -> np.ndarray:
+    """Each row's patient in ``expand_train``'s expansion, as an index into
+    ``cov``; the same arithmetic as there."""
+    assert cov.duration is not None
+    horizon = len(edges) - 1
+    last = np.clip(np.digitize(cov.duration, edges[1:]), 0, horizon - 1)
+    return np.repeat(np.arange(len(last)), last + 1)
+
+
 def expand_train(
     split: SurvivalSplit, edges: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, Covariates]:
@@ -504,6 +513,31 @@ def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) 
         df.filter(~is_test).sort("srch_id"),
         df.filter(is_test).sort("srch_id"),
     )
+
+
+# Seed replicates: the released parameters on a seeded sample of the training
+# split's entities, seeded by (dataset seed, REPLICATE_STREAM, k). The stream tag
+# keeps the draws apart from the dataset's other streams, such as Expedia's
+# candidate order (dataset seed, 1).
+REPLICATE_STREAM = 2
+
+
+def replicate_seed(dataset_seed: int, k: int) -> list[int]:
+    return [dataset_seed, REPLICATE_STREAM, k]
+
+
+def replicate_size(n: int, fraction: float) -> int:
+    """How many of ``n`` entities a replicate keeps: ``fraction`` of them, rounded."""
+    if not 0.0 < fraction < 1.0:
+        raise ValueError(f"replicate fraction {fraction} is not in (0, 1)")
+    return round(n * fraction)
+
+
+def sample_entities(n: int, fraction: float, seed: list[int]) -> np.ndarray:
+    """A seeded sample of ``replicate_size(n, fraction)`` of ``n`` entities,
+    without replacement, as ascending indices."""
+    keep = replicate_size(n, fraction)
+    return np.sort(np.random.default_rng(seed).choice(n, keep, replace=False))
 
 
 def session_offsets(srch_id: np.ndarray) -> np.ndarray:
