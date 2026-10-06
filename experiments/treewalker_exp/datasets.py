@@ -515,6 +515,42 @@ def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) 
     )
 
 
+# expedia-filled: Expedia with every missing value encoded as an ordinary number
+# below its column's training minimum, so methods without missing-value handling
+# (QuickScorer) compute the same function as the rest.
+FILL_RULE = (
+    "a missing value becomes its column's training-split minimum minus max(1, |minimum|), "
+    "in train and test alike; test values below it are kept"
+)
+
+
+def fill_constants(train_X: np.ndarray, names: list[str]) -> np.ndarray:
+    """Per column, the training split's minimum minus max(1, |minimum|): below
+    every training value and distinct from the minimum after the f32 conversion
+    XGBoost and QuickScorer apply."""
+    fills = np.empty(train_X.shape[1], dtype=np.float64)
+    for j in range(train_X.shape[1]):
+        col = train_X[:, j]
+        col = col[~np.isnan(col)]
+        if len(col) == 0:
+            raise ValueError(f"{names[j]}: no observed training value to fill below")
+        lo = float(col.min())
+        fill = lo - max(1.0, abs(lo))
+        in_f32 = abs(fill) <= float(np.finfo(np.float32).max)
+        if not (in_f32 and np.float32(fill) < np.float32(lo)):
+            raise ValueError(f"{names[j]}: fill {fill} is not a finite f32 below the minimum {lo}")
+        fills[j] = fill
+    return fills
+
+
+def fill_missing(X: np.ndarray, fills: np.ndarray) -> np.ndarray:
+    """``X`` with each missing value replaced by its column's constant."""
+    out = np.array(X, dtype=np.float64, copy=True)
+    rows, cols = np.nonzero(np.isnan(out))
+    out[rows, cols] = fills[cols]
+    return out
+
+
 # Seed replicates: the released parameters on a seeded sample of the training
 # split's entities, seeded by (dataset seed, REPLICATE_STREAM, k). The stream tag
 # keeps the draws apart from the dataset's other streams, such as Expedia's

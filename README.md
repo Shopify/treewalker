@@ -120,6 +120,25 @@ run `treewalker-exp fetch-expedia --train-csv data.zip`; extracting the zip need
 `experiments/data/expedia.parquet` and checks its content fingerprint
 against the file the paper used.
 
+The factorial suite also prepares two kinds of derived models
+(`experiments/grids.toml`), neither of which changes an existing model or cell:
+
+- `expedia-filled`, the Expedia split with every missing value encoded before
+  training as its column's training-split minimum minus max(1, |minimum|), the
+  same constant in train and test (test values below it are kept). The constant
+  stays below the minimum after the f32 conversion, so QuickScorer, which has no
+  missing-value handling, computes the same function as every other method.
+  Sessions workload, T in {50, 500, 1000, 2000}, L in {2, 4}, with Expedia's
+  sessions, order and varying features.
+- Seed replicates, `_r1` to `_r4` after a model's name. Training is
+  deterministic, so each replicate trains with the released parameters on a
+  seeded sample of exactly 80% of the training split's entities (patients,
+  sessions, applicants) and is timed on the released cell's data. At three
+  anchors: `support/nt500_md4_h16` (panel), `credit/nt500_md4` (what-if k4 G16,
+  on the features the released model splits on most) and `expedia/nt500_md8`
+  (sessions). A model's `model.json` records the sample (`replicate`) or the
+  encoding (`missing_values`).
+
 ## Released results
 
 All latencies are medians of per-block medians, in µs per observation (group);

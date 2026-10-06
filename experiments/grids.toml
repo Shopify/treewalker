@@ -128,6 +128,17 @@ max_depth = [8]
 replicates = [1, 2, 3, 4]
 replicate_fraction = 0.8
 
+# expedia-filled: the Expedia split with every missing value encoded, before
+# training, as its column's training minimum minus max(1, |minimum|), the same
+# constant in train and test. QuickScorer has no missing-value handling, so it
+# computes these models' function; trees of at most 16 leaves fit its 128. The
+# sessions, their order and the varying features are Expedia's.
+[workloads.ranking-filled]
+generator = "ranking-sessions-v2"
+datasets = ["expedia-filled"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4]
+
 # The released credit scenario cells (LightGBM only, in their released layout
 # under artifacts/scenario_credit). Kept for the byte-identical check and the
 # released scenario runs; the factorial suite uses whatif-v2.
@@ -155,6 +166,7 @@ workloads = [
     "panel-replicates",
     "whatif-credit-replicates",
     "ranking-replicates",
+    "ranking-filled",
 ]
 
 # Ablations at the anchors (T, L, G): the survival panels at horizon G, and
