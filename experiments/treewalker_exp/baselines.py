@@ -1,4 +1,5 @@
-"""Compiled baselines: tl2cgen for both frameworks, lleaves for LightGBM.
+"""Compiled baselines: tl2cgen for both frameworks, lleaves for LightGBM, and
+QuickScorer's XML for XGBoost.
 
 Each baseline is compiled once per model, compiler and target, next to the
 model. ``<baseline>.json`` records the compile identity, resolved before any
@@ -6,8 +7,16 @@ reuse: the model's hash, the settings, the compiler's path, version and
 target triple, the host CPU, and the generator's version (tl2cgen) or the
 script and its lock (lleaves, whose lock pins llvmlite and so its LLVM). A
 library is reused only when that identity and the library's hash match.
-Changing a recipe is a separately measured baseline update, so the recipes
-here are the released ones.
+Changing a recipe is a separately measured baseline update.
+
+PR 3's baseline update, measured on the next full run:
+
+- tl2cgen compiles for the host CPU: ``options=["-march=native"]`` reaches
+  its compiler command, where the released ``CFLAGS`` never did (finding
+  0.19). ``parallel_comp`` comes from grids.toml ``[baselines]``, set by the
+  pilot.
+- lleaves objects come from llvmlite's own LLVM, pinned by compile.py's lock,
+  linked by the system C compiler; no LLVM install.
 """
 
 import contextlib
@@ -26,10 +35,17 @@ from typing import Any
 
 from . import formats as fm
 
-# The released lleaves recipe (fblocksize 34 and O3 are lleaves's own
-# defaults; fp-contract on, not compile.py's former "fast").
-LLEAVES = {"fblocksize": 34, "opt_level": "3", "fp_contract": "on"}
-SCHEMA = 1
+# The lleaves recipe (fblocksize 34 and O3 are lleaves's own defaults;
+# fp-contract on, LLVM's default). compile.py splits the trees into one chunk per
+# job, so n_jobs shapes the library and belongs to the recipe: 4 chunks, however
+# many compiles run alongside.
+LLEAVES_CHUNKS = 4
+LLEAVES = {"fblocksize": 34, "opt_level": "3", "fp_contract": "on", "n_jobs": LLEAVES_CHUNKS}
+# tl2cgen compiles for the host CPU.
+TL2CGEN_OPTIONS = ["-march=native"]
+SCHEMA = 2
+# QuickScorer's masks are u128, so a tree may have at most 128 leaves.
+QUICKSCORER_MAX_LEAVES = 128
 
 
 @contextlib.contextmanager
@@ -80,20 +96,6 @@ def probe_compiler(path: str) -> dict[str, str]:
     }
 
 
-def probe_llc(path: str) -> dict[str, str]:
-    """llc's version, default target and the CPU that -mcpu=native resolves to."""
-    out = {"path": path, "version": "", "default_target": "", "host_cpu": ""}
-    for line in _run([path, "--version"]).splitlines():
-        text = line.strip()
-        if "version" in text.lower() and not out["version"]:
-            out["version"] = text
-        elif text.startswith("Default target:"):
-            out["default_target"] = text.split(":", 1)[1].strip()
-        elif text.startswith("Host CPU:"):
-            out["host_cpu"] = text.split(":", 1)[1].strip()
-    return out
-
-
 def _dist_version(name: str) -> str:
     try:
         return importlib.metadata.version(name)
@@ -114,16 +116,33 @@ def reusable(record: Path, lib: Path, key: str) -> bool:
     return doc.get("key") == key and doc.get("sha256") == fm.sha256_file(lib)
 
 
-def tl2cgen_settings(n_trees: int, nthread: int) -> dict[str, Any]:
-    # CFLAGS is set as the released harness did. Neither tl2cgen nor its gcc
-    # command reads it, so these libraries target the generic CPU; PR 3's
-    # baseline update passes -march=native through export_lib's options.
+# Nodes per tl2cgen source file. At -O3, gcc's memory grows with a file's size:
+# a 4.0M-node model (Expedia, T=1000, L=16) in 32 files, 126,000 nodes each,
+# took 60 GB in one cc1 and was killed on a 120 GB VM. 8,000 nodes per file
+# keeps the parallel compiles far below that, and models up to 256,000 nodes,
+# such as T=500 at L=8, still get the pilot's 32 files.
+MAX_NODES_PER_FILE = 8000
+
+
+def parallel_comp(setting: int | str, n_trees: int, total_nodes: int = 0) -> int:
+    """Source files for tl2cgen: ``"trees"`` is one per tree, the released recipe;
+    a file count is raised until no file holds more than ``MAX_NODES_PER_FILE``
+    nodes, and never exceeds the tree count."""
+    if setting == "trees":
+        return n_trees
+    return min(max(int(setting), -(-total_nodes // MAX_NODES_PER_FILE)), n_trees)
+
+
+def tl2cgen_settings(
+    n_trees: int, files: int | str = "trees", total_nodes: int = 0
+) -> dict[str, Any]:
+    """What a tl2cgen library depends on. Its compile thread count does not shape
+    the library, so it is not part of its identity."""
     return {
         "toolchain": "gcc",
-        "params": {"parallel_comp": n_trees},
-        "options": None,
-        "env": {"CFLAGS": "-march=native", "CXXFLAGS": "-march=native"},
-        "nthread": nthread,
+        "params": {"parallel_comp": parallel_comp(files, n_trees, total_nodes)},
+        "max_nodes_per_file": MAX_NODES_PER_FILE,
+        "options": TL2CGEN_OPTIONS,
     }
 
 
@@ -135,52 +154,60 @@ def tl2cgen_identity(model_sha: str, settings: dict[str, Any]) -> dict[str, Any]
         "settings": settings,
         "tl2cgen": _dist_version("tl2cgen"),
         "treelite": _dist_version("treelite"),
-        # tl2cgen runs `gcc -c -O3 ... -fPIC -std=c99` from PATH, with no -march,
-        # so the compiler's default target decides the code.
+        # tl2cgen runs `gcc -c -O3 ... -fPIC -std=c99 {options}` from PATH.
         "compiler": probe_compiler(_which(settings["toolchain"])),
         "host_cpu": host_cpu(),
     }
 
 
-def compile_tl2cgen(fw_dir: Path, nthread: int, force: bool = False) -> dict[str, Any]:
+def compile_tl2cgen(
+    fw_dir: Path,
+    nthread: int,
+    force: bool = False,
+    files: int | str = "trees",
+    lib_name: str = "tl2cgen.so",
+) -> dict[str, Any]:
     import tl2cgen
     import treelite
 
     model = fw_dir / "model_treelite.bin"
-    lib, record = fw_dir / "tl2cgen.so", fw_dir / "tl2cgen.json"
+    lib = fw_dir / lib_name
+    record = lib.with_suffix(".json")
     model_sha = fm.sha256_file(model)
     tl_model = treelite.Model.deserialize(str(model))
-    settings = tl2cgen_settings(tl_model.num_tree, nthread)
+    total_nodes = sum(
+        int(tl_model.get_tree_accessor(i).get_field("num_nodes")[0])
+        for i in range(tl_model.num_tree)
+    )
+    settings = tl2cgen_settings(tl_model.num_tree, files, total_nodes)
     identity = tl2cgen_identity(model_sha, settings)
     key = identity_key(identity)
     if not force and reusable(record, lib, key):
         return fm.read_json(record)
 
-    old = {k: os.environ.get(k) for k in settings["env"]}
-    os.environ.update({k: f"{v} {old[k] or ''}".strip() for k, v in settings["env"].items()})
     t0 = time.perf_counter()
-    try:
-        with _quiet_stderr():
-            tl2cgen.export_lib(
-                tl_model,
-                toolchain=settings["toolchain"],
-                libpath=str(lib),
-                params=settings["params"],
-                nthread=nthread,
-                verbose=False,
-            )
-    finally:
-        for k, v in old.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+    with _quiet_stderr():
+        tl2cgen.export_lib(
+            tl_model,
+            toolchain=settings["toolchain"],
+            libpath=str(lib),
+            params=settings["params"],
+            nthread=nthread,
+            verbose=False,
+            options=list(settings["options"]),
+        )
+    options = " ".join([*settings["options"], "-lm"])
     doc = {
         "baseline": "tl2cgen",
         "model": model.name,
         "key": key,
         "identity": identity,
-        "effective": {"compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99"},
+        "effective": {
+            "compiler_command": f"gcc -c -O3 -o {{obj}} {{src}} -fPIC -std=c99 {options}",
+            "link_command": f"gcc -shared -O3 -o {{lib}} {{objects}} -std=c99 {options}",
+            "source_files": settings["params"]["parallel_comp"],
+            "nthread": nthread,
+        },
         "seconds": round(time.perf_counter() - t0, 3),
         "sha256": fm.sha256_file(lib),
     }
@@ -188,17 +215,15 @@ def compile_tl2cgen(fw_dir: Path, nthread: int, force: bool = False) -> dict[str
     return doc
 
 
-def lleaves_request(fw_dir: Path, n_jobs: int, llc: str, clang: str) -> dict[str, Any]:
+def lleaves_request(fw_dir: Path, cc: str) -> dict[str, Any]:
     return {
         "model": str(fw_dir / "model_native.txt"),
         "output": str(fw_dir / "lleaves.so"),
         **LLEAVES,
-        "n_jobs": n_jobs,
         "target_cpu": "native",
         "relocation_model": "pic",
         "use_fp64": True,
-        "llc": llc,
-        "clang": clang,
+        "cc": cc,
     }
 
 
@@ -212,21 +237,20 @@ def lleaves_identity(script: Path, model_sha: str, request: dict[str, Any]) -> d
         "settings": settings,
         "compile_py_sha256": fm.sha256_file(script),
         "compile_lock_sha256": fm.sha256_file(lock),
-        "llc": probe_llc(request["llc"]),
-        "clang": probe_compiler(request["clang"]),
+        "cc": probe_compiler(request["cc"]),
         "host_cpu": host_cpu(),
     }
 
 
 def compile_lleaves(
-    script: Path, fw_dir: Path, n_jobs: int, llc: str = "", clang: str = "", force: bool = False
+    script: Path, fw_dir: Path, cc: str = "", force: bool = False
 ) -> dict[str, Any]:
     """Run compile.py under its own script lock with a structured request."""
     model = fw_dir / "model_native.txt"
     lib, record = fw_dir / "lleaves.so", fw_dir / "lleaves.json"
     model_sha = fm.sha256_file(model)
-    # Resolve the tools here, so the identity names the ones compile.py runs.
-    req = lleaves_request(fw_dir, n_jobs, _which("llc", llc), _which("clang", clang))
+    # Resolve the linker here, so the identity names the one compile.py runs.
+    req = lleaves_request(fw_dir, _which("cc", cc))
     identity = lleaves_identity(script, model_sha, req)
     key = identity_key(identity)
     if not force and reusable(record, lib, key):
@@ -259,12 +283,165 @@ def compile_lleaves(
     return doc
 
 
+# --- QuickScorer -----------------------------------------------------------------
+
+
+def _f32_below(t: float) -> float:
+    """The next float32 below float32 ``t``."""
+    import numpy as np
+
+    return float(np.nextafter(np.float32(t), np.float32(-np.inf), dtype=np.float32))
+
+
+def _xml_number(x: float) -> str:
+    """The shortest decimal that parses back to the same float32."""
+    import numpy as np
+
+    return np.format_float_positional(np.float32(x), unique=True, trim="-")
+
+
+def _xml_node(arrays: tuple, i: int, pos: str = "") -> str:
+    """Node ``i`` of a tree's (left, right, feature, threshold, leaf) arrays."""
+    import numpy as np
+
+    left, right, feat, thr, leaf = arrays
+    attr = f' pos="{pos}"' if pos else ""
+    if left[i] < 0:
+        return f"<split{attr}><output>{_xml_number(leaf[i])}</output></split>"
+    t32 = np.float32(thr[i])
+    if float(t32) != thr[i]:
+        raise ValueError(f"threshold {thr[i]!r} is not a float32")
+    return (
+        f"<split{attr}><feature>{int(feat[i]) + 1}</feature>"
+        f"<threshold>{_xml_number(_f32_below(float(t32)))}</threshold>"
+        f"{_xml_node(arrays, int(left[i]), 'left')}{_xml_node(arrays, int(right[i]), 'right')}"
+        "</split>"
+    )
+
+
+def quickscorer_xml(tl_model: Any) -> tuple[str | None, str]:
+    """An XGBoost model as QuickScorer XML (the ``<ranker>`` ensemble format), or
+    None and the reason it cannot be one.
+
+    XGBoost sends ``x < t`` left and QuickScorer ``x <= t``, so each threshold
+    becomes the next float32 below it; that is exact because XGBoost's
+    thresholds and inputs are float32. Leaves are float32 already. Categorical
+    splits have no QuickScorer form, and a tree may have at most 128 leaves.
+    Missing values go left at every QuickScorer split whatever the learned
+    default; validation decides per cell.
+    """
+    import numpy as np
+
+    trees = []
+    for t in range(tl_model.num_tree):
+        acc = tl_model.get_tree_accessor(t)
+        left = acc.get_field("cleft")
+        right = acc.get_field("cright")
+        if int((left < 0).sum()) > QUICKSCORER_MAX_LEAVES:
+            return None, f"tree {t} has {int((left < 0).sum())} leaves; QuickScorer takes 128"
+        node_type = acc.get_field("node_type")
+        if np.any((left >= 0) & (node_type == 2)):
+            return None, f"tree {t} has categorical splits; QuickScorer has none"
+        ops = acc.get_field("cmp")
+        if np.any((left >= 0) & (ops != 2)):  # Operator::kLT
+            return None, f"tree {t} has a comparison other than <"
+        feat = acc.get_field("split_index")
+        thr = np.asarray(acc.get_field("threshold"), dtype=np.float64)
+        leaf = np.asarray(acc.get_field("leaf_value"), dtype=np.float64)
+
+        if left[0] < 0:
+            return None, f"tree {t} is a single leaf; QuickScorer needs a split at the root"
+        arrays = (left, right, feat, thr, leaf)
+        trees.append(f'<tree id="{t + 1}" weight="1">{_xml_node(arrays, 0)}</tree>')
+    body = "\n".join(trees)
+    return f'<?xml version="1.0"?>\n<ranker>\n<ensemble>\n{body}\n</ensemble>\n</ranker>\n', "ready"
+
+
+def write_quickscorer(fw_dir: Path, force: bool = False) -> dict[str, Any]:
+    """Write ``quickscorer.xml`` for an XGBoost model, or record why there is none."""
+    import treelite
+
+    model = fw_dir / "model_treelite.bin"
+    xml, record = fw_dir / "quickscorer.xml", fw_dir / "quickscorer.json"
+    identity = {
+        "schema_version": SCHEMA,
+        "baseline": "quickscorer",
+        "model_sha256": fm.sha256_file(model),
+        "rule": "threshold = next float32 below t; at most 128 leaves; no categorical splits",
+    }
+    key = identity_key(identity)
+    if not force and record.exists():
+        old = fm.read_json(record)
+        if old.get("key") == key and (old["status"] != "ready" or reusable(record, xml, key)):
+            return old
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), 10_000))
+    text, status = quickscorer_xml(treelite.Model.deserialize(str(model)))
+    doc: dict[str, Any] = {"baseline": "quickscorer", "key": key, "identity": identity}
+    if text is None:
+        xml.unlink(missing_ok=True)
+        doc["status"] = f"unsupported: {status}"
+    else:
+        fm.write_bytes(xml, text.encode())
+        doc.update(status="ready", sha256=fm.sha256_file(xml), effective={"format": "xml"})
+    fm.write_json(record, doc)
+    return doc
+
+
+def model_nodes(fw_dir: Path) -> int:
+    """A model's node count, what orders the compiles: from its model.json, else
+    counted from its Treelite model, else 0."""
+    with contextlib.suppress(OSError, KeyError, ValueError):
+        return int(fm.read_json(fw_dir / "model.json")["structure"]["total_nodes"])
+    model = fw_dir / "model_treelite.bin"
+    if not model.exists():
+        return 0
+    import treelite
+
+    m = treelite.Model.deserialize(str(model))
+    return sum(int(m.get_tree_accessor(i).get_field("num_nodes")[0]) for i in range(m.num_tree))
+
+
+def compile_cost(tool: str, tl2cgen_threads: int) -> int:
+    """Compiler processes a compile keeps busy: tl2cgen its threads, lleaves one
+    per chunk, QuickScorer's XML none but its own."""
+    return {"tl2cgen": tl2cgen_threads, "lleaves": LLEAVES_CHUNKS}.get(tool, 1)
+
+
+def run_budgeted(pool: Any, tasks: list[Any], cost: Any, budget: int, submit: Any) -> Iterator:
+    """Run ``tasks`` in order on ``pool``, starting each as soon as the running
+    tasks' costs leave room for it within ``budget`` (a task costing more runs
+    alone). Order is kept strictly, so a large task is never starved by smaller
+    ones behind it. Yields ``(task, future)`` as each finishes."""
+    from concurrent.futures import FIRST_COMPLETED, wait
+
+    pending = list(tasks)
+    running: dict[Any, tuple[Any, int]] = {}
+    used = 0
+    while pending or running:
+        while pending:
+            c = min(cost(pending[0]), budget)
+            if running and used + c > budget:
+                break
+            task = pending.pop(0)
+            running[submit(pool, task)] = (task, c)
+            used += c
+        done, _ = wait(running, return_when=FIRST_COMPLETED)
+        for fut in done:
+            task, c = running.pop(fut)
+            used -= c
+            yield task, fut
+
+
+LIBRARY = {"tl2cgen": "tl2cgen.so", "lleaves": "lleaves.so", "quickscorer": "quickscorer.xml"}
+
+
 def summary(doc: dict[str, Any]) -> dict[str, Any]:
     """What a cell records about a compiled baseline."""
     return {
-        "library": "tl2cgen.so" if doc["baseline"] == "tl2cgen" else "lleaves.so",
-        "sha256": doc["sha256"],
+        "library": LIBRARY[doc["baseline"]],
+        "status": doc.get("status", "ready"),
+        "sha256": doc.get("sha256"),
         "key": doc["key"],
         "identity": doc["identity"],
-        "effective": doc["effective"],
+        "effective": doc.get("effective"),
     }
