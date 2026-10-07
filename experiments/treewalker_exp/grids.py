@@ -80,6 +80,13 @@ class Suite:
     description: str
     cells: list[Cell]
     extra: dict[str, Any] = field(default_factory=dict)
+    # Per cell ID, every workload that names the cell, in grids.toml's order. A
+    # cell shared by overlapping workloads keeps the first as its own (part of
+    # its identity); a workload filter matches any of them.
+    memberships: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def workloads_of(self, cell: Cell) -> tuple[str, ...]:
+        return self.memberships.get(cell.id, (cell.workload,))
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -128,10 +135,13 @@ def suite(doc: dict[str, Any], name: str) -> Suite:
     if name == "ablation":
         return _ablation(doc, s)
     cells: dict[str, Cell] = {}
+    memberships: dict[str, tuple[str, ...]] = {}
     for w in s["workloads"]:
         for c in workload_cells(doc, w):
             cells.setdefault(c.id, c)  # overlapping workloads share a cell
-    return Suite(name, s["description"], list(cells.values()))
+            if w not in memberships.get(c.id, ()):
+                memberships[c.id] = (*memberships.get(c.id, ()), w)
+    return Suite(name, s["description"], list(cells.values()), memberships=memberships)
 
 
 def _ablation(doc: dict[str, Any], s: dict[str, Any]) -> Suite:
