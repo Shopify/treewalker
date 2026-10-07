@@ -34,6 +34,12 @@ variable "apt_snapshot" {
   default     = "20261005T111000Z"
 }
 
+variable "diagnostic" {
+  description = "The name of a script in infra/scripts/diagnostics/ to run instead of the suites' runs, after preflight; empty for none"
+  type        = string
+  default     = ""
+}
+
 variable "gate_ref" {
   description = "A candidate ref for the kernel gate: instead of the suites' runs, time TreeWalker built from git_ref (A) and from this ref (B) in alternating processes, with default and 64-byte function alignment; empty for none"
   type        = string

@@ -21,6 +21,8 @@
 #                       build with 64-byte function alignment
 #   gcs_gate_uri      — gs:// path to a candidate's source archive: instead of the
 #                       suites' runs, the kernel gate (below); empty for none
+#   diagnostic        — the name of a script in infra/scripts/diagnostics/ to run
+#                       instead of the suites' runs; empty for none
 #   apt_snapshot      — Ubuntu archive snapshot every apt operation uses; empty
 #                       for the live archive
 #   machine_type, image, turbo_mode, pmu_level — recorded in run.json
@@ -42,6 +44,7 @@ GIT_REF="${git_ref}"
 SUITES="${suites}"
 LAYOUT_CHECK="${layout_check}"
 GCS_GATE_URI="${gcs_gate_uri}"
+DIAGNOSTIC="${diagnostic}"
 APT_SNAPSHOT="${apt_snapshot}"
 MACHINE_TYPE="${machine_type}"
 IMAGE="${image}"
@@ -279,7 +282,13 @@ as_bench "mkdir -p experiments/data/runs"
       "$REPO_DIR/experiments/data/runs" "$GCS_RESULTS_BASE/runs" >/dev/null 2>&1 || true
   done ) &
 SYNC_PID=$!
-if [ -n "$GCS_GATE_URI" ]; then
+if [ -n "$DIAGNOSTIC" ]; then
+  # A one-off measurement, from the source archive, with this script's helpers.
+  script="$REPO_DIR/infra/scripts/diagnostics/$DIAGNOSTIC.sh"
+  [ -f "$script" ] || fail "No diagnostic $DIAGNOSTIC ($script)"
+  log "Diagnostic: $DIAGNOSTIC"
+  source "$script"
+elif [ -n "$GCS_GATE_URI" ]; then
   # The kernel gate: TreeWalker built from this ref (A) and from the candidate (B),
   # timed in alternating processes, A B B A, three times, with default function
   # alignment and with every function aligned to 64 bytes. Production only, on the
