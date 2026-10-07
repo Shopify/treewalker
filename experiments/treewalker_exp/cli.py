@@ -55,14 +55,19 @@ def _cells(suites: list[str], datasets, workloads, models, frameworks, ids=None)
     paths = _paths()
     doc = grids.load(paths.grids)
     cells: dict[str, grids.Cell] = {}
+    # Every workload naming each cell: overlapping workloads share cells, and a
+    # workload filter must find a shared cell under each of them.
+    member: dict[str, set[str]] = {}
     for name in suites:
-        for c in grids.suite(doc, name).cells:
+        s = grids.suite(doc, name)
+        for c in s.cells:
             cells.setdefault(c.id, c)
+            member.setdefault(c.id, set()).update(s.workloads_of(c))
     out = [
         c
         for c in cells.values()
         if (not datasets or c.model.dataset in datasets)
-        and (not workloads or c.workload in workloads)
+        and (not workloads or not member[c.id].isdisjoint(workloads))
         and (not models or c.model.name in models)
         and (not frameworks or c.framework in frameworks)
         and (not ids or any(fnmatchcase(c.id, pattern) for pattern in ids))
