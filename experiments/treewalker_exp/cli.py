@@ -380,6 +380,30 @@ def build_bench(
     print(bench.build(_paths(), features or bench.FEATURES, rustflags))
 
 
+@app.command("validation-readout")
+def validation_readout(
+    run_dir: Annotated[Path, typer.Argument(help="The validation deployment's run directory.")],
+) -> None:
+    """What the final run's settings rest on: round 0 against later rounds, XGBoost's
+    mixed share, counters and children, the sentinel's first load, the probes'
+    margins, the drawn samples and the measured per-row rate."""
+    from . import readout
+
+    print("\n".join(readout.readout(run_dir)))
+
+
+@app.command()
+def summarize(
+    run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
+    reference: Annotated[str, typer.Option(help="The method speedups are against.")] = "treewalker",
+    boot: Annotated[int, typer.Option(help="Bootstrap replicates.")] = 1000,
+) -> None:
+    """Per-group p50/p99, row-weighted speedups and one bootstrap interval each."""
+    from . import analysis
+
+    print("\n".join(analysis.summarize(run_dir, reference, boot)))
+
+
 def _run_id(suite: str) -> str:
     import platform
     from datetime import UTC, datetime
@@ -526,3 +550,37 @@ def pilot_tl2cgen(
             results.append(row)
             print(json.dumps(row))
     fm.write_json(paths.artifacts / "pilots" / "tl2cgen.json", results)
+
+
+@app.command()
+def budget(
+    suite: Suites,
+    pilot_run: Annotated[
+        Path | None, typer.Option(help="A finished run to scale from: the validation deployment's.")
+    ] = None,
+    arch: Annotated[
+        str | None,
+        typer.Option(help="The machine (x86_64, aarch64), for XGBoost's extra processes."),
+    ] = None,
+) -> None:
+    """Print a suite's expected models, compilations, cells, calls, sample bytes,
+    disk, RAM and wall time, scaled from a pilot run where one is given."""
+    from . import budget as bg
+    from . import grids
+
+    paths = _paths()
+    doc = grids.load(paths.grids)
+    pilot = bg.Pilot.from_run(pilot_run) if pilot_run else None
+    # The inputs decide the estimate: name them.
+    print(
+        f"budget from pilot {pilot_run or 'none'}, arch {arch or 'any'}, sizes from the "
+        f"prepared cells in {paths.artifacts}"
+    )
+    rounds = int(grids.run_config(doc).get("min_rounds", 3))
+    missing = False
+    for name in suite:
+        b = bg.estimate(paths, doc, name, pilot, arch)
+        print("\n".join(bg.describe(b, rounds)))
+        missing |= bool(b.missing)
+    if missing:
+        raise typer.Exit(1)
