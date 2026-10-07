@@ -215,52 +215,88 @@ def compile_baselines(
     model: Models = None,
     framework: Frameworks = None,
     cell: CellIds = None,
-    only: Annotated[list[str] | None, typer.Option(help="tl2cgen or lleaves.")] = None,
-    workers: Annotated[int | None, typer.Option(help="Parallel compiles.")] = None,
-    llc: Annotated[str, typer.Option(help="llc for lleaves [default: from PATH].")] = "",
-    clang: Annotated[str, typer.Option(help="clang for lleaves [default: from PATH].")] = "",
+    only: Annotated[list[str] | None, typer.Option(help="tl2cgen, lleaves or quickscorer.")] = None,
+    jobs: Annotated[
+        int | None,
+        typer.Option(help="Compiler processes at once, over all compiles [default: CPUs]."),
+    ] = None,
+    threads: Annotated[int, typer.Option(help="Compiler threads per tl2cgen compile.")] = 2,
+    cc: Annotated[str, typer.Option(help="Linker for lleaves [default: cc from PATH].")] = "",
     force: Annotated[bool, typer.Option(help="Recompile even when records match.")] = False,
 ) -> None:
-    """Compile tl2cgen (both frameworks) and lleaves (LightGBM) once per model.
+    """Compile tl2cgen (both frameworks) and lleaves (LightGBM) once per model, and
+    write QuickScorer XML for XGBoost models.
 
     tl2cgen comes from the baselines dependency group:
     uv run --group baselines treewalker-exp compile-baselines ...
     """
     import os
-    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from concurrent.futures import ProcessPoolExecutor
 
     from . import baselines as bl
     from . import formats as fm
+    from . import grids
 
-    paths, _, cells = _cells(suite, dataset, workload, model, framework, cell)
-    tools = only or ["tl2cgen", "lleaves"]
-    ncpu = os.cpu_count() or 8
-    n_workers = workers or min(max(ncpu // 2, 1), 4)
-    threads = max(1, ncpu // n_workers)
+    paths, doc, cells = _cells(suite, dataset, workload, model, framework, cell)
+    # Only the factorial method set times baselines (MethodSet::baselines in
+    # sweep_bench); the ablation suite's cells need none.
+    timed = {
+        cid
+        for name in suite
+        for cid, p in grids.suite(doc, name).plan.items()
+        if p["methods"] == "factorial"
+    }
+    cells = [c for c in cells if c.id in timed]
+    # The sentinel times its cell's baselines in every suite's run, the ablation
+    # suite's included, so an unfiltered compile covers its model too.
+    if not (dataset or workload or model or framework or cell):
+        extra = sentinel_cell(doc)
+        if extra is not None and extra.id not in {c.id for c in cells}:
+            cells.append(extra)
+    files = grids.baseline_settings(doc).get("tl2cgen_parallel_comp", "trees")
+    tools = only or ["tl2cgen", "lleaves", "quickscorer"]
+    # As many compiler processes at once as CPUs, as before, but in more, narrower
+    # compiles: tl2cgen with a few threads each, lleaves its 4 chunks, so one
+    # model's last, largest file no longer holds the machine. Largest models first.
+    budget = max(1, jobs or os.cpu_count() or 8)
+    if "lleaves" in tools and budget < bl.LLEAVES_CHUNKS:
+        # Its chunk count is its recipe, so it cannot shrink to fit.
+        raise typer.BadParameter(
+            f"lleaves runs {bl.LLEAVES_CHUNKS} compiler processes; --jobs must be at least that",
+            param_hint="--jobs",
+        )
+    threads = max(1, min(threads, budget))
     tasks = []
     for fw_dir, fw in sorted(
         {(c.model.dir(paths.artifacts) / c.framework, c.framework) for c in cells}
     ):
-        if not (fw_dir / "model_treelite.bin").exists():
+        if fw not in ("lightgbm", "xgboost") or not (fw_dir / "model_treelite.bin").exists():
             continue
         if "tl2cgen" in tools:
             tasks.append(("tl2cgen", fw_dir))
         if "lleaves" in tools and fw == "lightgbm":
             tasks.append(("lleaves", fw_dir))
-    print(f"{len(tasks)} compiles, {n_workers} workers x {threads} threads", file=sys.stderr)
+        if "quickscorer" in tools and fw == "xgboost":
+            tasks.append(("quickscorer", fw_dir))
+    tasks = compile_order(tasks)
+    print(
+        f"{len(tasks)} compiles, {budget} compiler processes at once, "
+        f"tl2cgen {threads} threads each, lleaves {bl.LLEAVES_CHUNKS} chunks",
+        file=sys.stderr,
+    )
     failed = []
-    with ProcessPoolExecutor(max_workers=n_workers) as pool:
-        futures = {
-            pool.submit(
-                _compile_one, tool, fw_dir, threads, paths.compile_script, llc, clang, force
-            ): (
-                tool,
-                fw_dir,
-            )
-            for tool, fw_dir in tasks
-        }
-        for i, fut in enumerate(as_completed(futures), 1):
-            tool, fw_dir = futures[fut]
+
+    def submit(pool, task):
+        tool, fw_dir = task
+        return pool.submit(
+            _compile_one, tool, fw_dir, threads, paths.compile_script, cc, force, files
+        )
+
+    with ProcessPoolExecutor(max_workers=budget) as pool:
+        done = bl.run_budgeted(
+            pool, tasks, lambda t: bl.compile_cost(t[0], threads), budget, submit
+        )
+        for i, ((tool, fw_dir), fut) in enumerate(done, 1):
             label = f"{fw_dir.relative_to(paths.artifacts)}/{tool}"
             try:
                 fut.result()
@@ -274,15 +310,23 @@ def compile_baselines(
         fw_dir = c.model.dir(paths.artifacts) / c.framework
         if not cell_json.exists():
             continue
-        doc = fm.read_cell(cell_json)
-        doc["baselines"] = {
+        cdoc = fm.read_cell(cell_json)
+        cdoc["baselines"] = {
             tool: bl.summary(fm.read_json(fw_dir / f"{tool}.json"))
-            for tool in ("tl2cgen", "lleaves")
+            for tool in ("tl2cgen", "lleaves", "quickscorer")
             if (fw_dir / f"{tool}.json").exists()
         }
-        fm.write_cell(cell_json, doc)
+        fm.write_cell(cell_json, cdoc)
     if failed:
         raise typer.Exit(1)
+
+
+def compile_order(tasks):
+    """Largest models first, by node count; a model's compiles together."""
+    from . import baselines as bl
+
+    nodes = {fw_dir: bl.model_nodes(fw_dir) for _, fw_dir in tasks}
+    return sorted(tasks, key=lambda t: (-nodes[t[1]], str(t[1]), t[0]))
 
 
 def sentinel_cell(doc):
@@ -295,13 +339,15 @@ def sentinel_cell(doc):
     return grids.find_cell(doc, run["sentinel_cell"])
 
 
-def _compile_one(tool, fw_dir, threads, script, llc, clang, force) -> None:
+def _compile_one(tool, fw_dir, threads, script, cc, force, files) -> None:
     from . import baselines as bl
 
     if tool == "tl2cgen":
-        bl.compile_tl2cgen(fw_dir, threads, force)
+        bl.compile_tl2cgen(fw_dir, threads, force, files)
+    elif tool == "quickscorer":
+        bl.write_quickscorer(fw_dir, force)
     else:
-        bl.compile_lleaves(script, fw_dir, threads, llc, clang, force)
+        bl.compile_lleaves(script, fw_dir, cc, force)
 
 
 @app.command("build-native")
