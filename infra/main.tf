@@ -124,10 +124,12 @@ resource "google_compute_instance" "bench" {
       gcs_results_base  = "gs://${google_storage_bucket.bench.name}/results/${each.key}"
       gcs_artifacts_uri = "gs://${google_storage_bucket.bench.name}/artifacts"
       gcs_expedia_uri   = length(google_storage_bucket_object.expedia) > 0 ? "gs://${google_storage_bucket.bench.name}/${google_storage_bucket_object.expedia[0].name}" : ""
+      gcs_cache_uri     = var.cache_bucket == "" ? "" : "gs://${var.cache_bucket}"
       git_ref           = var.git_ref
       role              = each.value.role
       suites            = join(" ", var.suites)
       layout_check      = var.layout_check
+      apt_snapshot      = var.apt_snapshot
       machine_type      = each.value.machine_type
       image             = each.value.image
       turbo_mode        = local.effective_turbo[each.key]

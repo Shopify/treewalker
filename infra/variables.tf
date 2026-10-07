@@ -28,6 +28,18 @@ variable "layout_check" {
   default     = false
 }
 
+variable "apt_snapshot" {
+  description = "Ubuntu archive snapshot (YYYYMMDDTHHMMSSZ) every apt operation on the VMs uses, so the compiler and tools match across deployments and the cached baselines stay valid; empty for the live archive. The default is the archive the 2026-10-05 shakedown factorial installed from."
+  type        = string
+  default     = "20261005T111000Z"
+}
+
+variable "cache_bucket" {
+  description = "An existing bucket that keeps prepared models and compiled baselines across deployments, so a rerun does not retrain or recompile; empty for none. Create it outside Terraform, so destroy leaves it."
+  type        = string
+  default     = ""
+}
+
 variable "expedia_parquet" {
   description = "Path to expedia.parquet built by treewalker-exp fetch-expedia; needed when a suite has Expedia cells (default: ../experiments/data/expedia.parquet)"
   type        = string
@@ -56,12 +68,12 @@ variable "machines" {
   default = {
     intel = {
       machine_type = "c4-standard-32"
-      image        = "ubuntu-os-cloud/ubuntu-2604-lts-amd64"
+      image        = "ubuntu-os-cloud/ubuntu-2604-resolute-amd64-v20260918"
       role         = "trainer"
     }
     arm = {
       machine_type = "c4a-highmem-16"
-      image        = "ubuntu-os-cloud/ubuntu-2604-lts-arm64"
+      image        = "ubuntu-os-cloud/ubuntu-2604-resolute-arm64-v20260918"
       role         = "benchmarker"
     }
   }

@@ -11,12 +11,16 @@
 #   gcs_results_base  — gs:// prefix for uploading results
 #   gcs_artifacts_uri — gs:// prefix where the trainer hands its fresh models over
 #   gcs_expedia_uri   — gs:// path to expedia.parquet, empty when no suite needs it
+#   gcs_cache_uri     — gs:// bucket that keeps prepared models and compiled
+#                       baselines across deployments; empty for none
 #   git_ref           — the ref archived; the commit is in experiments/SOURCE_COMMIT
 #   role              — "trainer" (prepares and uploads models) or "benchmarker"
 #                       (downloads the trainer's models, checked by hash)
 #   suites            — space-separated suites from experiments/grids.toml
 #   layout_check      — "true": also time TreeWalker on the acceptance cells in a
 #                       build with 64-byte function alignment
+#   apt_snapshot      — Ubuntu archive snapshot every apt operation uses; empty
+#                       for the live archive
 #   machine_type, image, turbo_mode, pmu_level — recorded in run.json
 #
 # Results land in /home/bench/results/. Progress is logged to
@@ -30,10 +34,12 @@ GCS_SOURCE_URI="${gcs_source_uri}"
 GCS_RESULTS_BASE="${gcs_results_base}"
 GCS_ARTIFACTS_URI="${gcs_artifacts_uri}"
 GCS_EXPEDIA_URI="${gcs_expedia_uri}"
+GCS_CACHE_URI="${gcs_cache_uri}"
 ROLE="${role}"
 GIT_REF="${git_ref}"
 SUITES="${suites}"
 LAYOUT_CHECK="${layout_check}"
+APT_SNAPSHOT="${apt_snapshot}"
 MACHINE_TYPE="${machine_type}"
 IMAGE="${image}"
 TURBO_MODE="${turbo_mode}"
@@ -75,6 +81,30 @@ as_bench() {
 }
 twx() { as_bench "uv run --group baselines treewalker-exp $*"; }
 
+# The cache: prepared/ holds what prep writes, compiled/<machine type>/ the
+# baselines compiled on that machine. A pull only offers files: prep reuses a
+# model or cell only when its manifest's key and hashes match, and
+# compile-baselines a library only when its compile identity and hash match;
+# anything else is rebuilt. A failed pull or push costs time, never the run.
+# Bulk copies print nothing per file: the serial console drains at about 10 KB/s,
+# and a 47 GB pull's file list kept it an hour behind the VM. Errors still print.
+COMPILED_RE='.*\.(so|dylib)$|.*/(tl2cgen|lleaves|quickscorer)\.(json|xml)$'
+ONLY_COMPILED_RE='^(?!.*\.(so|dylib)$)(?!.*/(tl2cgen|lleaves|quickscorer)\.(json|xml)$)'
+cache_pull() {
+  [ -n "$GCS_CACHE_URI" ] || return 0
+  as_bench "mkdir -p experiments/artifacts"
+  if gcloud storage ls "$GCS_CACHE_URI/$1/" &>/dev/null; then
+    gcloud storage rsync --no-user-output-enabled -r "$GCS_CACHE_URI/$1/" "$REPO_DIR/experiments/artifacts/" \
+      || log "Cache: pulling $1 failed; building here"
+    chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
+  fi
+}
+cache_push() {
+  [ -n "$GCS_CACHE_URI" ] || return 0
+  gcloud storage rsync --no-user-output-enabled -r --exclude="$2" "$REPO_DIR/experiments/artifacts/" "$GCS_CACHE_URI/$1/" \
+    || log "Cache: pushing $1 failed"
+}
+
 metadata() {
   curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/$1" 2>/dev/null || true
 }
@@ -98,10 +128,18 @@ chown $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
 # ---------------------------------------------------------------------------
 phase 1 "System packages"
 export DEBIAN_FRONTEND=noninteractive
+# The image is pinned, and so is the archive: with a snapshot, update, upgrade and
+# install see the archive as it was then (Ubuntu 24.04 and later need no source
+# changes), so GCC and the other tools match across deployments and the cached
+# compiled baselines stay valid.
+if [ -n "$APT_SNAPSHOT" ]; then
+  echo "APT::Snapshot \"$APT_SNAPSHOT\";" > /etc/apt/apt.conf.d/50snapshot
+fi
 apt-get update -qq
 apt-get upgrade -y -qq
 apt-get install -y -qq build-essential cmake git curl pkg-config libgomp1
 log "cmake: $(cmake --version | head -1); gcc: $(gcc --version | head -1)"
+log "apt: $(apt-cache policy gcc | grep -m1 -E 'https?://' | sed -E 's/^ +//')"
 
 # ---------------------------------------------------------------------------
 # Phase 2: Rust and uv. rustup installs no toolchain, so rust-toolchain.toml
@@ -133,10 +171,10 @@ as_bench "CXX='$REPO_DIR/infra/scripts/cxx-cstdint' uv sync --locked --group bas
 twx build-native
 
 # ---------------------------------------------------------------------------
-# Phase 5: Data and models. The trainer prepares from scratch: nothing is
-# pulled from earlier runs, and prep rebuilds anything its manifest does not
-# vouch for. The benchmarker takes the trainer's fresh models; sweep_bench
-# checks every file against the hashes in cell.json.
+# Phase 5: Data and models. The trainer starts from the cache, if any, and
+# prep rebuilds anything its manifest does not vouch for. The benchmarker takes
+# the trainer's models; sweep_bench checks every file against the hashes in
+# cell.json. Each machine starts its compiles from its own cached baselines.
 # ---------------------------------------------------------------------------
 phase 5 "Data and models ($ROLE)"
 if [ "$ROLE" = "trainer" ]; then
@@ -146,12 +184,13 @@ if [ "$ROLE" = "trainer" ]; then
     chown $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/data/expedia.parquet"
     twx fetch-expedia --check-only
   fi
+  cache_pull prepared
   for suite in $SUITES; do
     twx prepare --suite "$suite"
   done
+  cache_push prepared "$COMPILED_RE"
   # Compiled baselines are per machine; the benchmarker compiles its own.
-  gcloud storage rsync --no-user-output-enabled -r \
-    --exclude='.*\.(so|dylib)$|.*/(tl2cgen|lleaves|quickscorer)\.(json|xml)$' \
+  gcloud storage rsync --no-user-output-enabled -r --exclude="$COMPILED_RE" \
     "$REPO_DIR/experiments/artifacts/" "$GCS_ARTIFACTS_URI/"
   echo "$(date -Iseconds)" | gcloud storage cp - "$GCS_ARTIFACTS_URI/$UPLOAD_MARKER"
   log "Models uploaded to $GCS_ARTIFACTS_URI"
@@ -169,9 +208,14 @@ else
   rm -f "$REPO_DIR/experiments/artifacts/"UPLOAD_DONE*
   chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
 fi
+# Push the compiled baselines even when a compile fails, so a rerun keeps them.
+cache_pull "compiled/$MACHINE_TYPE"
+COMPILED_OK=true
 for suite in $SUITES; do
-  twx compile-baselines --suite "$suite"
+  twx compile-baselines --suite "$suite" || COMPILED_OK=false
 done
+cache_push "compiled/$MACHINE_TYPE" "$ONLY_COMPILED_RE"
+$COMPILED_OK || fail "Compiling the baselines failed"
 
 # ---------------------------------------------------------------------------
 # Phase 6: The machine, tuned and described
@@ -194,6 +238,7 @@ cat > "$SYSTEM_INFO" <<SYSINFO
   "zone": "$(metadata zone | awk -F/ '{print $NF}')",
   "image_requested": "$IMAGE",
   "image": "$(metadata image)",
+  "apt_snapshot": "$APT_SNAPSHOT",
   "turbo_mode": "$TURBO_MODE",
   "pmu_level": "$PMU_LEVEL",
   "os_release": "$(. /etc/os-release && echo "$PRETTY_NAME")",
