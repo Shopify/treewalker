@@ -1,10 +1,15 @@
 #!/bin/sh
-# A C++ compiler that includes <cstdint> first. tl2cgen has no aarch64 Linux
-# wheel, so uv builds it from source there, and the Treelite headers it
-# compiles use fixed-width integer types without including <cstdint>, which
-# GCC 13 rejects. Build through this wrapper:
+# A C++ compiler for tl2cgen's source build. tl2cgen has no aarch64 Linux wheel,
+# so uv builds it from source there, and two things in the sources it compiles
+# break with current GCC:
+# - the Treelite headers use fixed-width integer types without including
+#   <cstdint>, which GCC 13 rejects;
+# - the bundled RapidJSON assigns to a const member inside a template that is
+#   never instantiated (document.h:319), which GCC 15, Ubuntu 26.04's compiler,
+#   rejects through -Wtemplate-body.
+# Build through this wrapper:
 #
 #   CXX="$PWD/infra/scripts/cxx-cstdint" uv sync --group baselines
 #
 # REAL_CXX selects the compiler (default g++).
-exec "${REAL_CXX:-g++}" -include cstdint "$@"
+exec "${REAL_CXX:-g++}" -include cstdint -Wno-template-body "$@"
