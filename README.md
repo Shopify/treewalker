@@ -228,7 +228,17 @@ terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var 'suites=["accept
 terraform apply -var project=YOUR_PROJECT -var git_ref=REF      # factorial and ablation
 ```
 
-The VMs run with the GCE PMU at `STANDARD` and `turbo_mode = "ALL_CORE_MAX"`.
+With `-var cache_bucket=NAME`, an existing bucket keeps the prepared models and each
+machine type's compiled baselines across deployments, so a rerun retrains and
+recompiles only what changed. Prep and `compile-baselines` reuse a cached file only
+when its recorded key and hash match. Create the bucket once, outside Terraform, so
+`terraform destroy` leaves it:
+`gcloud storage buckets create gs://NAME --location US --uniform-bucket-level-access`.
+
+The VMs run with the GCE PMU at `STANDARD` and `turbo_mode = "ALL_CORE_MAX"`. They boot
+a pinned image, and every `apt` operation uses one Ubuntu archive snapshot
+(`apt_snapshot`), so the compiler and tools, and with them the cached compiled
+baselines, stay the same across deployments.
 Suites with Expedia cells need `experiments/data/expedia.parquet` from
 `treewalker-exp fetch-expedia`; Terraform uploads it for the trainer VM, which checks its
 fingerprint before training. Terraform uploads `git archive` of `var.git_ref`
