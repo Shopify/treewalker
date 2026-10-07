@@ -152,6 +152,10 @@ resource "google_compute_instance" "bench" {
       gcs_gate_uri      = var.gate_ref == "" ? "" : "gs://${google_storage_bucket.bench.name}/${google_storage_bucket_object.gate_source[0].name}"
       apt_snapshot      = var.apt_snapshot
       machine_type      = each.value.machine_type
+      cache_machine     = each.value.cache_as != "" ? each.value.cache_as : each.value.machine_type
+      expected_cpu      = each.value.expected_cpu
+      compile_only      = var.compile_only
+      tl2cgen_threads   = var.tl2cgen_threads
       image             = each.value.image
       turbo_mode        = local.effective_turbo[each.key]
       pmu_level         = local.pmu_level

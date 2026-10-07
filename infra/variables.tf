@@ -46,6 +46,18 @@ variable "gate_ref" {
   default     = ""
 }
 
+variable "compile_only" {
+  description = "Prepare and compile the suites' baselines into the cache, then stop: no timing. With machines whose cache_as names the benchmark machine types, a larger VM of the same CPU fills their caches."
+  type        = bool
+  default     = false
+}
+
+variable "tl2cgen_threads" {
+  description = "Compiler threads per tl2cgen compile (compile-baselines --threads); the total of compiler processes stays at the CPU count"
+  type        = number
+  default     = 2
+}
+
 variable "cache_bucket" {
   description = "An existing bucket that keeps prepared models and compiled baselines across deployments, so a rerun does not retrain or recompile; empty for none. Create it outside Terraform, so destroy leaves it."
   type        = string
@@ -76,6 +88,11 @@ variable "machines" {
     machine_type = string
     image        = string
     role         = string # "trainer" (trains + uploads artifacts) or "benchmarker" (downloads + benchmarks)
+    # A compile-only VM fills another machine type's compiled-baselines cache:
+    # that type's name, and the host CPU model it reports (`baselines.host_cpu`),
+    # which must match, since it is part of each library's compile identity.
+    cache_as     = optional(string, "")
+    expected_cpu = optional(string, "")
   }))
   default = {
     intel = {
