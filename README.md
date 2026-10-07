@@ -172,7 +172,8 @@ LightGBM 4.6.0 and XGBoost 3.2.0 were built from source with `-march=native`,
 TreeWalker with `-C target-cpu=native` (`.cargo/config.toml`). The factorial
 grid used Rust 1.94.1; the scenario and chunked runs used Rust 1.97.1, the
 version now pinned in `rust-toolchain.toml`. `infra/scripts/startup.sh` is the
-full machine recipe.
+full machine recipe; it now builds the versions `uv.lock` installs, LightGBM
+4.7.0 and XGBoost 3.4.1.
 
 ### On GCE with Terraform
 

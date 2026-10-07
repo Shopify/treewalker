@@ -28,8 +28,10 @@ GIT_REF="${git_ref}"
 BENCH_SUITE="${bench_suite}"  # "paper" (full sweep) or "rebuttal" (E1 scenario + E2 chunked-G)
 LLVM_VERSION=20
 CMAKE_VER=3.31.6
-LIGHTGBM_VER=v4.6.0
-XGBOOST_VER=v3.2.0
+# The versions uv.lock installs: the native builds replace the packages'
+# libraries, and XGBoost refuses a library of another version at import.
+LIGHTGBM_VER=v4.7.0
+XGBOOST_VER=v3.4.1
 
 BENCH_USER=bench
 BENCH_HOME=/home/$BENCH_USER
