@@ -10,9 +10,10 @@ variable "zone" {
 }
 
 variable "git_ref" {
-  description = "Git branch, tag, or SHA to benchmark"
+  # No default: the startup script needs experiments/ and treewalker-exp, which
+  # the neurips2026 tag predates. Pass a ref that contains them.
+  description = "Git branch, tag, or SHA to benchmark; it must contain experiments/ and treewalker-exp"
   type        = string
-  default     = "neurips2026"
 }
 
 variable "bench_suite" {
@@ -22,7 +23,7 @@ variable "bench_suite" {
 }
 
 variable "expedia_parquet" {
-  description = "Path to expedia.parquet built by paper/experiments/scripts/fetch_expedia.py; required for bench_suite = \"paper\" (default: ../paper/experiments/data/expedia.parquet)"
+  description = "Path to expedia.parquet built by treewalker-exp fetch-expedia; required for bench_suite = \"paper\" (default: ../experiments/data/expedia.parquet)"
   type        = string
   default     = ""
 }

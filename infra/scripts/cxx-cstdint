@@ -1,0 +1,10 @@
+#!/bin/sh
+# A C++ compiler that includes <cstdint> first. tl2cgen has no aarch64 Linux
+# wheel, so uv builds it from source there, and the Treelite headers it
+# compiles use fixed-width integer types without including <cstdint>, which
+# GCC 13 rejects. Build through this wrapper:
+#
+#   CXX="$PWD/infra/scripts/cxx-cstdint" uv sync --group baselines
+#
+# REAL_CXX selects the compiler (default g++).
+exec "${REAL_CXX:-g++}" -include cstdint "$@"

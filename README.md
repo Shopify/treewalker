@@ -23,9 +23,11 @@ found [under the neurips2026 tag](https://github.com/Shopify/treewalker/releases
 | Path | Contents |
 |---|---|
 | `src/` | inference library and treelite model parser |
-| `benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
-| `paper/experiments/scripts/` | dataset preparation, baseline compilation, figures, tables |
-| `paper/experiments/data/` | released result CSVs and machine descriptions |
+| `experiments/benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
+| `experiments/treewalker_exp/` | `treewalker-exp`: dataset preparation, workloads, training, compiled baselines |
+| `experiments/grids.toml` | the benchmark suites, resolved by `treewalker-exp` into execution manifests |
+| `experiments/scripts/` | figures, tables and the chunked-G run, on the released CSVs |
+| `experiments/data/` | released result CSVs and machine descriptions |
 | `infra/` | Terraform and VM startup script for the two GCE benchmark machines |
 
 ## Building and packaging the library
@@ -54,7 +56,7 @@ manifest and the shared `Cargo.lock`. Build it explicitly; `--target-dir target`
 preserves the binary path used by the experiment scripts:
 
 ```bash
-cargo build --manifest-path benchmarks/Cargo.toml --target-dir target \
+cargo build --manifest-path experiments/benchmarks/Cargo.toml --target-dir target \
   --release --features external-bench
 ```
 
@@ -99,21 +101,23 @@ output and precision policy, errors, limits, and the caller's grouping contract.
 
 ## Datasets
 
-The scripts download the public datasets; none are redistributed here.
+None of the datasets are redistributed here. `uv run treewalker-exp fetch`
+downloads the public ones into `experiments/data/raw/` and checks each against
+a pinned SHA-256; `prepare` fetches them on demand.
 
 | Dataset | Source | Fetched by |
 |---|---|---|
-| SUPPORT | DeepSurv repository (`support_train_test.h5`) | `prepare.py` |
-| FLCHAIN | R `survival` package via Rdatasets | `prepare.py` |
-| Expedia (ICDM 2013) | Kaggle competition `expedia-personalized-sort` | `fetch_expedia.py`, from the `data.zip` you download |
-| UCI Default of Credit Card Clients | OpenML 42477, CC BY 4.0, DOI 10.24432/C55S3H | `prepare_scenario.py` |
+| SUPPORT | DeepSurv repository (`support_train_test.h5`) | `treewalker-exp fetch` |
+| FLCHAIN | R `survival` package via Rdatasets | `treewalker-exp fetch` |
+| Expedia (ICDM 2013) | Kaggle competition `expedia-personalized-sort` | `treewalker-exp fetch-expedia`, from the `data.zip` you download |
+| UCI Default of Credit Card Clients | OpenML 42477, CC BY 4.0, DOI 10.24432/C55S3H | `treewalker-exp fetch` |
 
 The Expedia data may not be redistributed. Accept the competition rules on
 Kaggle, download `data.zip` (for example
 `kaggle competitions download -c expedia-personalized-sort -f data.zip`), then
-run `fetch_expedia.py --train-csv data.zip`; extracting the zip needs Info-ZIP
+run `treewalker-exp fetch-expedia --train-csv data.zip`; extracting the zip needs Info-ZIP
 `unzip`, because it uses Deflate64. It writes
-`paper/experiments/data/expedia.parquet` and checks its content fingerprint
+`experiments/data/expedia.parquet` and checks its content fingerprint
 against the file the paper used.
 
 ## Released results
@@ -138,14 +142,14 @@ benchmark machines. From the repository root:
 
 ```bash
 uv sync
-uv run python3 paper/experiments/scripts/plot.py                    # Figures 3, 4, 6-9
-uv run python3 paper/experiments/scripts/gen_heatmap_tex.py         # Figure 2
-uv run python3 paper/experiments/scripts/decomposition_validation.py  # Table 1, Figure 5
-uv run python3 paper/experiments/scripts/summarize_scenario.py --arch arm   # Tables 3, 10 (also --arch intel)
-uv run python3 paper/experiments/scripts/paper_numbers.py           # every in-text number
+uv run python3 experiments/scripts/plot.py                    # Figures 3, 4, 6-9
+uv run python3 experiments/scripts/gen_heatmap_tex.py         # Figure 2
+uv run python3 experiments/scripts/decomposition_validation.py  # Table 1, Figure 5
+uv run python3 experiments/scripts/summarize_scenario.py --arch arm   # Tables 3, 10 (also --arch intel)
+uv run python3 experiments/scripts/paper_numbers.py           # every in-text number
 ```
 
-Outputs go to `paper/experiments/figures/`. `paper_numbers.py` prints each
+Outputs go to `experiments/figures/`. `paper_numbers.py` prints each
 number next to the value printed in the paper.
 
 | Paper item | Source |
@@ -168,50 +172,64 @@ LightGBM 4.6.0 and XGBoost 3.2.0 were built from source with `-march=native`,
 TreeWalker with `-C target-cpu=native` (`.cargo/config.toml`). The factorial
 grid used Rust 1.94.1; the scenario and chunked runs used Rust 1.97.1, the
 version now pinned in `rust-toolchain.toml`. `infra/scripts/startup.sh` is the
-full machine recipe.
+full machine recipe; it now builds the versions `uv.lock` installs, LightGBM
+4.7.0 and XGBoost 3.4.1.
 
 ### On GCE with Terraform
 
 ```bash
 cd infra
 terraform init
-terraform apply -var project=YOUR_PROJECT              # factorial grid (bench_suite = "paper")
-terraform apply -var project=YOUR_PROJECT -var bench_suite=rebuttal   # scenario + chunked runs
+terraform apply -var project=YOUR_PROJECT -var git_ref=REF              # factorial grid (bench_suite = "paper")
+terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var bench_suite=rebuttal   # scenario + chunked runs
 ```
 
-The factorial grid needs `paper/experiments/data/expedia.parquet` from
-`fetch_expedia.py`; Terraform uploads it for the trainer VM, which checks its
+The factorial grid needs `experiments/data/expedia.parquet` from
+`treewalker-exp fetch-expedia`; Terraform uploads it for the trainer VM, which checks its
 fingerprint before training. Terraform uploads `git archive` of `var.git_ref`
-(default `neurips2026`) to a new bucket. The Intel VM trains the models and shares them, so both machines
+to a new bucket. The ref has no default: it must contain `experiments/` and
+`treewalker-exp`, which the `neurips2026` tag predates. The Intel VM trains the models and shares them, so both machines
 evaluate identical models. Results land in the bucket under `results/`. The
 scenario and chunked runs take about 25 minutes per VM.
 
 ### By hand on a prepared Linux machine
 
 ```bash
-uv sync
-uv run python3 paper/experiments/scripts/fetch_expedia.py --train-csv PATH/data.zip
-uv run python3 paper/experiments/scripts/prepare.py --grid all --prepare-groups --skip-compiled
-uv run python3 paper/experiments/scripts/prepare.py --grid all --compile-only   # tl2cgen, lleaves, sweep_bench
-cargo test --manifest-path benchmarks/Cargo.toml --target-dir target \
+uv sync --group baselines
+uv run --group baselines treewalker-exp fetch-expedia --train-csv PATH/data.zip
+uv run --group baselines treewalker-exp prepare --suite factorial
+uv run --group baselines treewalker-exp compile-baselines --suite factorial   # tl2cgen, lleaves
+uv run --group baselines treewalker-exp build-bench
+cargo test --manifest-path experiments/benchmarks/Cargo.toml --target-dir target \
   --release --features research
 
-taskset -c 0 ./target/release/sweep_bench paper/experiments/artifacts --grid all \
-  --output-dir paper/experiments/data --warmup 3 --iters 21 --min-iters 11 \
+taskset -c 0 ./target/release/sweep_bench experiments/artifacts --grid all \
+  --output-dir experiments/data --warmup 3 --iters 21 --min-iters 11 \
   --max-time-secs 30 --lgb-lib /usr/local/lib/lib_lightgbm.so --xgb-lib PATH/libxgboost.so
 
-uv run python3 paper/experiments/scripts/prepare_scenario.py
-uv run python3 paper/experiments/scripts/prepare_chunked.py --stage prepare
-taskset -c 0 ./target/release/sweep_bench paper/experiments/artifacts --grid scen \
-  --output-dir paper/experiments/data --warmup 3 --iters 21 --min-iters 11 --max-time-secs 10
-taskset -c 0 uv run python3 paper/experiments/scripts/prepare_chunked.py --stage timing
+uv run --group baselines treewalker-exp prepare --suite scenario-v1 --validate
+uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage prepare
+taskset -c 0 ./target/release/sweep_bench experiments/artifacts --grid scen \
+  --output-dir experiments/data --warmup 3 --iters 21 --min-iters 11 --max-time-secs 10
+taskset -c 0 uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage timing
 ```
 
-The compiled baselines are installed separately, as in `startup.sh`:
-`uv pip install 'tl2cgen>=1.0.0'` and
-`uv pip install 'lleaves @ git+https://github.com/siboehm/lleaves.git@v1.4.1'`,
-with LLVM 20 for lleaves. `sweep_bench` loads the native LightGBM and XGBoost
+tl2cgen comes from the locked `baselines` dependency group. It has no aarch64
+Linux wheel, so there it builds from source with
+`CXX=$PWD/infra/scripts/cxx-cstdint`. lleaves runs in
+`experiments/compile.py`'s own script lock, with `llc` and `clang` from LLVM 20
+on `PATH` or given by `--llc` and `--clang`. Every `uv run` passes
+`--group baselines`, because `uv run` removes packages outside the groups it
+syncs. `sweep_bench` loads the native LightGBM and XGBoost
 libraries given by `--lgb-lib` and `--xgb-lib`.
+
+`uv.lock`, `experiments/compile.py.lock` and
+`tests/fixtures/import/generate.py.lock` resolve against PyPI through the
+`pypi` index that the project and both scripts declare, which takes priority
+over any index in a user's uv configuration. Relock with `uv lock`,
+`uv lock --script experiments/compile.py` and
+`uv lock --script tests/fixtures/import/generate.py`; `uv lock --check` (with
+`--script` for a script) verifies a lock without changing it.
 
 ### What to expect from a rerun
 
@@ -238,7 +256,7 @@ order, layout and every ablation except `disable_exact_sums` leave it unchanged.
 The margin and the link are ordinary rounded `f64` operations.
 
 LightGBM (f64) predictions match Treelite GTIL within 1e-13, and XGBoost (f32)
-predictions match native XGBoost within 1e-5 (`benchmarks/tests/correctness.rs`).
+predictions match native XGBoost within 1e-5 (`experiments/benchmarks/tests/correctness.rs`).
 GTIL and the full walk add leaves in `f64` in tree order, so they differ from the
 exact sum by their rounding, which grows with the partial sums. Measured on
 2026-10-04, the full walk's outputs differ by at most 2.2e-15 on the FLCHAIN and

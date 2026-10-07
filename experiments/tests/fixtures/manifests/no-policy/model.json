@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "dataset": "credit",
+  "framework": "lightgbm",
+  "source": {
+    "x": "y"
+  },
+  "split": {
+    "seed": 0,
+    "test_frac": 0.2,
+    "unit": "row"
+  },
+  "n_trees": 5,
+  "max_depth": 2,
+  "horizon": null,
+  "train": {
+    "params": {
+      "objective": "binary",
+      "metric": "binary_logloss",
+      "num_leaves": 3,
+      "max_depth": 2,
+      "learning_rate": 0.05,
+      "verbose": -1,
+      "seed": 42
+    },
+    "num_boost_round": 5
+  },
+  "categorical_features": [],
+  "feature_order": [
+    "a",
+    "b",
+    "c"
+  ],
+  "libraries": {
+    "numpy": "2.5.3",
+    "polars": "1.44.2",
+    "treelite": "4.7.2",
+    "lightgbm": "4.7.0"
+  },
+  "train_data_sha256": "c0e1fdcbd25d72d8450d09991982feba2895a618b4a8427e657c01337a23e93d",
+  "key": "c1343ef2bd80da6e77f7cafd83820f6621851c826a2aadd723f950681a664f49",
+  "files": {
+    "native": {
+      "path": "model_native.txt",
+      "sha256": "6e698f02a74ca15b19bdcf96d90b0721e341e6c8352c23193e75bd727d2b7a1b"
+    },
+    "treelite_bin": {
+      "path": "model_treelite.bin",
+      "sha256": "d9da013e8f1563d513698cf194564d89af17b7cbcbf52d035db21517c4c63fce"
+    },
+    "treelite_json": {
+      "path": "model_treelite.json",
+      "sha256": "cb06006f13c635d8cae64ce6943bb894ecf955965949caa53edc470c7b0f37b8"
+    }
+  },
+  "structure": {
+    "trees": 5,
+    "total_nodes": 25,
+    "max_tree_nodes": 5
+  },
+  "limits": [],
+  "treelite_json": {
+    "bytes": 7737,
+    "status": "written"
+  },
+  "prep": {
+    "train_seconds": 7.176,
+    "export_seconds": 0.103,
+    "peak_rss_bytes": 177750016,
+    "bytes": 16141
+  }
+}

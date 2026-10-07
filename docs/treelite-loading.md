@@ -11,7 +11,7 @@ thresholds. Treelite can emit invalid JSON for nonfinite values; TreeWalker
 rejects those dumps rather than repairing them.
 
 ```python
-import treelite  # fixture/reference version: 4.7.0
+import treelite  # fixture/reference version: 4.7.2
 model = treelite.frontend.load_lightgbm_model("model.txt")
 model.serialize("model.bin")
 # Optional, for debugging: model.dump_as_json()
@@ -68,7 +68,7 @@ output dimensions instead of producing a scalar prediction.
 | Property | Support |
 |---|---|
 | Binary | Little-endian Treelite v4 checkpoints, producer versions 4.0–4.7, no extensions |
-| JSON | Strict Treelite scalar dump schema, as exercised with 4.7.0; no syntax repairs or unknown fields |
+| JSON | Strict Treelite scalar dump schema, as exercised with 4.7.2; no syntax repairs or unknown fields |
 | Tasks | Scalar binary classification, regression, and ranking |
 | Outputs | One target, one class/output slot, scalar leaves, nonempty forest |
 | Tree assignments | Every tree contributes to the sole output; target and class IDs must both be 0 |
@@ -208,8 +208,9 @@ truncated binary fields, size overflow declarations, and unsupported exports.
 
 Optional fixture generation is documented in
 [`tests/fixtures/import/generate.py`](../tests/fixtures/import/generate.py).
-It pins Treelite 4.7.0, NumPy 2.2.6, sklearn 1.6.1, and SciPy 1.15.3; the
-manifest records input dtype and per-fixture absolute/relative tolerances.
+It pins Treelite 4.7.2, NumPy 2.5.3, sklearn 1.9.1, and SciPy 1.18.1, and
+`generate.py.lock` pins their dependencies; the manifest records input dtype
+and per-fixture absolute/relative tolerances.
 Float64 fixtures use 1e-14; float32 fixtures allow 1e-7 for the different
 accumulation precision. Existing artifact gates remain f64 1e-14 and native
 XGBoost f32 1e-5.
@@ -220,5 +221,5 @@ not update the archived paper's benchmark results.
 
 Format references: [Treelite v4 serialization](https://treelite.readthedocs.io/en/latest/serialization/v4.html),
 [postprocessors](https://treelite.readthedocs.io/en/latest/knobs/postprocessor.html),
-and the [pinned 4.7.0 reference evaluator](https://github.com/dmlc/treelite/blob/4.7.0/src/gtil/predict.cc).
+and the [pinned 4.7.2 reference evaluator](https://github.com/dmlc/treelite/blob/4.7.2/src/gtil/predict.cc).
 The `latest` documentation may describe a newer producer version.

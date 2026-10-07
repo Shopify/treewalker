@@ -1,0 +1,158 @@
+# The benchmark grids. `treewalker-exp prepare --suite NAME` prepares a
+# suite's cells, and `treewalker-exp manifest --suite NAME` resolves it into
+# an explicit execution manifest (artifacts/manifests/NAME.json) listing every
+# model, workload and cell. The Rust runner executes that manifest and has no
+# grid logic of its own.
+#
+# A model is one (dataset, framework, T, L, horizon); a workload adds the
+# entity selection, G, k and feature classification; a cell is a workload on
+# one model. Both frameworks are trained for every model.
+
+schema = 1
+
+[defaults]
+seed = 42
+test_frac = 0.2
+frameworks = ["lightgbm", "xgboost"]
+expedia_max_sessions = 50_000
+
+# Treelite JSON exports, for the models that the Rust tests and the
+# byte-identical check read (parse_test's default is flchain/nt500_md8_h16).
+# Every other model writes only the binary export, which the runner and
+# tl2cgen load; listed models still skip a dump over the loader's 64 MiB.
+[treelite_json]
+models = [
+    "flchain/nt500_md8_h16",
+    "support/nt500_md8_h16",
+    "expedia/nt500_md8",
+    "scenario_credit",
+]
+
+# --- workloads ---------------------------------------------------------------
+
+# Survival panels: one model per (T, L, horizon), each test patient over the
+# full horizon. SUPPORT tops out at 104 steps.
+[workloads.panel]
+generator = "panel-v2"
+datasets = ["support", "flchain"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+horizon = [1, 2, 4, 8, 16, 32, 64, 128]
+
+# Long FLCHAIN horizons; 1,024 realizes 1,008 steps.
+[workloads.panel-long]
+generator = "panel-v2"
+datasets = ["flchain"]
+n_trees = [500, 2000]
+max_depth = [8, 16]
+horizon = [256, 512, 1024]
+
+# Expedia: one click-probability model per (T, L), used to rank every test
+# session. It is not trained with a ranking objective.
+[workloads.ranking]
+generator = "ranking-sessions-v2"
+datasets = ["expedia"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+
+# The controlled size curve: one cohort of sessions with at least 32
+# candidates; each size is the first n candidates of the session's seeded order.
+[workloads.ranking-cohort]
+generator = "ranking-cohort-v2"
+datasets = ["expedia"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+min_candidates = 32
+sizes = [4, 8, 16, 32]
+
+# What-if: G scenarios for one entity, k perturbed features.
+[workloads.whatif-credit-core]
+generator = "whatif-v2"
+datasets = ["credit"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+k = [1, 4, 8]
+G = [4, 16, 128]
+
+[workloads.whatif-credit-full]
+generator = "whatif-v2"
+datasets = ["credit"]
+n_trees = [500]
+max_depth = [8]
+k = [1, 2, 4, 8]
+G = [4, 16, 64, 128]
+
+# The other datasets on their reference model (survival at horizon 16).
+[workloads.whatif-reference]
+generator = "whatif-v2"
+datasets = ["support", "flchain", "expedia"]
+n_trees = [500]
+max_depth = [8]
+horizon = [16]
+k = [1, 2, 4, 8]
+G = [4, 16, 64, 128]
+
+# The released credit scenario cells (LightGBM only, in their released layout
+# under artifacts/scenario_credit). Kept for the byte-identical check and the
+# released scenario runs; the factorial suite uses whatif-v2.
+[workloads.whatif-v1]
+generator = "whatif-v1"
+datasets = ["credit"]
+frameworks = ["lightgbm"]
+n_trees = [500]
+max_depth = [8]
+k = [1, 2, 4, 8]
+G = [4, 16, 64, 128]
+
+# --- suites --------------------------------------------------------------------
+
+[suites.factorial]
+description = "Every workload on every model, timed with every method."
+workloads = [
+    "panel",
+    "panel-long",
+    "ranking",
+    "ranking-cohort",
+    "whatif-credit-core",
+    "whatif-credit-full",
+    "whatif-reference",
+]
+
+# Ablations at the anchors (T, L, G): the survival panels at horizon G, and
+# Expedia's sessions at the anchor's (T, L).
+[suites.ablation]
+description = "Runtime and parse-time ablations at the anchors."
+anchors = [
+    [50, 4, 1],
+    [500, 8, 4],
+    [500, 8, 16],
+    [1000, 16, 32],
+    [500, 4, 16],
+    [500, 8, 64],
+    [500, 8, 128],
+]
+panel_datasets = ["support", "flchain"]
+ranking_datasets = ["expedia"]
+runtime_variants = [
+    [],
+    ["disable_varying_precompute"],
+    ["disable_varying_precompute", "disable_monotonic"],
+    ["disable_unsplit"],
+    ["disable_unsplit", "disable_varying_precompute"],
+    ["disable_predicate_sweep"],
+    ["disable_exact_sums"],
+]
+# LoadOptions, one at a time everywhere; all 8 combinations of the first
+# three at the interaction anchors. disable_prefix_grouping is prefix_depth 0.
+# Disabling dedup keeps bitset interning on.
+parse_flags = [
+    "disable_tree_ordering",
+    "disable_prefix_grouping",
+    "disable_bitset_intern",
+    "disable_predicate_dedup",
+]
+interaction_anchors = [[500, 8, 16], [1000, 16, 32]]
+
+[suites.scenario-v1]
+description = "The released credit scenario cells (whatif-v1)."
+workloads = ["whatif-v1"]
