@@ -19,6 +19,8 @@
 #   suites            — space-separated suites from experiments/grids.toml
 #   layout_check      — "true": also time TreeWalker on the acceptance cells in a
 #                       build with 64-byte function alignment
+#   gcs_gate_uri      — gs:// path to a candidate's source archive: instead of the
+#                       suites' runs, the kernel gate (below); empty for none
 #   apt_snapshot      — Ubuntu archive snapshot every apt operation uses; empty
 #                       for the live archive
 #   machine_type, image, turbo_mode, pmu_level — recorded in run.json
@@ -39,6 +41,7 @@ ROLE="${role}"
 GIT_REF="${git_ref}"
 SUITES="${suites}"
 LAYOUT_CHECK="${layout_check}"
+GCS_GATE_URI="${gcs_gate_uri}"
 APT_SNAPSHOT="${apt_snapshot}"
 MACHINE_TYPE="${machine_type}"
 IMAGE="${image}"
@@ -276,13 +279,64 @@ as_bench "mkdir -p experiments/data/runs"
       "$REPO_DIR/experiments/data/runs" "$GCS_RESULTS_BASE/runs" >/dev/null 2>&1 || true
   done ) &
 SYNC_PID=$!
-# A run exits nonzero when a cell fails; the cell's diagnostics are in failed/.
-# Keep going, so one cell cannot cost the later suites or the results upload.
-for suite in $SUITES; do
-  twx run --suite "$suite" --run-id "$suite-$ARCH_LABEL" --core 0 \
-    --system-info "$SYSTEM_INFO" --require-pmu \
-    || log "Run $suite: some cells failed; see runs/$suite-$ARCH_LABEL/failed/"
-done
+if [ -n "$GCS_GATE_URI" ]; then
+  # The kernel gate: TreeWalker built from this ref (A) and from the candidate (B),
+  # timed in alternating processes, A B B A, three times, with default function
+  # alignment and with every function aligned to 64 bytes. Production only, on the
+  # kernel study's cells. A slowdown counts only if it persists under fixed
+  # alignment.
+  GATE=$BENCH_HOME/gate
+  as_bench "mkdir -p '$GATE/src'"
+  gcloud storage cp "$GCS_GATE_URI" /tmp/gate.tar.gz
+  su - $BENCH_USER -c "tar xzf /tmp/gate.tar.gz -C '$GATE/src'"
+  rm -f /tmp/gate.tar.gz
+  log "Gate: A $(cat "$REPO_DIR/experiments/SOURCE_COMMIT"), B $(cat "$GATE/src/experiments/SOURCE_COMMIT")"
+  for align in default align6; do
+    flags="-C target-cpu=native"
+    [ "$align" = align6 ] && flags="$flags -C llvm-args=-align-all-functions=6"
+    for side in A B; do
+      src=$REPO_DIR
+      [ "$side" = B ] && src=$GATE/src
+      as_bench "cd '$src' && RUSTFLAGS='$flags' cargo build -q --release --bin sweep_bench \
+        --manifest-path experiments/benchmarks/Cargo.toml --target-dir '$GATE/target-$side' \
+        --features external-bench,pmu && cp '$GATE/target-$side/release/sweep_bench' \
+        '$GATE/sweep_bench-$side-$align'"
+    done
+  done
+  # suite:glob pairs; noglob, so the patterns reach sweep_bench unexpanded.
+  set -f
+  GATE_CELLS="acceptance:*_md4* ablation:support/nt50_md4_h1/lightgbm/*
+    ablation:support/nt500_md8_h16/* ablation:support/nt1000_md16_h32/*
+    ablation:expedia/nt500_md8/lightgbm/*"
+  for align in default align6; do
+    for round in 1 2 3; do
+      pos=0
+      for side in A B B A; do
+        pos=$((pos + 1))
+        i=0
+        for spec in $GATE_CELLS; do
+          i=$((i + 1))
+          suite=$${spec%%:*}
+          glob=$${spec#*:}
+          as_bench "taskset -c 0 '$GATE/sweep_bench-$side-$align' run \
+            experiments/artifacts/manifests/$suite.json \
+            --output-dir experiments/data/runs/gate-$align-$round-$pos$side-$i-$ARCH_LABEL \
+            --cells '$glob' --only treewalker --system-info '$SYSTEM_INFO' --require-pmu" \
+            > /dev/null || log "gate $align $round $pos$side $i: failed"
+        done
+      done
+    done
+  done
+  set +f
+else
+  # A run exits nonzero when a cell fails; the cell's diagnostics are in failed/.
+  # Keep going, so one cell cannot cost the later suites or the results upload.
+  for suite in $SUITES; do
+    twx run --suite "$suite" --run-id "$suite-$ARCH_LABEL" --core 0 \
+      --system-info "$SYSTEM_INFO" --require-pmu \
+      || log "Run $suite: some cells failed; see runs/$suite-$ARCH_LABEL/failed/"
+  done
+fi
 kill "$SYNC_PID" 2>/dev/null || true
 if [ "$LAYOUT_CHECK" = "true" ]; then
   # Layout sensitivity: the same kernel, instruction-identical, in a build whose
