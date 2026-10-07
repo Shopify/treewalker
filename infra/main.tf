@@ -23,6 +23,25 @@ resource "terraform_data" "source_archive" {
   }
 }
 
+# The kernel gate's candidate, archived and uploaded like the source.
+resource "terraform_data" "gate_archive" {
+  count            = var.gate_ref == "" ? 0 : 1
+  triggers_replace = [timestamp()]
+
+  provisioner "local-exec" {
+    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/gate.tar.gz ${var.gate_ref}"
+  }
+}
+
+resource "google_storage_bucket_object" "gate_source" {
+  count  = var.gate_ref == "" ? 0 : 1
+  name   = "gate-${random_id.suffix.hex}-${var.gate_ref}.tar.gz"
+  bucket = google_storage_bucket.bench.name
+  source = "${path.module}/.terraform/gate.tar.gz"
+
+  depends_on = [terraform_data.gate_archive]
+}
+
 locals {
   expedia_parquet = var.expedia_parquet != "" ? var.expedia_parquet : "${path.module}/../experiments/data/expedia.parquet"
 }
@@ -129,6 +148,7 @@ resource "google_compute_instance" "bench" {
       role              = each.value.role
       suites            = join(" ", var.suites)
       layout_check      = var.layout_check
+      gcs_gate_uri      = var.gate_ref == "" ? "" : "gs://${google_storage_bucket.bench.name}/${google_storage_bucket_object.gate_source[0].name}"
       apt_snapshot      = var.apt_snapshot
       machine_type      = each.value.machine_type
       image             = each.value.image

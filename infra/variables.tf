@@ -34,6 +34,12 @@ variable "apt_snapshot" {
   default     = "20261005T111000Z"
 }
 
+variable "gate_ref" {
+  description = "A candidate ref for the kernel gate: instead of the suites' runs, time TreeWalker built from git_ref (A) and from this ref (B) in alternating processes, with default and 64-byte function alignment; empty for none"
+  type        = string
+  default     = ""
+}
+
 variable "cache_bucket" {
   description = "An existing bucket that keeps prepared models and compiled baselines across deployments, so a rerun does not retrain or recompile; empty for none. Create it outside Terraform, so destroy leaves it."
   type        = string
