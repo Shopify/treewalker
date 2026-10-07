@@ -148,6 +148,7 @@ resource "google_compute_instance" "bench" {
       role              = each.value.role
       suites            = join(" ", var.suites)
       layout_check      = var.layout_check
+      diagnostic        = var.diagnostic
       gcs_gate_uri      = var.gate_ref == "" ? "" : "gs://${google_storage_bucket.bench.name}/${google_storage_bucket_object.gate_source[0].name}"
       apt_snapshot      = var.apt_snapshot
       machine_type      = each.value.machine_type
