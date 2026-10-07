@@ -25,8 +25,22 @@ def git_source(repo: Path) -> dict[str, Any]:
     return {"commit": git("rev-parse", "HEAD") or None, "dirty": bool(git("status", "--porcelain"))}
 
 
+def files_intact(cell_dir: Path, files: dict[str, Any], hashes: dict[Path, str | None]) -> bool:
+    """Whether every file a cell records still has its recorded hash. Files the
+    cells share, such as a model or a workload's test data, are hashed once per
+    manifest, through ``hashes``."""
+    for rec in files.values():
+        p = (cell_dir / rec["path"]).resolve()
+        if p not in hashes:
+            hashes[p] = fm.sha256_file(p) if p.is_file() else None
+        if hashes[p] != rec["sha256"]:
+            return False
+    return True
+
+
 def build(paths: Paths, suite: Suite) -> dict[str, Any]:
     art = paths.artifacts
+    hashes: dict[Path, str | None] = {}
     models: dict[str, dict[str, Any]] = {}
     workloads: dict[str, dict[str, Any]] = {}
     cells = []
@@ -45,6 +59,11 @@ def build(paths: Paths, suite: Suite) -> dict[str, Any]:
             cells.append({**entry, "status": "missing"})
             continue
         doc = fm.read_cell(doc_path)
+        # A ready cell stays ready only while its files are the ones it recorded:
+        # rebuilding another cell can rewrite a file they share.
+        status = doc["status"]
+        if status == "ready" and not files_intact(cell_dir, doc["files"], hashes):
+            status = "stale"
         model_dir = (cell_dir / doc["model"]["dir"]).resolve()
         model_id = str(model_dir.relative_to(art.resolve()))
         models.setdefault(model_id, {"id": model_id, "dir": model_id, "key": doc["model"]["key"]})
@@ -62,7 +81,7 @@ def build(paths: Paths, suite: Suite) -> dict[str, Any]:
         cells.append(
             {
                 **entry,
-                "status": doc["status"],
+                "status": status,
                 "key": doc["key"],
                 "model": model_id,
                 "workload": wkey,
