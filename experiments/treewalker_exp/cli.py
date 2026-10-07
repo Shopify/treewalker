@@ -285,6 +285,16 @@ def compile_baselines(
         raise typer.Exit(1)
 
 
+def sentinel_cell(doc):
+    """The sentinel's cell, when [run] names one and turns it on."""
+    from . import grids
+
+    run = grids.run_config(doc)
+    if not run.get("sentinel_cell") or not run.get("sentinel_every"):
+        return None
+    return grids.find_cell(doc, run["sentinel_cell"])
+
+
 def _compile_one(tool, fw_dir, threads, script, llc, clang, force) -> None:
     from . import baselines as bl
 

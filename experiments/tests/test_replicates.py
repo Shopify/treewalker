@@ -342,6 +342,8 @@ SUITES_AT_8F4A9F9 = {
     "factorial": (1094, "3f44ce977469023c798105506b818952f9daed43a7aa2a493c83ed83de5fe2cf"),
     "ablation": (36, "68ba9c8ec70bdf7d173e8fa88eeceaeb331eaf0b1da4d0ffbfa27064b5dccf42"),
     "scenario-v1": (16, "04d464a93b06089049b0e5b002c4f69c844440b014c0818714ad2ba498628075"),
+    "acceptance": (17, "44bdadcb250065276eca37972a656e537302d8e763998d8c356d960f3b3e5f3a"),
+    "smoke": (31, "30a667eb2b8be7abf433820b624ac530e2791f452d89aaf406dc52a8f17d0872"),
 }
 
 
@@ -377,6 +379,7 @@ def test_factorial_adds_the_replicates_and_expedia_filled():
     assert {(c.model.n_trees, c.model.max_depth) for c in filled} == {
         (t, d) for t in (50, 500, 1000, 2000) for d in (2, 4)
     }
+    assert all(s.plan_for(c)["methods"] == "factorial" for c in new)
 
 
 @pytest.mark.parametrize(

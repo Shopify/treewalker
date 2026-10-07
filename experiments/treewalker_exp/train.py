@@ -174,6 +174,66 @@ def gtil(tl_model: Any, X: np.ndarray) -> np.ndarray:
     return treelite.gtil.predict(tl_model, X).flatten().astype(np.float64)
 
 
+# The stage oracle samples whole groups, in a seeded order, until it has this
+# many rows or groups.
+ORACLE_ROWS = 512
+ORACLE_GROUPS = 64
+ORACLE_SEED = 20261004
+
+
+def oracle_groups(offsets: np.ndarray) -> list[int]:
+    """Groups the oracle covers: a seeded sample, in ascending order."""
+    sizes = np.diff(np.asarray(offsets, dtype=np.int64))
+    order = np.random.default_rng(ORACLE_SEED).permutation(len(sizes))
+    picked: list[int] = []
+    rows = 0
+    for g in order:
+        if rows >= ORACLE_ROWS or len(picked) >= ORACLE_GROUPS:
+            break
+        picked.append(int(g))
+        rows += int(sizes[g])
+    return sorted(picked)
+
+
+def oracle(tl_model: Any, X: np.ndarray, offsets: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+    """An independent oracle for TreeWalker's stages on a sample of groups.
+
+    ``tree_sum`` is ``math.fsum`` of Treelite GTIL's per-tree outputs, so it is the
+    correctly rounded leaf sum; ``raw_margin`` is the staged finalization recomputed
+    from it, ``tree_sum / divisor + base_score``, rounded at each step, with the
+    divisor and the margin-scale base score Treelite parsed. Returns a matrix of
+    (row, tree_sum, raw_margin) and the header the runner needs.
+    """
+    import math
+
+    import treelite
+
+    h = tl_model.get_header_accessor()
+    divisor = float(tl_model.num_tree) if int(h.get_field("average_tree_output")[0]) else 1.0
+    base_scores = np.asarray(h.get_field("base_scores"), dtype=np.float64)
+    if base_scores.size != 1:
+        raise ValueError(f"expected one base score, got {base_scores.size}")
+    base = float(base_scores[0])
+    groups = oracle_groups(offsets)
+    rows = np.concatenate([np.arange(offsets[g], offsets[g + 1], dtype=np.int64) for g in groups])
+    dtype = np.float32 if tl_model.input_type == "float32" else np.float64
+    per_tree = treelite.gtil.predict_per_tree(tl_model, np.asarray(X[rows], dtype=dtype), nthread=1)
+    per_tree = np.asarray(per_tree, dtype=np.float64).reshape(len(rows), tl_model.num_tree)
+    out = np.empty((len(rows), 3), dtype=np.float64)
+    for i, r in enumerate(rows):
+        tree_sum = math.fsum(per_tree[i].tolist())
+        out[i] = (float(r), tree_sum, tree_sum / divisor + base)
+    header = {
+        "groups": groups,
+        "divisor": divisor,
+        "base_score": base,
+        "postprocessor": str(h.get_field("postprocessor")),
+        "sigmoid_alpha": float(np.asarray(h.get_field("sigmoid_alpha"))[0]),
+        "source": f"math.fsum of Treelite GTIL {treelite.__version__} predict_per_tree",
+    }
+    return out, header
+
+
 def split_counts(framework: str, native: Path, n_features: int) -> np.ndarray:
     """How many splits each feature has in the model."""
     if framework == "lightgbm":
