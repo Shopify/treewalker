@@ -145,7 +145,7 @@ def prepare(
     force: Annotated[bool, typer.Option(help="Rebuild even when manifests match.")] = False,
     dry_run: Annotated[bool, typer.Option(help="List the models and cells only.")] = False,
     validate: Annotated[
-        bool, typer.Option(help="Check whatif-v1 cells with sweep_bench --validate.")
+        bool, typer.Option(help="Check the prepared cells with sweep_bench validate.")
     ] = False,
 ) -> None:
     """Train models and write each cell's data, references and cell.json."""
@@ -171,13 +171,13 @@ def prepare(
     print(f"prepared {report.models} models; cells {report.cells}", file=sys.stderr)
     failed = list(report.failed)
     if validate:
-        failed += _validate_scenario(paths, [c for c in cells if c.generator == "whatif-v1"])
+        failed += _validate(paths, cells)
     if failed:
         print(f"FAILED: {failed}", file=sys.stderr)
         raise typer.Exit(1)
 
 
-def _validate_scenario(paths, cells) -> list[str]:
+def _validate(paths, cells) -> list[str]:
     from . import bench
 
     if not cells:
@@ -185,9 +185,7 @@ def _validate_scenario(paths, cells) -> list[str]:
     binary = bench.build(paths)
     failed = []
     for c in cells:
-        ok, line = bench.validate_scenario_cell(
-            binary, c.model.dir(paths.artifacts) / c.framework, c.dir(paths.artifacts)
-        )
+        ok, line = bench.validate_cell(binary, c.dir(paths.artifacts))
         print(f"  {c.id}: {line}", file=sys.stderr)
         if not ok:
             failed.append(c.id)
@@ -373,9 +371,158 @@ def build_native(
 
 @app.command("build-bench")
 def build_bench(
-    features: Annotated[str, typer.Option(help="Cargo features.")] = "external-bench",
+    features: Annotated[str | None, typer.Option(help="Cargo features.")] = None,
+    rustflags: Annotated[str, typer.Option(help="RUSTFLAGS.")] = "-C target-cpu=native",
 ) -> None:
-    """Build sweep_bench (release, -C target-cpu=native)."""
+    """Build sweep_bench (release, -C target-cpu=native; hardware counters on Linux)."""
     from . import bench
 
-    print(bench.build(_paths(), features))
+    print(bench.build(_paths(), features or bench.FEATURES, rustflags))
+
+
+def _run_id(suite: str) -> str:
+    import platform
+    from datetime import UTC, datetime
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"{suite}-{platform.machine()}-{stamp}"
+
+
+@app.command()
+def preflight(
+    suite: Suites,
+    require_pmu: Annotated[bool, typer.Option(help="Fail without hardware counters.")] = False,
+) -> None:
+    """Resolve the suites' manifests and check them with sweep_bench preflight: which
+    methods are required and which optional, which variants are unsupported."""
+    import subprocess
+
+    from . import bench, grids
+    from . import manifest as mf
+
+    paths = _paths()
+    doc = grids.load(paths.grids)
+    binary = bench.build(paths)
+    ok = True
+    for name in suite:
+        out, _ = mf.write(paths, grids.suite(doc, name))
+        cmd = [str(binary), "preflight", str(out)] + (["--require-pmu"] if require_pmu else [])
+        ok &= subprocess.run(cmd, check=False).returncode == 0
+    raise typer.Exit(0 if ok else 1)
+
+
+@app.command()
+def run(
+    suite: Suites,
+    run_id: Annotated[str | None, typer.Option(help="Run directory name.")] = None,
+    cells: Annotated[str | None, typer.Option(help="Only cells matching this glob.")] = None,
+    core: Annotated[int | None, typer.Option(help="Pin to this core (taskset).")] = 0,
+    system_info: Annotated[
+        Path | None, typer.Option(help="JSON of host facts for run.json (image, turbo mode).")
+    ] = None,
+    require_pmu: Annotated[bool, typer.Option(help="Fail without hardware counters.")] = False,
+    only: Annotated[str | None, typer.Option(help="Only these methods, comma-separated.")] = None,
+    rustflags: Annotated[
+        str, typer.Option(help="RUSTFLAGS for sweep_bench, e.g. for the layout check.")
+    ] = "-C target-cpu=native",
+    set_: Annotated[
+        list[str] | None,
+        typer.Option("--set", help="Override a grids.toml [run] setting for this run: KEY=VALUE."),
+    ] = None,
+) -> None:
+    """Run suites with sweep_bench into experiments/data/runs/<run_id>/, one run per
+    suite. A rerun with the same run ID resumes: finished cells whose manifests
+    match are reused. The run settings, overrides included, are in run.json."""
+    import subprocess
+
+    from . import bench, grids
+    from . import manifest as mf
+
+    paths = _paths()
+    doc = grids.load(paths.grids)
+    overrides = tuple(set_ or ())
+    try:
+        grids.run_config(doc, overrides)
+    except ValueError as e:
+        raise typer.BadParameter(str(e), param_hint="--set") from None
+    binary = bench.build(paths, rustflags=rustflags)
+    failed = False
+    for name in suite:
+        out, _ = mf.write(paths, grids.suite(doc, name), overrides)
+        rid = run_id if run_id and len(suite) == 1 else _run_id(name)
+        run_dir = paths.runs / rid
+        cmd = [str(binary), "run", str(out), "--output-dir", str(run_dir)]
+        cmd += ["--cells", cells] if cells else []
+        cmd += ["--system-info", str(system_info)] if system_info else []
+        cmd += ["--require-pmu"] if require_pmu else []
+        cmd += ["--only", only] if only else []
+        print(f"{name}: {run_dir}", file=sys.stderr)
+        failed |= subprocess.run(bench.pinned(cmd, core), check=False).returncode != 0
+    raise typer.Exit(1 if failed else 0)
+
+
+@app.command("pilot-tl2cgen")
+def pilot_tl2cgen(
+    suite: Suites,
+    cell: CellIds = None,
+    files: Annotated[
+        list[str] | None, typer.Option(help="parallel_comp settings: trees, or a file count.")
+    ] = None,
+    workers: Annotated[int, typer.Option(help="Compile threads.")] = 8,
+) -> None:
+    """Time tl2cgen's parallel_comp settings on the selected cells' models.
+
+    The released recipe compiles one file per tree, so every tree is a call the
+    compiler cannot inline. Each setting is compiled next to the model as
+    tl2cgen_pc<N>.so and timed with sweep_bench cell (tl2cgen only, both modes).
+    Run it on the largest and a mid-size model, then set grids.toml [baselines]
+    tl2cgen_parallel_comp to the faster setting.
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    import polars as pl
+
+    from . import baselines as bl
+    from . import bench
+    from . import formats as fm
+    from . import manifest as mf
+
+    paths, _, cells = _cells(suite, None, None, None, None, cell)
+    runtime = mf.tl2cgen_runtime()
+    if runtime is None:
+        raise typer.BadParameter("no libtl2cgen: uv run --group baselines ...")
+    binary = bench.build(paths)
+    results = []
+    for c in cells:
+        fw_dir = c.model.dir(paths.artifacts) / c.framework
+        if c.framework not in ("lightgbm", "xgboost"):
+            continue
+        for setting in files or ["trees", "32"]:
+            n = setting if setting == "trees" else int(setting)
+            name = f"tl2cgen_pc{setting}.so"
+            rec = bl.compile_tl2cgen(fw_dir, workers, False, n, name)
+            out = Path(tempfile.mkdtemp(prefix="tl2cgen-pilot-"))
+            cmd = [str(binary), "cell", str(c.dir(paths.artifacts)), "--output-dir", str(out)]
+            cmd += ["--only", "tl2cgen", "--tl2cgen-lib", str(fw_dir / name)]
+            cmd += ["--tl2cgen-runtime", runtime["path"], "--no-hardware-counters"]
+            subprocess.run(bench.pinned(cmd, 0), check=True, capture_output=True)
+            hz = fm.read_json(out / "run.json")["timer"]["calibration"]["hz"]
+            s = pl.read_parquet(out / "cells" / "*" / "samples.parquet")
+            per_row = {
+                r["mode"]: r["ticks"] / r["rows"] / hz * 1e6
+                for r in s.group_by("mode")
+                .agg(pl.col("ticks").sum(), pl.col("rows").sum())
+                .iter_rows(named=True)
+            }
+            row = {
+                "cell": c.id,
+                "parallel_comp": rec["effective"]["source_files"],
+                "setting": setting,
+                "compile_seconds": rec["seconds"],
+                "us_per_row": per_row,
+            }
+            results.append(row)
+            print(json.dumps(row))
+    fm.write_json(paths.artifacts / "pilots" / "tl2cgen.json", results)

@@ -3,24 +3,34 @@ name = "treewalker-bench"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "TreeWalker benchmark harness and artifact correctness tests"
+description = "TreeWalker benchmark runner and artifact correctness tests"
 license.workspace = true
 publish = false
 
 [features]
-research = ["treewalker-gbdt/research"]  # now only gates the slow artifact suite, correctness.rs
-quickscorer-bench = ["dep:quickscorer"]  # QuickScorer baseline in the legacy CLI
-external-bench = ["dep:libloading", "dep:quickscorer"]  # C FFI baselines + QuickScorer
+research = []  # gates the slow artifact suite, correctness.rs; the runner always uses the research API
+quickscorer-bench = ["dep:quickscorer"]  # the QuickScorer baseline
+external-bench = ["dep:libloading", "quickscorer-bench"]  # C baselines (LightGBM, XGBoost, tl2cgen, lleaves) and QuickScorer
+pmu = ["dep:perf-event"]  # hardware counters through perf_event; Linux only, a no-op elsewhere
 
 [dependencies]
 treewalker-gbdt = { path = "../..", features = ["research"] }
 serde.workspace = true
-simd-json.workspace = true
+serde_json = "1.0.151"
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+sha2 = "0.11.0"
+arrow-array = "60"
+arrow-schema = "60"
+parquet = { version = "60", default-features = false, features = ["arrow", "zstd"] }
 quickscorer = { version = "=0.1.0", git = "https://github.com/leomanne/quickscorer-rs.git", rev = "8314d03b5ef2d15385f8d0cd86d8f281d11b2d49", optional = true }
 libloading = { version = "0.9", optional = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+perf-event = { version = "0.4.9", optional = true }
 
 [dev-dependencies]
 ndarray = "0.17"

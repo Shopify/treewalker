@@ -65,6 +65,11 @@ class Paths:
         return self.artifacts_override or self.experiments / "artifacts"
 
     @property
+    def runs(self) -> Path:
+        """Run directories: run.json and per-cell Parquet tables."""
+        return self.data / "runs"
+
+    @property
     def manifests(self) -> Path:
         return self.artifacts / "manifests"
 

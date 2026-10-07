@@ -1,0 +1,4 @@
+# Raw measurements live in git-lfs.
+experiments/data/**/*.parquet filter=lfs diff=lfs merge=lfs -text
+# git archive writes the commit here, so a run from an archive knows its source.
+experiments/SOURCE_COMMIT export-subst
