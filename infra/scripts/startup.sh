@@ -47,6 +47,12 @@ GCS_GATE_URI="${gcs_gate_uri}"
 DIAGNOSTIC="${diagnostic}"
 APT_SNAPSHOT="${apt_snapshot}"
 MACHINE_TYPE="${machine_type}"
+# The machine type whose compiled baselines this VM uses and fills: its own, or
+# a benchmark machine's for a compile-only VM of the same CPU.
+CACHE_MACHINE="${cache_machine}"
+EXPECTED_CPU="${expected_cpu}"
+COMPILE_ONLY="${compile_only}"
+TL2CGEN_THREADS="${tl2cgen_threads}"
 IMAGE="${image}"
 TURBO_MODE="${turbo_mode}"
 PMU_LEVEL="${pmu_level}"
@@ -215,13 +221,28 @@ else
   chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
 fi
 # Push the compiled baselines even when a compile fails, so a rerun keeps them.
-cache_pull "compiled/$MACHINE_TYPE"
+# A VM filling another machine type's cache must have that machine's CPU: the
+# host CPU is part of each library's compile identity.
+if [ -n "$EXPECTED_CPU" ]; then
+  HOST_CPU=$(as_bench "uv run --group baselines python -c 'from treewalker_exp.baselines import host_cpu; print(host_cpu())'")
+  [ "$HOST_CPU" = "$EXPECTED_CPU" ] || fail "Host CPU '$HOST_CPU' is not the expected '$EXPECTED_CPU'"
+  log "Host CPU: $HOST_CPU, as expected"
+fi
+cache_pull "compiled/$CACHE_MACHINE"
 COMPILED_OK=true
 for suite in $SUITES; do
-  twx compile-baselines --suite "$suite" || COMPILED_OK=false
+  twx compile-baselines --suite "$suite" --threads "$TL2CGEN_THREADS" || COMPILED_OK=false
 done
-cache_push "compiled/$MACHINE_TYPE" "$ONLY_COMPILED_RE"
+cache_push "compiled/$CACHE_MACHINE" "$ONLY_COMPILED_RE"
 $COMPILED_OK || fail "Compiling the baselines failed"
+if [ "$COMPILE_ONLY" = "true" ]; then
+  log "Compile only: the baselines for $SUITES are in $GCS_CACHE_URI/compiled/$CACHE_MACHINE"
+  mkdir -p "$RESULTS_DIR"
+  echo "$(date -Iseconds)" > "$RESULTS_DIR/DONE"
+  gcloud storage cp -r "$RESULTS_DIR/*" "$GCS_RESULTS_BASE/"
+  log "===== ALL PHASES COMPLETE ====="
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Phase 6: The machine, tuned and described
