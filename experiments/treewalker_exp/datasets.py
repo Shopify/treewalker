@@ -300,6 +300,15 @@ def feature_names(cov: Covariates) -> list[str]:
     return [sanitize(c) for c in cov.names] + TV_FEATURE_NAMES
 
 
+def train_patients(cov: Covariates, edges: np.ndarray) -> np.ndarray:
+    """Each row's patient in ``expand_train``'s expansion, as an index into
+    ``cov``; the same arithmetic as there."""
+    assert cov.duration is not None
+    horizon = len(edges) - 1
+    last = np.clip(np.digitize(cov.duration, edges[1:]), 0, horizon - 1)
+    return np.repeat(np.arange(len(last)), last + 1)
+
+
 def expand_train(
     split: SurvivalSplit, edges: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, Covariates]:
@@ -504,6 +513,67 @@ def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) 
         df.filter(~is_test).sort("srch_id"),
         df.filter(is_test).sort("srch_id"),
     )
+
+
+# expedia-filled: Expedia with every missing value encoded as an ordinary number
+# below its column's training minimum, so methods without missing-value handling
+# (QuickScorer) compute the same function as the rest.
+FILL_RULE = (
+    "a missing value becomes its column's training-split minimum minus max(1, |minimum|), "
+    "in train and test alike; test values below it are kept"
+)
+
+
+def fill_constants(train_X: np.ndarray, names: list[str]) -> np.ndarray:
+    """Per column, the training split's minimum minus max(1, |minimum|): below
+    every training value and distinct from the minimum after the f32 conversion
+    XGBoost and QuickScorer apply."""
+    fills = np.empty(train_X.shape[1], dtype=np.float64)
+    for j in range(train_X.shape[1]):
+        col = train_X[:, j]
+        col = col[~np.isnan(col)]
+        if len(col) == 0:
+            raise ValueError(f"{names[j]}: no observed training value to fill below")
+        lo = float(col.min())
+        fill = lo - max(1.0, abs(lo))
+        in_f32 = abs(fill) <= float(np.finfo(np.float32).max)
+        if not (in_f32 and np.float32(fill) < np.float32(lo)):
+            raise ValueError(f"{names[j]}: fill {fill} is not a finite f32 below the minimum {lo}")
+        fills[j] = fill
+    return fills
+
+
+def fill_missing(X: np.ndarray, fills: np.ndarray) -> np.ndarray:
+    """``X`` with each missing value replaced by its column's constant."""
+    out = np.array(X, dtype=np.float64, copy=True)
+    rows, cols = np.nonzero(np.isnan(out))
+    out[rows, cols] = fills[cols]
+    return out
+
+
+# Seed replicates: the released parameters on a seeded sample of the training
+# split's entities, seeded by (dataset seed, REPLICATE_STREAM, k). The stream tag
+# keeps the draws apart from the dataset's other streams, such as Expedia's
+# candidate order (dataset seed, 1).
+REPLICATE_STREAM = 2
+
+
+def replicate_seed(dataset_seed: int, k: int) -> list[int]:
+    return [dataset_seed, REPLICATE_STREAM, k]
+
+
+def replicate_size(n: int, fraction: float) -> int:
+    """How many of ``n`` entities a replicate keeps: ``fraction`` of them, rounded."""
+    if not 0.0 < fraction < 1.0:
+        raise ValueError(f"replicate fraction {fraction} is not in (0, 1)")
+    return round(n * fraction)
+
+
+def sample_entities(n: int, fraction: float, seed: list[int]) -> np.ndarray:
+    """A seeded sample of ``replicate_size(n, fraction)`` of ``n`` entities,
+    without replacement, as ascending indices."""
+    keep = replicate_size(n, fraction)
+    return np.sort(np.random.default_rng(seed).choice(n, keep, replace=False))
 
 
 def session_offsets(srch_id: np.ndarray) -> np.ndarray:

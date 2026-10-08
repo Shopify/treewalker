@@ -92,6 +92,53 @@ horizon = [16]
 k = [1, 2, 4, 8]
 G = [4, 16, 64, 128]
 
+# Seed replicates. Training has no row or feature subsampling, so it is
+# deterministic and a seed alone changes nothing. Replicate k (1-4) trains with
+# the released parameters on a sample of exactly replicate_fraction of the
+# training split's entities (patients, sessions, applicants), without
+# replacement, seeded by (dataset seed, k); its time bins and test data are the
+# released model's, so it times the released cell's groups. Model IDs end in
+# _r<k>. At three anchors, both frameworks: SUPPORT's panel at T=500 L=4 h16,
+# credit's what-if at T=500 L=4 k4 G16 (the features the released model splits
+# on most), and Expedia's sessions at T=500 L=8.
+[workloads.panel-replicates]
+generator = "panel-v2"
+datasets = ["support"]
+n_trees = [500]
+max_depth = [4]
+horizon = [16]
+replicates = [1, 2, 3, 4]
+replicate_fraction = 0.8
+
+[workloads.whatif-credit-replicates]
+generator = "whatif-v2"
+datasets = ["credit"]
+n_trees = [500]
+max_depth = [4]
+k = [4]
+G = [16]
+replicates = [1, 2, 3, 4]
+replicate_fraction = 0.8
+
+[workloads.ranking-replicates]
+generator = "ranking-sessions-v2"
+datasets = ["expedia"]
+n_trees = [500]
+max_depth = [8]
+replicates = [1, 2, 3, 4]
+replicate_fraction = 0.8
+
+# expedia-filled: the Expedia split with every missing value encoded, before
+# training, as its column's training minimum minus max(1, |minimum|), the same
+# constant in train and test. QuickScorer has no missing-value handling, so it
+# computes these models' function; trees of at most 16 leaves fit its 128. The
+# sessions, their order and the varying features are Expedia's.
+[workloads.ranking-filled]
+generator = "ranking-sessions-v2"
+datasets = ["expedia-filled"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4]
+
 # The released credit scenario cells (LightGBM only, in their released layout
 # under artifacts/scenario_credit). Kept for the byte-identical check and the
 # released scenario runs; the factorial suite uses whatif-v2.
@@ -116,6 +163,10 @@ workloads = [
     "whatif-credit-core",
     "whatif-credit-full",
     "whatif-reference",
+    "panel-replicates",
+    "whatif-credit-replicates",
+    "ranking-replicates",
+    "ranking-filled",
 ]
 
 # Ablations at the anchors (T, L, G): the survival panels at horizon G, and

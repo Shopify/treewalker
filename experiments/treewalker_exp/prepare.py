@@ -110,6 +110,15 @@ class TrainData:
     horizon: dict[str, int] | None
     sha256: str  # of train_data.bin: features plus the label column
     extra: dict[str, Any] = field(default_factory=dict)
+    # Fields only some models' identities have (IDENTITY_EXTRAS), added only when
+    # present, so every other model keeps its key.
+    identity: dict[str, Any] = field(default_factory=dict)
+
+
+# replicate: a seed replicate's entity sample; missing_values: expedia-filled's encoding.
+IDENTITY_EXTRAS = ("replicate", "missing_values")
+# Datasets built from the Expedia split, one session per group.
+RANKING = ("expedia", "expedia-filled")
 
 
 class Context:
@@ -126,7 +135,8 @@ class Context:
         self._survival: dict[str, ds.SurvivalSplit] = {}
         self._train: dict[tuple, TrainData] = {}
         self._ranking: ds.RankingSplit | None = None
-        self._sessions: wl.Workload | None = None
+        self._fills: tuple[np.ndarray, dict[str, Any]] | None = None
+        self._sessions: dict[str, wl.Workload] = {}
         self._credit: ds.CreditSplit | None = None
         self._draws: dict[tuple, wl.WhatIfDraws] = {}
         self._tl: dict[Path, Any] = {}
@@ -148,10 +158,45 @@ class Context:
             self._credit = ds.split_credit(self.paths)
         return self._credit
 
-    def sessions(self) -> wl.Workload:
-        if self._sessions is None:
-            self._sessions = wl.ranking_sessions(self.ranking())
-        return self._sessions
+    def expedia_fills(self) -> tuple[np.ndarray, dict[str, Any]]:
+        """expedia-filled's constants, one per feature, from the training split,
+        and their record: the rule, the constants of the columns with missing
+        values, and how many each split has."""
+        if self._fills is None:
+            r = self.ranking()
+            names = list(ds.EXPEDIA_FEATURES)
+            train = r.train_df.select(names).to_numpy().astype(np.float64)
+            test = r.test_df.select(names).to_numpy().astype(np.float64)
+            fills = ds.fill_constants(train, names)
+            n_train, n_test = np.isnan(train).sum(axis=0), np.isnan(test).sum(axis=0)
+            cols = [j for j in range(len(names)) if n_train[j] or n_test[j]]
+            record = {
+                "rule": ds.FILL_RULE,
+                "fill": {names[j]: float(fills[j]) for j in cols},
+                "missing": {
+                    "train": {names[j]: int(n_train[j]) for j in cols},
+                    "test": {names[j]: int(n_test[j]) for j in cols},
+                },
+            }
+            self._fills = fills, record
+        return self._fills
+
+    def sessions(self, dataset: str = "expedia") -> wl.Workload:
+        """Every test session; expedia-filled's are Expedia's with the missing
+        values filled, in the same order, with the same walker config."""
+        if dataset not in self._sessions:
+            if dataset == "expedia":
+                w = wl.ranking_sessions(self.ranking())
+            elif dataset == "expedia-filled":
+                base = self.sessions("expedia")
+                fills, record = self.expedia_fills()
+                meta = {**base.meta, "missing_values": record}
+                X = ds.fill_missing(base.X, fills)
+                w = wl.Workload(X, base.offsets, dict(base.config), base.entities, meta)
+            else:
+                raise ValueError(f"{dataset} has no sessions")
+            self._sessions[dataset] = w
+        return self._sessions[dataset]
 
     def tl_model(self, bin_path: Path) -> Any:
         import treelite
@@ -161,10 +206,15 @@ class Context:
         return self._tl[bin_path]
 
     def train_data(self, model: Model) -> TrainData:
-        key = (model.dataset, model.horizon)
+        key = (model.dataset, model.horizon, model.replicate, model.replicate_fraction)
         source: dict[str, Any]
         if key in self._train:
             return self._train[key]
+        if model.replicate:
+            td = self.replicate_data(model)
+            self._train[key] = td
+            return td
+        identity: dict[str, Any] = {}
         if model.dataset in SURVIVAL:
             assert model.horizon is not None
             split = self.survival(model.dataset)
@@ -175,9 +225,12 @@ class Context:
             source = ds.source_record(model.dataset)
             horizon = {"requested": model.horizon, "realized": len(edges) - 1}
             extra = {"edges": edges, "train_cov": cov}
-        elif model.dataset == "expedia":
+        elif model.dataset in RANKING:
             r = self.ranking()
             X = r.train_df.select(ds.EXPEDIA_FEATURES).to_numpy().astype(np.float64)
+            if model.dataset == "expedia-filled":
+                fills, identity["missing_values"] = self.expedia_fills()
+                X = ds.fill_missing(X, fills)
             y = r.train_df[ds.EXPEDIA_LABEL].to_numpy().astype(np.float64)
             names, cat = list(ds.EXPEDIA_FEATURES), []
             split_rec = {
@@ -193,19 +246,69 @@ class Context:
                 "matches_paper": r.fingerprint_ok,
             }
             horizon, extra = None, {}
-        else:
+        elif model.dataset == "credit":
             c = self.credit()
             X, y = c.train_X, c.train_y
             names, cat = list(ds.CREDIT_FEATURES), []
             split_rec = {"seed": c.seed, "test_frac": c.test_frac, "unit": "row"}
             source = ds.source_record("credit")
             horizon, extra = None, {}
+        else:
+            raise ValueError(f"unknown dataset {model.dataset}")
         sha = hashlib.sha256(matrix_bytes(np.column_stack([X, y]))).hexdigest()
-        td = TrainData(X, y, names, cat, split_rec, source, horizon, sha, extra)
+        td = TrainData(X, y, names, cat, split_rec, source, horizon, sha, extra, identity)
         self._train[key] = td
         return td
 
+    def train_entities(self, model: Model, td: TrainData) -> np.ndarray:
+        """Each training row's entity: patient, session or row."""
+        if model.dataset in SURVIVAL:
+            return ds.train_patients(td.extra["train_cov"], td.extra["edges"])
+        if model.dataset in RANKING:
+            return self.ranking().train_df["srch_id"].to_numpy().astype(np.int64)
+        return np.arange(len(td.X), dtype=np.int64)
+
+    def replicate_data(self, model: Model) -> TrainData:
+        """A seed replicate's training data: the released model's rows of a seeded
+        sample of the training split's entities, without replacement. The split,
+        the survival time bins and the test data are the released model's."""
+        released = self.train_data(model.released)
+        rows = self.train_entities(model.released, released)
+        if len(rows) != len(released.X):
+            raise AssertionError(f"{model.id}: {len(rows)} entity labels, {len(released.X)} rows")
+        entities = np.unique(rows)
+        seed = ds.replicate_seed(int(released.split["seed"]), model.replicate)
+        chosen = entities[ds.sample_entities(len(entities), model.replicate_fraction, seed)]
+        keep = np.isin(rows, chosen)
+        X, y = released.X[keep], released.y[keep]
+        sha = hashlib.sha256(matrix_bytes(np.column_stack([X, y]))).hexdigest()
+        replicate = {
+            "index": model.replicate,
+            "fraction": model.replicate_fraction,
+            "seed": seed,
+            "unit": released.split["unit"],
+            "entities": len(entities),
+            "sampled": len(chosen),
+            "rows": int(keep.sum()),
+            "released_train_data_sha256": released.sha256,
+        }
+        return TrainData(
+            X,
+            y,
+            released.names,
+            released.cat,
+            released.split,
+            released.source,
+            released.horizon,
+            sha,
+            released.extra,
+            {**released.identity, "replicate": replicate},
+        )
+
     def whatif_draws(self, model: Model, td: TrainData) -> wl.WhatIfDraws:
+        if model.replicate:  # a replicate times the released model's cells
+            model = model.released
+            td = self.train_data(model)
         horizon = td.horizon["realized"] if td.horizon else None
         key = (model.dataset, horizon)
         if key in self._draws:
@@ -227,7 +330,7 @@ class Context:
             d = wl.whatif_v2_draws(
                 "expedia", test, np.arange(len(test)), td.X, pool, td.names, None
             )
-        else:
+        elif model.dataset == "credit":
             c = self.credit()
             d = wl.whatif_v2_draws(
                 "credit",
@@ -238,6 +341,8 @@ class Context:
                 td.names,
                 None,
             )
+        else:
+            raise ValueError(f"whatif-v2 has no draws for {model.dataset}")
         self._draws[key] = d
         return d
 
@@ -268,6 +373,7 @@ def model_identity(model: Model, fw: str, td: TrainData) -> dict[str, Any]:
         "feature_order": td.names,
         "libraries": tr.library_versions(fw),
         "train_data_sha256": td.sha256,
+        **{k: td.identity[k] for k in IDENTITY_EXTRAS if k in td.identity},
     }
 
 
@@ -427,18 +533,26 @@ def build_workload(ctx: Context, cell: Cell, td: TrainData, mdoc: dict[str, Any]
             w.meta["horizon"] = td.horizon
             return write_workload(w, model_dir)
         case "ranking-sessions-v2":
-            return write_workload(ctx.sessions(), model_dir)
+            return write_workload(ctx.sessions(cell.model.dataset), model_dir)
         case "ranking-cohort-v2":
-            subsets = wl.ranking_cohort(ctx.sessions(), p["min_candidates"], [p["size"]])
+            sessions = ctx.sessions(cell.model.dataset)
+            subsets = wl.ranking_cohort(sessions, p["min_candidates"], [p["size"]])
             return write_workload(
                 subsets[p["size"]], art / cell.model.dataset / "workloads" / cell.workload_id
             )
         case "whatif-v2":
             draws = ctx.whatif_draws(cell.model, td)
-            native = model_dir / cell.framework / tr.NATIVE_NAME[cell.framework]
+            # A replicate times its released cell's data: the features are the
+            # released model's most-split ones, so that model must exist.
+            released = cell.model.released
+            if cell.model.replicate:
+                ensure_model(ctx, released, cell.framework, ctx.train_data(released), False)
+            native = released.dir(art) / cell.framework / tr.NATIVE_NAME[cell.framework]
             counts = tr.split_counts(cell.framework, native, len(td.names))
             features = wl.whatif_v2_features(draws, counts, p["k"])
             w = wl.whatif_v2(draws, features, p["k"], p["G"])
+            if cell.model.replicate:
+                w.meta["perturbation"]["ranked_by"] = f"{released.id}/{cell.framework}"
             if td.horizon:
                 w.meta["horizon"] = td.horizon
             w.meta["perturbation"]["split_counts"] = {
@@ -616,6 +730,7 @@ def ensure_cell(
         "seeds": {"split": mdoc["split"]["seed"], **w.meta.get("seeds", {})},
         "split": mdoc["split"],
         "train": mdoc["train"],
+        **{k: mdoc[k] for k in IDENTITY_EXTRAS if k in mdoc},
         "libraries": mdoc["libraries"],
         "model": {
             "key": mdoc["key"],
