@@ -379,6 +379,12 @@ if [ "$LAYOUT_CHECK" = "true" ]; then
     --rustflags "'-C target-cpu=native -C llvm-args=-align-all-functions=6'" \
     || log "Layout check (align64): some cells failed"
 fi
+# One Parquet file per table per run, verified against the cells, which it then
+# deletes. The bucket keeps the per-cell copies made while the suites ran; a run
+# that fails to pack keeps its cells, and they are uploaded instead.
+for run in "$REPO_DIR"/experiments/data/runs/*/; do
+  twx pack "$run" --remove || log "Pack $(basename "$run"): failed; uploading its cells"
+done
 
 # ---------------------------------------------------------------------------
 # Phase 8: Results
