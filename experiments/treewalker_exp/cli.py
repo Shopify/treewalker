@@ -393,6 +393,25 @@ def validation_readout(
 
 
 @app.command()
+def pack(
+    run_dirs: Annotated[
+        list[Path], typer.Argument(help="Finished runs: experiments/data/runs/<run_id>")
+    ],
+    remove: Annotated[
+        bool, typer.Option(help="Delete the per-cell directories once the packed tables verify.")
+    ] = False,
+    level: Annotated[int, typer.Option(help="zstd level.")] = 9,
+) -> None:
+    """One Parquet file per table and one cells.json per run, each table verified against
+    its cells; summarize, validation-readout and budget read packed runs only."""
+    from . import pack as pk
+
+    for run_dir in run_dirs:
+        for line in pk.pack_run(run_dir, remove=remove, level=level):
+            print(line, flush=True)
+
+
+@app.command()
 def summarize(
     run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
     reference: Annotated[str, typer.Option(help="The method speedups are against.")] = "treewalker",
@@ -512,6 +531,7 @@ def pilot_tl2cgen(
     from . import bench
     from . import formats as fm
     from . import manifest as mf
+    from . import pack as pk
 
     paths, _, cells = _cells(suite, None, None, None, None, cell)
     runtime = mf.tl2cgen_runtime()
@@ -533,7 +553,8 @@ def pilot_tl2cgen(
             cmd += ["--tl2cgen-runtime", runtime["path"], "--no-hardware-counters"]
             subprocess.run(bench.pinned(cmd, 0), check=True, capture_output=True)
             hz = fm.read_json(out / "run.json")["timer"]["calibration"]["hz"]
-            s = pl.read_parquet(out / "cells" / "*" / "samples.parquet")
+            pk.pack_run(out)
+            s = pl.read_parquet(out / "samples.parquet")
             per_row = {
                 r["mode"]: r["ticks"] / r["rows"] / hz * 1e6
                 for r in s.group_by("mode")

@@ -1,11 +1,11 @@
-"""summarize and validation-readout end to end, on a small Linux-like run with
+"""pack, summarize and validation-readout end to end, on a small Linux-like run with
 counters and XGBoost children (rev-opus n44, round 9)."""
 
 from pathlib import Path
 
 import polars as pl
 
-from treewalker_exp import analysis, readout
+from treewalker_exp import analysis, pack, readout
 from treewalker_exp import formats as fm
 
 BATCHES, ROUNDS, CHILDREN = 4, 3, 3
@@ -56,6 +56,7 @@ def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS) -> None:
     pl.DataFrame({"cell": [cell] * 8, "group": range(8), "entity": range(8)}).write_parquet(
         d / "groups.parquet"
     )
+    pl.DataFrame({"cell": [cell] * 8, "group": range(8)}).write_parquet(d / "counters.parquet")
     stop = {"rounds": rounds, "blocks_per_round": BATCHES, "reason": "precision"}
     procs = [{"process": p, "mode": "serving", "status": "ok"} for p in range(CHILDREN + 1)]
     fm.write_json(
@@ -113,6 +114,7 @@ def write_run(run: Path, rounds: int = ROUNDS) -> None:
     )
     # One mode; the children read 2% slow.
     write_cell(run, "c/one/xgboost/panel", lambda p: (102.0 if p else 100.0, 100.0), rounds)
+    pack.pack_run(run)
 
 
 def test_summarize_and_the_readout_on_a_run_with_counters_and_children(tmp_path):

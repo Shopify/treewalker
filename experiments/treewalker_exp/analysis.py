@@ -32,16 +32,17 @@ from . import formats as fm
 
 
 def load(run_dir: Path) -> dict[str, Any]:
+    """A packed run (treewalker-exp pack): run.json, three tables and the manifests."""
     import polars as pl
 
+    from . import pack
+
+    pack.require_packed(run_dir)
     run = fm.read_json(run_dir / "run.json")
-    cells = sorted(p for p in (run_dir / "cells").iterdir() if not p.name.startswith("."))
-    samples = pl.read_parquet(run_dir / "cells" / "*" / "samples.parquet")
-    groups = pl.read_parquet(run_dir / "cells" / "*" / "groups.parquet")
-    hw = pl.read_parquet(run_dir / "cells" / "*" / "hw.parquet")
-    manifests = {
-        fm.read_json(c / "manifest.json")["id"]: fm.read_json(c / "manifest.json") for c in cells
-    }
+    samples = pl.read_parquet(run_dir / "samples.parquet")
+    groups = pl.read_parquet(run_dir / "groups.parquet")
+    hw = pl.read_parquet(run_dir / "hw.parquet")
+    manifests = fm.read_json(run_dir / pack.CELLS)
     return {"run": run, "samples": samples, "groups": groups, "hw": hw, "manifests": manifests}
 
 

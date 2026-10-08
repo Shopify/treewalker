@@ -239,9 +239,9 @@ def readout(run_dir: Path) -> list[str]:
             excluded.append(f"{cell} {mode} (process 0 switches mode in a batch)")
         else:
             keep.append((cell, mode))
+    kept = pl.DataFrame(keep, schema={"cell": pl.String, "mode": pl.String}, orient="row")
     xr = r0.filter(pl.col("method") == "xgboost_native").join(
-        pl.DataFrame(keep, schema={"cell": pl.String, "mode": pl.String}, orient="row"),
-        on=["cell", "mode"],
+        kept.cast({"cell": r0.schema["cell"], "mode": r0.schema["mode"]}), on=["cell", "mode"]
     )
     # Every method process 0 timed has an entry: one missing a whole period
     # (round 0 or the later rounds) in every cell has no ratio, so no evidence.
