@@ -33,20 +33,22 @@ class Pilot:
 
     @classmethod
     def from_run(cls, run_dir: Path) -> Pilot:
+        """From a packed run; bytes per sample are the packed samples table's."""
         import polars as pl
 
-        files = list((run_dir / "cells").glob("*/samples.parquet"))
-        if not files:
-            raise ValueError(f"{run_dir} has no finished cells")
-        s = pl.read_parquet(files)
+        from . import pack
+
+        pack.require_packed(run_dir)
+        path = run_dir / "samples.parquet"
+        s = pl.read_parquet(path, columns=["cell", "rows"])
+        rows = dict(s.group_by("cell").agg(pl.col("rows").sum()).iter_rows())
         secs, work = 0.0, 0.0
-        for p in (run_dir / "cells").glob("*/manifest.json"):
-            m = fm.read_json(p)
-            rows = pl.read_parquet(p.parent / "samples.parquet")["rows"].sum()
+        for cid, m in fm.read_json(run_dir / pack.CELLS).items():
             secs += m["seconds"]
-            work += float(rows) * m["model"]["trees"] * max(int(m["cell"].get("max_depth", 1)), 1)
+            depth = max(int(m["cell"].get("max_depth", 1)), 1)
+            work += float(rows.get(cid, 0)) * m["model"]["trees"] * depth
         return cls(
-            bytes_per_sample=sum(p.stat().st_size for p in files) / max(len(s), 1),
+            bytes_per_sample=path.stat().st_size / max(len(s), 1),
             secs_per_row_tree_level=secs / max(work, 1.0),
         )
 
@@ -234,6 +236,6 @@ def describe(b: Budget, rounds: int) -> list[str]:
         f"largest prepared cell in RAM ~{b.ram_bytes / 1e9:.2f} GB",
     ]
     if b.sample_bytes is not None and b.hours is not None:
-        lines.append(f"  samples on disk ~{b.sample_bytes / 1e9:.2f} GB")
+        lines.append(f"  samples, packed, ~{b.sample_bytes / 1e9:.2f} GB")
         lines.append(f"  wall time ~{b.hours:.1f} h at the pilot's rate, {rounds} rounds")
     return lines + [f"  note: {n}" for n in b.notes]

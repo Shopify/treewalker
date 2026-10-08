@@ -10,7 +10,8 @@
 //! ```
 //!
 //! Rows are collected in memory and written when a cell completes, outside any timed
-//! interval. Unsupported or missing values are null, with a status column.
+//! interval. Unsupported or missing values are null, with a status column. Once a run
+//! is finished, `treewalker-exp pack` rewrites its cells as one file per table.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

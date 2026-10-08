@@ -246,15 +246,19 @@ uv run --group baselines treewalker-exp prepare --suite acceptance
 uv run --group baselines treewalker-exp compile-baselines --suite acceptance   # tl2cgen, lleaves, QuickScorer XML
 uv run --group baselines treewalker-exp preflight --suite acceptance
 uv run --group baselines treewalker-exp run --suite acceptance --run-id acceptance
+uv run --group baselines treewalker-exp pack experiments/data/runs/acceptance
 uv run --group baselines treewalker-exp summarize experiments/data/runs/acceptance
 ```
 
 Then the same with `--suite factorial` and `--suite ablation`. `run` resolves
 the suite into an execution manifest, builds `sweep_bench` and runs it pinned to
 core 0 with `taskset` where it exists; a rerun with the same run ID reuses the
-finished cells whose manifests match. Each run directory holds `run.json` and,
-per cell, `manifest.json` and the `samples`, `groups`, `counters` and `hw`
-Parquet tables. `run --set KEY=VALUE` overrides a `grids.toml [run]` setting, after
+finished cells whose manifests match. The runner writes `run.json` and, per
+cell, `manifest.json` and the `samples`, `groups`, `counters` and `hw` Parquet
+tables. `pack` then writes one file per table and one `cells.json` for the run
+(the sentinel's cells under `sentinel/`), checks every table against its cells,
+and with `--remove` deletes the per-cell directories; `summarize`,
+`validation-readout` and `budget` read packed runs. `run --set KEY=VALUE` overrides a `grids.toml [run]` setting, after
 the suite's own `[suites.NAME.run]` settings (the validation suite's).
 
 The protocol, per cell (settings in `grids.toml [run]`):
