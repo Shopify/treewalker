@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use arrow_array::{
-    ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray, UInt32Array, UInt64Array,
+    ArrayRef, BooleanArray, Float64Array, Int64Array, RecordBatch, StringArray, UInt32Array,
+    UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use parquet::arrow::ArrowWriter;
@@ -33,6 +34,7 @@ pub enum Kind {
     U32,
     I64,
     F64,
+    Bool,
     Str,
     OptU64,
     OptF64,
@@ -41,6 +43,7 @@ pub enum Kind {
 enum Col {
     U64(Vec<u64>),
     U32(Vec<u32>),
+    Bool(Vec<bool>),
     I64(Vec<i64>),
     F64(Vec<f64>),
     /// Interned: an index into the table's strings.
@@ -64,6 +67,7 @@ pub enum V<'a> {
     U32(u32),
     I64(i64),
     F64(f64),
+    B(bool),
     S(&'a str),
     Opt(Option<u64>),
     OptF(Option<f64>),
@@ -88,6 +92,7 @@ impl Table {
                     Kind::U32 => Col::U32(Vec::new()),
                     Kind::I64 => Col::I64(Vec::new()),
                     Kind::F64 => Col::F64(Vec::new()),
+                    Kind::Bool => Col::Bool(Vec::new()),
                     Kind::Str => Col::Str(Vec::new()),
                     Kind::OptU64 => Col::OptU64(Vec::new()),
                     Kind::OptF64 => Col::OptF64(Vec::new()),
@@ -122,6 +127,7 @@ impl Table {
                 (Col::U32(c), V::U32(x)) => c.push(*x),
                 (Col::I64(c), V::I64(x)) => c.push(*x),
                 (Col::F64(c), V::F64(x)) => c.push(*x),
+                (Col::Bool(c), V::B(x)) => c.push(*x),
                 (Col::Str(c), V::S(_)) => c.push(interned.unwrap_or_default()),
                 (Col::OptU64(c), V::Opt(x)) => c.push(*x),
                 (Col::OptU64(c), V::U64(x)) => c.push(Some(*x)),
@@ -152,6 +158,7 @@ impl Table {
                 Col::U32(v) | Col::Str(v) => filter(v, &keep),
                 Col::I64(v) => filter(v, &keep),
                 Col::F64(v) => filter(v, &keep),
+                Col::Bool(v) => filter(v, &keep),
                 Col::OptU64(v) => filter(v, &keep),
                 Col::OptF64(v) => filter(v, &keep),
             }
@@ -170,6 +177,7 @@ impl Table {
                         Col::U32(v) => Value::from(v[r]),
                         Col::I64(v) => Value::from(v[r]),
                         Col::F64(v) => Value::from(v[r]),
+                        Col::Bool(v) => Value::from(v[r]),
                         Col::Str(v) => Value::from(self.strings[v[r] as usize].as_str()),
                         Col::OptU64(v) => v[r].map_or(Value::Null, Value::from),
                         Col::OptF64(v) => v[r].map_or(Value::Null, Value::from),
@@ -194,6 +202,7 @@ impl Table {
                 ),
                 Col::I64(_) => V::I64(v.as_i64().ok_or_else(bad)?),
                 Col::F64(_) => V::F64(v.as_f64().ok_or_else(bad)?),
+                Col::Bool(_) => V::B(v.as_bool().ok_or_else(bad)?),
                 Col::Str(_) => V::S(v.as_str().ok_or_else(bad)?),
                 Col::OptU64(_) => V::Opt(v.as_u64()),
                 Col::OptF64(_) => V::OptF(v.as_f64()),
@@ -209,6 +218,7 @@ impl Table {
             Some(Col::U32(c) | Col::Str(c)) => c.len(),
             Some(Col::I64(c)) => c.len(),
             Some(Col::F64(c)) => c.len(),
+            Some(Col::Bool(c)) => c.len(),
             Some(Col::OptU64(c)) => c.len(),
             Some(Col::OptF64(c)) => c.len(),
             None => 0,
@@ -243,6 +253,11 @@ impl Table {
                     DataType::Float64,
                     false,
                     Arc::new(Float64Array::from(c.clone())),
+                ),
+                Col::Bool(c) => (
+                    DataType::Boolean,
+                    false,
+                    Arc::new(BooleanArray::from(c.clone())),
                 ),
                 Col::Str(c) => (
                     DataType::Utf8,
@@ -307,7 +322,7 @@ pub fn samples_table() -> Table {
 }
 
 /// The `groups` table: each group's index, entity and row count, and whether it is
-/// timed (1) or left out of a group sample (0).
+/// timed or left out of a group sample.
 pub fn groups_table() -> Table {
     Table::new(&[
         ("suite", Kind::Str),
@@ -316,7 +331,7 @@ pub fn groups_table() -> Table {
         ("entity", Kind::I64),
         ("first_row", Kind::U64),
         ("rows", Kind::U32),
-        ("timed", Kind::U32),
+        ("timed", Kind::Bool),
     ])
 }
 
@@ -530,6 +545,33 @@ mod tests {
             parquet::file::reader::SerializedFileReader::new(std::fs::File::open(&path).unwrap())
                 .unwrap();
         assert_eq!(reader.metadata().file_metadata().num_rows(), 2);
+
+        // groups.timed is a Parquet boolean, and survives the child's JSON too.
+        let mut g = groups_table();
+        for (i, timed) in [true, false].into_iter().enumerate() {
+            g.push(&[
+                V::S("s"),
+                V::S("c"),
+                V::U32(i as u32),
+                V::I64(-1),
+                V::U64(0),
+                V::U32(1),
+                V::B(timed),
+            ]);
+        }
+        let json = g.rows_json();
+        assert_eq!(json[1][6], Value::Bool(false));
+        g.push_json(&json[0]).unwrap();
+        let path = dir.join("groups.parquet");
+        g.write(&path).unwrap();
+        let reader =
+            parquet::file::reader::SerializedFileReader::new(std::fs::File::open(&path).unwrap())
+                .unwrap();
+        let schema = reader.metadata().file_metadata().schema_descr();
+        let timed = schema.column(6);
+        assert_eq!(timed.name(), "timed");
+        assert_eq!(timed.physical_type(), parquet::basic::Type::BOOLEAN);
+        assert_eq!(reader.metadata().file_metadata().num_rows(), 3);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
