@@ -1989,7 +1989,7 @@ pub fn run_cell(
             V::I64(cell.entities[g]),
             V::U64(cell.offsets[g] as u64),
             V::U32((cell.offsets[g + 1] - cell.offsets[g]) as u32),
-            V::U32(u32::from(timed)),
+            V::B(timed),
         ]);
     }
 
