@@ -190,6 +190,24 @@ impl Groups<'_> {
     }
 }
 
+/// Node pools at least this large (64 KiB of nodes) prefetch each next tree's start.
+const PREFETCH_MIN_NODES: usize = 4096;
+
+/// Hint the cache to load the line at `p`; no effect on results.
+#[inline(always)]
+fn prefetch(p: *const u8) {
+    #[cfg(target_arch = "aarch64")]
+    // SAFETY: a prefetch never faults and has no architectural effect.
+    unsafe {
+        std::arch::asm!("prfm pldl1keep, [{0}]", in(reg) p, options(nostack, preserves_flags, readonly));
+    }
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: as above.
+    unsafe {
+        std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(p.cast());
+    }
+}
+
 #[inline]
 fn sigmoid_inplace(slice: &mut [f64]) {
     let (chunks, remainder) = slice.split_at_mut(slice.len() & !1);
@@ -544,7 +562,8 @@ impl Model {
 
         if !self.prefix_groups.is_empty() {
             let k = self.prefix_depth;
-            prefix_starts.fill(0);
+            // No fill: trees outside every prefix group keep the zero start the
+            // workspace was created with, and grouped trees are overwritten below.
             for group in &self.prefix_groups {
                 self.precompute_prefix_starts::<F32, STATS>(
                     const_features,
@@ -556,19 +575,40 @@ impl Model {
             }
         }
 
-        for (i, tree) in self.trees.iter().enumerate() {
-            ctx.base = tree.node_start as usize;
-            let start_idx = prefix_starts[i] as usize;
-            self.partial_eval::<F32, M, STATS, ABLATE>(&mut ctx, start_idx, all_mask);
+        // Models whose node pool outgrows the L1 data cache prefetch each next tree's
+        // start node; the loop is split so small models pay nothing for it.
+        if self.nodes.len() >= PREFETCH_MIN_NODES {
+            let n_trees = self.trees.len();
+            for (i, tree) in self.trees.iter().enumerate() {
+                if i + 1 < n_trees {
+                    // SAFETY: i + 1 < n_trees, prefix_starts has one entry per tree, and
+                    // a tree's start index lies inside the tree.
+                    unsafe {
+                        let next = self.trees.get_unchecked(i + 1).node_start as usize
+                            + *prefix_starts.get_unchecked(i + 1) as usize;
+                        prefetch(self.nodes.as_ptr().add(next).cast());
+                    }
+                }
+                ctx.base = tree.node_start as usize;
+                let start_idx = prefix_starts[i] as usize;
+                self.eval_tree::<F32, M, STATS, ABLATE>(&mut ctx, start_idx, all_mask, n);
+            }
+        } else {
+            for (i, tree) in self.trees.iter().enumerate() {
+                ctx.base = tree.node_start as usize;
+                let start_idx = prefix_starts[i] as usize;
+                self.eval_tree::<F32, M, STATS, ABLATE>(&mut ctx, start_idx, all_mask, n);
+            }
         }
 
         if let Some(e) = scale {
             let mut acc = 0i128;
-            for (out, &d) in ctx.results[start..end].iter_mut().zip(&ctx.diff[..n]) {
-                acc += d;
+            for (out, d) in ctx.results[start..end].iter_mut().zip(&mut ctx.diff[..n]) {
+                acc += *d;
+                *d = 0;
                 *out = crate::exact::to_f64(acc, e);
             }
-            ctx.diff[..=n].fill(0);
+            ctx.diff[n] = 0;
         }
     }
 }
