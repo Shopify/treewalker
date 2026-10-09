@@ -1,0 +1,5881 @@
+{
+  "credit/nt500_md4/lightgbm/whatif-v2-k4-G16": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=2826578, varying=1367028, unsplit=556489, recurse=810539, leaf=1810539, leaf_adds=8757784, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=128000, sort_compares=568939, sweep_compares=888069, mask_writes=860000"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=2826578, varying=1367028, unsplit=556489, recurse=810539, leaf=1810539, leaf_adds=8757784, row_evals=17236448, scan_rows=17236448, scan_compares=17236448, scan_missing=17236448, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {
+        "lleaves": {
+          "effective": {
+            "cc": "/usr/bin/x86_64-linux-gnu-gcc-15",
+            "cc_version": "unknown",
+            "codegen": {
+              "codemodel": "default",
+              "cpu": "emeraldrapids",
+              "features": "+64bit,+adx,+aes,-amx-avx512,+amx-bf16,-amx-complex,-amx-fp16,-amx-fp8,+amx-int8,-amx-movrs,-amx-tf32,+amx-tile,+avx,-avx10.1,-avx10.2,+avx2,+avx512bf16,+avx512bitalg,+avx512bw,+avx512cd,+avx512dq,+avx512f,+avx512fp16,+avx512ifma,+avx512vbmi,+avx512vbmi2,+avx512vl,+avx512vnni,-avx512vp2intersect,+avx512vpopcntdq,-avxifma,-avxneconvert,+avxvnni,-avxvnniint16,-avxvnniint8,+bmi,+bmi2,-ccmp,-cf,+cldemote,+clflushopt,+clwb,-clzero,+cmov,-cmpccxadd,+crc32,+cx16,+cx8,-egpr,-enqcmd,+f16c,+fma,-fma4,+fsgsbase,+fxsr,+gfni,-hreset,+invpcid,-kl,-lwp,+lzcnt,+mmx,+movbe,+movdir64b,+movdiri,-movrs,-mwaitx,-ndd,-nf,+pclmul,-pconfig,-pku,+popcnt,-ppx,-prefetchi,+prfchw,-ptwrite,-push2pop2,-raoint,+rdpid,-rdpru,+rdrnd,+rdseed,+rtm,+sahf,+serialize,-sgx,+sha,-sha512,-shstk,-sm3,-sm4,+sse,+sse2,+sse3,+sse4.1,+sse4.2,-sse4a,+ssse3,-tbm,+tsxldtrk,-uintr,-usermsr,+vaes,+vpclmulqdq,-waitpkg,+wbnoinvd,-widekl,-xop,+xsave,+xsavec,+xsaveopt,+xsaves,-zu",
+              "fp_contract": "on (TargetOptions default, FPOpFusion::Standard)",
+              "ir_optimization": "none",
+              "llvm": "22.1.0",
+              "opt": 3,
+              "reloc": "pic",
+              "triple": "x86_64-unknown-linux-gnu"
+            },
+            "fblocksize": 34,
+            "fp_contract": "on",
+            "link_command": [
+              "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "-shared",
+              "-o",
+              "/home/bench/treewalker/experiments/artifacts/credit/nt500_md4/lightgbm/lleaves.so",
+              "<objects>"
+            ],
+            "lleaves": "1.4.1",
+            "llvmlite": "0.50.0",
+            "model": "/home/bench/treewalker/experiments/artifacts/credit/nt500_md4/lightgbm/model_native.txt",
+            "n_jobs": 4,
+            "opt_level": "3",
+            "output": "/home/bench/treewalker/experiments/artifacts/credit/nt500_md4/lightgbm/lleaves.so",
+            "relocation_model": "pic",
+            "target_cpu": "native",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "use_fp64": true
+          },
+          "identity": {
+            "baseline": "lleaves",
+            "cc": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "compile_lock_sha256": "761d1326ad45f3bdea0bc145b92f10c107e3958f1c99e16990faef4ff27a917a",
+            "compile_py_sha256": "fbf03429f403a7e43f9d59801dac7e946c57d2ad8637db4709f90ca9083ab543",
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "b7315c5c845a7148953dda523a483df82646125b6e3a321d948be4fc36f542aa",
+            "schema_version": 2,
+            "settings": {
+              "cc": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "fblocksize": 34,
+              "fp_contract": "on",
+              "n_jobs": 4,
+              "opt_level": "3",
+              "relocation_model": "pic",
+              "target_cpu": "native",
+              "use_fp64": true
+            }
+          },
+          "key": "9752147f379012574d23240c91fb657c6655508ff2412d4713dd8d08a7bc8583",
+          "library": "lleaves.so",
+          "sha256": "7a6665518a60cabe7bb83578bd8d839a4f007db99f3e6455884db9afb7fda7b3",
+          "status": "ready"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 2,
+            "source_files": 32
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "8d4d9971e7b7ee222c8e4a1742d3a075d634b8f6811456542652e0760801b93c",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 32
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "15cdbb2e1b34e43f689abd262e6a8971fe9408d43425996e6214334953b97649",
+          "library": "tl2cgen.so",
+          "sha256": "2e41c55d0d6c4399e5317eaa12caa9fbf9f8a2fba9201c5cd42d01aacd93f550",
+          "status": "ready"
+        }
+      },
+      "content_key": "737041d09878668963c61658002443d2873492ab70579af10b6f466eaa47d017",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "aecdb3371e5f8fd7561dc28c15b9c566fe6e0d2444182ca1c51a9b7339e2b9df",
+        "group_offsets": "529270ac38b93bc6c41e195b95a97df5d47865abab8352a61c73ab952c4aea76",
+        "test_data": "4d5b67f4c69242f52219bea1e9a75423e048e9405e08e95bf23668c33ac7465a",
+        "walker_config": "e9716c6b2b3763d8e74688bc5656e2127e23fb6f37d792a236124763927fe43f"
+      },
+      "dataset": "credit",
+      "feature_order": [
+        "x1",
+        "x2",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "x8",
+        "x9",
+        "x10",
+        "x11",
+        "x12",
+        "x13",
+        "x14",
+        "x15",
+        "x16",
+        "x17",
+        "x18",
+        "x19",
+        "x20",
+        "x21",
+        "x22",
+        "x23"
+      ],
+      "features": {
+        "mono_dec": [],
+        "mono_inc": [],
+        "realized_varying": [
+          "x1",
+          "x12",
+          "x18",
+          "x20"
+        ],
+        "varying": [
+          "x1",
+          "x12",
+          "x18",
+          "x20"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "aecdb3371e5f8fd7561dc28c15b9c566fe6e0d2444182ca1c51a9b7339e2b9df"
+        },
+        "group_offsets": {
+          "path": "group_offsets.bin",
+          "sha256": "529270ac38b93bc6c41e195b95a97df5d47865abab8352a61c73ab952c4aea76"
+        },
+        "model_native": {
+          "path": "../../model_native.txt",
+          "sha256": "b7315c5c845a7148953dda523a483df82646125b6e3a321d948be4fc36f542aa"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "8d4d9971e7b7ee222c8e4a1742d3a075d634b8f6811456542652e0760801b93c"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "e6e69c59517e77562bae00b02e2a0ec1aca969b90a92c12bcca4c60672fb44f8"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "934acb45e717f19778f55af280050c4a814ae027e34f95ac0dd4272dced592f1"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "4d5b67f4c69242f52219bea1e9a75423e048e9405e08e95bf23668c33ac7465a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "e9716c6b2b3763d8e74688bc5656e2127e23fb6f37d792a236124763927fe43f"
+        }
+      },
+      "framework": "lightgbm",
+      "generator": "whatif-v2",
+      "grouping": {
+        "G": 16,
+        "kind": "whatif",
+        "n_groups": 2000,
+        "rows": 32000,
+        "size_max": 16,
+        "size_mean": 16.0,
+        "size_min": 16
+      },
+      "horizon": null,
+      "id": "credit/nt500_md4/lightgbm/whatif-v2-k4-G16",
+      "k": {
+        "realized_varying_columns": 4,
+        "requested": 4,
+        "selected": 4
+      },
+      "key": "a38586ba6a841f741bea2b391a80a2e61783ffe689f7ac99ab82c2f28028339f",
+      "libraries": {
+        "lightgbm": "4.7.0",
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2"
+      },
+      "limits": [],
+      "max_depth": 4,
+      "model": {
+        "dir": "../..",
+        "key": "f412a5b829d61d9dedd6acb3805fe78c47d9ce7d1197a7d09af7430a0ee47154",
+        "structure": {
+          "max_tree_nodes": 29,
+          "total_nodes": 12850,
+          "trees": 500
+        },
+        "varying_predicates_upper_bound": 430
+      },
+      "model_key": "f412a5b829d61d9dedd6acb3805fe78c47d9ce7d1197a7d09af7430a0ee47154",
+      "n_trees": 500,
+      "oracle": {
+        "base_score": 0.0,
+        "divisor": 1.0,
+        "groups": [
+          65,
+          190,
+          194,
+          232,
+          371,
+          411,
+          434,
+          445,
+          498,
+          584,
+          594,
+          685,
+          694,
+          731,
+          783,
+          951,
+          953,
+          1026,
+          1033,
+          1185,
+          1235,
+          1300,
+          1339,
+          1383,
+          1390,
+          1441,
+          1442,
+          1450,
+          1471,
+          1716,
+          1769,
+          1818
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {
+        "G": 16,
+        "k": 4
+      },
+      "perturbation": {
+        "feature_names": [
+          "x1",
+          "x12",
+          "x18",
+          "x20"
+        ],
+        "features": [
+          0,
+          11,
+          17,
+          19
+        ],
+        "perturbed_covariates": [
+          "x1",
+          "x12",
+          "x18",
+          "x20"
+        ],
+        "pool": [
+          "x1",
+          "x12",
+          "x13",
+          "x14",
+          "x15",
+          "x16",
+          "x17",
+          "x18",
+          "x19",
+          "x20",
+          "x21",
+          "x22",
+          "x23"
+        ],
+        "rules": "Per scenario, one donor drawn uniformly from the training entities supplies every perturbed feature jointly. Scenario 0 is the base entity. Features are the model's most-split eligible covariates, ties by feature index, nested across k; features the model never splits on are not selected, so the selected k can be smaller than requested. Base entities, donors and time steps are drawn once per dataset and shared by every model, k and G: the size-G group is the first G scenarios of the size-128 group.",
+        "spec": {
+          "categorical": "none",
+          "donors": "training rows",
+          "entity": "a test row",
+          "missing": "none in the data",
+          "pool": "the frozen monetary pool: x1 (credit limit), x12-x17 (bill amounts), x18-x23 (payment amounts)",
+          "time_step": "not a survival dataset"
+        },
+        "split_counts": {
+          "x1": 464,
+          "x12": 470,
+          "x13": 287,
+          "x14": 327,
+          "x15": 344,
+          "x16": 337,
+          "x17": 289,
+          "x18": 425,
+          "x19": 344,
+          "x20": 416,
+          "x21": 320,
+          "x22": 376,
+          "x23": 306
+        },
+        "time_step": null
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "generator": 1701079454,
+        "split": 42
+      },
+      "split": {
+        "seed": 42,
+        "test_frac": 0.2,
+        "unit": "row"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 500,
+        "params": {
+          "learning_rate": 0.05,
+          "max_depth": 4,
+          "metric": "binary_logloss",
+          "num_leaves": 15,
+          "objective": "binary",
+          "seed": 42,
+          "verbose": -1
+        }
+      },
+      "warnings": [],
+      "workload": "whatif-credit-core"
+    },
+    "excluded": [],
+    "groups": 2000,
+    "id": "credit/nt500_md4/lightgbm/whatif-v2-k4-G16",
+    "load_seconds": {
+      "": 0.001821092
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 12850,
+      "threshold_type": "F64",
+      "trees": 500
+    },
+    "model_bytes": 1148329,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "8599a516621720a970f85d4d87720e0138421d799b0a97014b7fbe07117a9d32",
+    "rows": 32000,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 1.355935295,
+    "stop": {
+      "serving": {
+        "blocks": 36,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 3,
+        "rse_pct": {
+          "treewalker/all-on": 0.009266511767436418,
+          "treewalker_research/all-on": 0.047356493483984304,
+          "treewalker_research/disable_varying_precompute": 0.10063985833372836
+        },
+        "seconds": 0.826890863,
+        "totals": {
+          "treewalker/all-on": [
+            459958930,
+            96000
+          ],
+          "treewalker_research/all-on": [
+            466334332,
+            96000
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            807692522,
+            96000
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 2000,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 2000,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 32,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 8.881784197001252e-16,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 32000
+      }
+    },
+    "xgboost_processes": null
+  },
+  "credit/nt500_md4/xgboost/whatif-v2-k4-G16": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=2967607, varying=1251408, unsplit=496021, recurse=755387, leaf=1755387, leaf_adds=8420600, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=128000, sort_compares=567687, sweep_compares=875335, mask_writes=836000"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=2967607, varying=1251408, unsplit=496021, recurse=755387, leaf=1755387, leaf_adds=8420600, row_evals=15785754, scan_rows=15785754, scan_compares=15785754, scan_missing=15785754, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {
+        "quickscorer": {
+          "effective": {
+            "format": "xml"
+          },
+          "identity": {
+            "baseline": "quickscorer",
+            "model_sha256": "44db2d1fbf4b2f1653cbb1089c4fe8191b1c5296ff7d39fac8b0f29422365cb9",
+            "rule": "threshold = next float32 below t; at most 128 leaves; no categorical splits",
+            "schema_version": 2
+          },
+          "key": "87b69f425d2c3458141dcb2ffbd7b5c214331437def9a6700b91bae131988f07",
+          "library": "quickscorer.xml",
+          "sha256": "9a89cc947cb0eade20ac25f2cbb987f9ba95c453fe8f36cd9d695bce5c19bb32",
+          "status": "ready"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 2,
+            "source_files": 32
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "44db2d1fbf4b2f1653cbb1089c4fe8191b1c5296ff7d39fac8b0f29422365cb9",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 32
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "c2ce3dd9a2c28e5b20a87135b677d56e0bf73f8ddc9627fcd17cc6bbf93a9309",
+          "library": "tl2cgen.so",
+          "sha256": "ee8d289fe7ce08289da4ff9864099ef29f2daafd38651fc0c32a7065c8091299",
+          "status": "ready"
+        }
+      },
+      "content_key": "e81a4da7796bc8345f33ca49107abb3a696dd0733c640a39106418b95771e49f",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "aecdb3371e5f8fd7561dc28c15b9c566fe6e0d2444182ca1c51a9b7339e2b9df",
+        "group_offsets": "529270ac38b93bc6c41e195b95a97df5d47865abab8352a61c73ab952c4aea76",
+        "test_data": "c50d49bf9655ceb650ade448538fae599f1dd34a16ef667515210c1208aeef75",
+        "walker_config": "aa896142766463791ce8863d9e1125ead6f264da5c1cefaefad7cc7ca4d93a4e"
+      },
+      "dataset": "credit",
+      "feature_order": [
+        "x1",
+        "x2",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "x8",
+        "x9",
+        "x10",
+        "x11",
+        "x12",
+        "x13",
+        "x14",
+        "x15",
+        "x16",
+        "x17",
+        "x18",
+        "x19",
+        "x20",
+        "x21",
+        "x22",
+        "x23"
+      ],
+      "features": {
+        "mono_dec": [],
+        "mono_inc": [],
+        "realized_varying": [
+          "x1",
+          "x12",
+          "x18",
+          "x22"
+        ],
+        "varying": [
+          "x1",
+          "x12",
+          "x18",
+          "x22"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "aecdb3371e5f8fd7561dc28c15b9c566fe6e0d2444182ca1c51a9b7339e2b9df"
+        },
+        "group_offsets": {
+          "path": "group_offsets.bin",
+          "sha256": "529270ac38b93bc6c41e195b95a97df5d47865abab8352a61c73ab952c4aea76"
+        },
+        "model_native": {
+          "path": "../../model_native.json",
+          "sha256": "5a945ee938b11f63222993981cbfb4db7a4486b799447ef65c7b5922b9247595"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "44db2d1fbf4b2f1653cbb1089c4fe8191b1c5296ff7d39fac8b0f29422365cb9"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "91f6e86810b2ffce6000145b9d27f8d362a57f3dcac835c25ea23e871904e5f2"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "a85b1b1d707266780dd0f57ce5eb371631daee6d23dd0a0c6db7083bd839efa9"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "c50d49bf9655ceb650ade448538fae599f1dd34a16ef667515210c1208aeef75"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "aa896142766463791ce8863d9e1125ead6f264da5c1cefaefad7cc7ca4d93a4e"
+        }
+      },
+      "framework": "xgboost",
+      "generator": "whatif-v2",
+      "grouping": {
+        "G": 16,
+        "kind": "whatif",
+        "n_groups": 2000,
+        "rows": 32000,
+        "size_max": 16,
+        "size_mean": 16.0,
+        "size_min": 16
+      },
+      "horizon": null,
+      "id": "credit/nt500_md4/xgboost/whatif-v2-k4-G16",
+      "k": {
+        "realized_varying_columns": 4,
+        "requested": 4,
+        "selected": 4
+      },
+      "key": "9e13a4d29e85952ce113edc35d525bb0dc80877a741d61caddcf047310ea2840",
+      "libraries": {
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2",
+        "xgboost": "3.4.1"
+      },
+      "limits": [],
+      "max_depth": 4,
+      "model": {
+        "dir": "../..",
+        "key": "c7555a9d815baecf9c60a18049ad3574be42330701676a638c613d9df8365faf",
+        "structure": {
+          "max_tree_nodes": 31,
+          "total_nodes": 13784,
+          "trees": 500
+        },
+        "varying_predicates_upper_bound": 418
+      },
+      "model_key": "c7555a9d815baecf9c60a18049ad3574be42330701676a638c613d9df8365faf",
+      "n_trees": 500,
+      "oracle": {
+        "base_score": -1.255497152903256,
+        "divisor": 1.0,
+        "groups": [
+          65,
+          190,
+          194,
+          232,
+          371,
+          411,
+          434,
+          445,
+          498,
+          584,
+          594,
+          685,
+          694,
+          731,
+          783,
+          951,
+          953,
+          1026,
+          1033,
+          1185,
+          1235,
+          1300,
+          1339,
+          1383,
+          1390,
+          1441,
+          1442,
+          1450,
+          1471,
+          1716,
+          1769,
+          1818
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {
+        "G": 16,
+        "k": 4
+      },
+      "perturbation": {
+        "feature_names": [
+          "x1",
+          "x12",
+          "x18",
+          "x22"
+        ],
+        "features": [
+          0,
+          11,
+          17,
+          21
+        ],
+        "perturbed_covariates": [
+          "x1",
+          "x12",
+          "x18",
+          "x22"
+        ],
+        "pool": [
+          "x1",
+          "x12",
+          "x13",
+          "x14",
+          "x15",
+          "x16",
+          "x17",
+          "x18",
+          "x19",
+          "x20",
+          "x21",
+          "x22",
+          "x23"
+        ],
+        "rules": "Per scenario, one donor drawn uniformly from the training entities supplies every perturbed feature jointly. Scenario 0 is the base entity. Features are the model's most-split eligible covariates, ties by feature index, nested across k; features the model never splits on are not selected, so the selected k can be smaller than requested. Base entities, donors and time steps are drawn once per dataset and shared by every model, k and G: the size-G group is the first G scenarios of the size-128 group.",
+        "spec": {
+          "categorical": "none",
+          "donors": "training rows",
+          "entity": "a test row",
+          "missing": "none in the data",
+          "pool": "the frozen monetary pool: x1 (credit limit), x12-x17 (bill amounts), x18-x23 (payment amounts)",
+          "time_step": "not a survival dataset"
+        },
+        "split_counts": {
+          "x1": 570,
+          "x12": 484,
+          "x13": 348,
+          "x14": 351,
+          "x15": 295,
+          "x16": 364,
+          "x17": 359,
+          "x18": 416,
+          "x19": 396,
+          "x20": 399,
+          "x21": 312,
+          "x22": 423,
+          "x23": 304
+        },
+        "time_step": null
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "generator": 1701079454,
+        "split": 42
+      },
+      "split": {
+        "seed": 42,
+        "test_frac": 0.2,
+        "unit": "row"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 500,
+        "params": {
+          "eval_metric": "logloss",
+          "learning_rate": 0.05,
+          "max_depth": 4,
+          "objective": "binary:logistic",
+          "seed": 42,
+          "tree_method": "hist"
+        }
+      },
+      "warnings": [],
+      "workload": "whatif-credit-core"
+    },
+    "excluded": [],
+    "groups": 2000,
+    "id": "credit/nt500_md4/xgboost/whatif-v2-k4-G16",
+    "load_seconds": {
+      "": 0.002798825
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 13784,
+      "threshold_type": "F32",
+      "trees": 500
+    },
+    "model_bytes": 1114645,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "aeface91adfade45b09280939b8ad21f29c39487a4a75b86d8d75393b1dc2403",
+    "rows": 32000,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 1.213337377,
+    "stop": {
+      "serving": {
+        "blocks": 36,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 3,
+        "rse_pct": {
+          "treewalker/all-on": 0.03998572324664619,
+          "treewalker_research/all-on": 0.058532079341111896,
+          "treewalker_research/disable_varying_precompute": 0.04482304318165731
+        },
+        "seconds": 0.70673219,
+        "totals": {
+          "treewalker/all-on": [
+            446537714,
+            96000
+          ],
+          "treewalker_research/all-on": [
+            450386744,
+            96000
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            576055068,
+            96000
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 2000,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 2000,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 32,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 5.611106217440209e-07,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 32000
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/average_base/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "11d551548cadd23804027aff2635bba9f3303703e8d7d785e3d78e34a550232e"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "370e3a631533779a1c6a59482fcaa3e67e143858c358f327d4ff1d52cfdc0c14"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "b4f1a21521102361dda4fd269f3f1d6745b42d42937873b8334446e7f20feae1"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "average_base",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/average_base/treelite/import",
+      "key": "272972d8346ae81db4c6184452c1765828d514406aca6a863d7f3dd0f03ec68a",
+      "model": {
+        "dir": "../..",
+        "key": "11d551548cadd23804027aff2635bba9f3303703e8d7d785e3d78e34a550232e",
+        "source": "tests/fixtures/import (average_base)"
+      },
+      "model_sha256": "11d551548cadd23804027aff2635bba9f3303703e8d7d785e3d78e34a550232e",
+      "oracle": {
+        "base_score": 3.0,
+        "divisor": 2.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "identity",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/average_base/treelite/import",
+    "load_seconds": {
+      "": 0.000157999
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 892,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "f1385752bede8f02b93761cd138720ed1d910fb22548fe6d0d01508ef4e3e34a",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.003474571,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 0.447358713809699,
+          "treewalker_research/all-on": 10.665731163419258,
+          "treewalker_research/disable_varying_precompute": 0.5966696704407233
+        },
+        "seconds": 0.000988967,
+        "totals": {
+          "treewalker/all-on": [
+            331276,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            365708,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            128626,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/categories_f32/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=336, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=336, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "6aa04fbd7b88878ec001424120a6443adbc7f685e9fde4a60c8a8518aab28181"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "7ebb4814c6d3c63f090d1af588c59e58dad74c528dfca51809caac664eb1eed0"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "0ec4336e419f93e0b0cd61ca9c63d3a4063ec98b4d267d33dc3e3c0a87d0b759"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "categories_f32",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/categories_f32/treelite/import",
+      "key": "1e250ba746987bf814f3636f3d1074d10c98deaa944cf95c56d5475de2abd0de",
+      "model": {
+        "dir": "../..",
+        "key": "6aa04fbd7b88878ec001424120a6443adbc7f685e9fde4a60c8a8518aab28181",
+        "source": "tests/fixtures/import (categories_f32)"
+      },
+      "model_sha256": "6aa04fbd7b88878ec001424120a6443adbc7f685e9fde4a60c8a8518aab28181",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/categories_f32/treelite/import",
+    "load_seconds": {
+      "": 0.000144457
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 8,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F32",
+      "trees": 2
+    },
+    "model_bytes": 859,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "bddba167c3acc484d3771eb9391e0ee313be08c2064a5655a67217f3c3309cd3",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.00332089,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 15.655593354689435,
+          "treewalker_research/all-on": 1.7779643572863195,
+          "treewalker_research/disable_varying_precompute": 0.6705970578083363
+        },
+        "seconds": 0.000933036,
+        "totals": {
+          "treewalker/all-on": [
+            278420,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            239166,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            231100,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 3.5863151670589843e-08,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/categories_left/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=476, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=476, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "52e14db2a5901ee1812487e3f1d3fadbf74c00fc1436a369d64a5000c3670671"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "edbd899cf6166082bc3736553260577a7b2e17373c7d3435dbed8c2925e96dad"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "1137b7fea2d745631ec924082fcc156b0515534601eea81d62a961c4b2f19558"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "categories_left",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/categories_left/treelite/import",
+      "key": "a6f95f487c5d9f60bc0607ceb13355e5a11c729bc68d24129d85ad1377e5b13d",
+      "model": {
+        "dir": "../..",
+        "key": "52e14db2a5901ee1812487e3f1d3fadbf74c00fc1436a369d64a5000c3670671",
+        "source": "tests/fixtures/import (categories_left)"
+      },
+      "model_sha256": "52e14db2a5901ee1812487e3f1d3fadbf74c00fc1436a369d64a5000c3670671",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/categories_left/treelite/import",
+    "load_seconds": {
+      "": 0.000158488
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 8,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 907,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "536176bad336c7544ee5db4016241588998c43e4fa1a3c3d087f3b6176e97210",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.002716116,
+    "stop": {
+      "serving": {
+        "blocks": 28,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 4,
+        "rse_pct": {
+          "treewalker/all-on": 0.8928822527759759,
+          "treewalker_research/all-on": 0.19460651888673153,
+          "treewalker_research/disable_varying_precompute": 0.15404215578762998
+        },
+        "seconds": 0.000453064,
+        "totals": {
+          "treewalker/all-on": [
+            129276,
+            3584
+          ],
+          "treewalker_research/all-on": [
+            128190,
+            3584
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            125886,
+            3584
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/categories_right/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=336, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=336, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "3ae0982705f9acaf44eeb24b1809bc33bf59f8bc75410926ed6211163c876d78"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "7bde7298093d8e9c6e796911efd94d1fbd6a2ddada1d815f48b9b69bad29d1e6"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "2f725b16f7f2d52730917690e4f00e066b3880d8cb4da42e436284eddd7db3b5"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "categories_right",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/categories_right/treelite/import",
+      "key": "dca5f5ad25029643556b3a476ff487203190efdb1da6cf7af4d0b4dae544896c",
+      "model": {
+        "dir": "../..",
+        "key": "3ae0982705f9acaf44eeb24b1809bc33bf59f8bc75410926ed6211163c876d78",
+        "source": "tests/fixtures/import (categories_right)"
+      },
+      "model_sha256": "3ae0982705f9acaf44eeb24b1809bc33bf59f8bc75410926ed6211163c876d78",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/categories_right/treelite/import",
+    "load_seconds": {
+      "": 0.000148603
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 8,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 907,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "52cc81dc2c1d7662a133d122cdd32d698670e85f30a464996e07f6ceaeba58a5",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.002756729,
+    "stop": {
+      "serving": {
+        "blocks": 35,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 5,
+        "rse_pct": {
+          "treewalker/all-on": 0.2882988604501641,
+          "treewalker_research/all-on": 0.461017616690787,
+          "treewalker_research/disable_varying_precompute": 0.9970791713874102
+        },
+        "seconds": 0.000464808,
+        "totals": {
+          "treewalker/all-on": [
+            119670,
+            4480
+          ],
+          "treewalker_research/all-on": [
+            117698,
+            4480
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            112650,
+            4480
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/identity/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "c364f98a82f0105b0f9c40673c32b4807ac623f22eeab21d6376e15311aafcf5"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "53ff60cd369c65736d10e4b1b315c8150ae33f81a378dcacdbe6ce5532a74109"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "be28e9f0fd8aea8d96d3df485cee987e6ae065651b6c69c406b94e79b3c6878e"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "identity",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/identity/treelite/import",
+      "key": "c00f8e6c718a7f75ddf3b0e8ab6081d421a20ae940b7b7db4f389076297ec471",
+      "model": {
+        "dir": "../..",
+        "key": "c364f98a82f0105b0f9c40673c32b4807ac623f22eeab21d6376e15311aafcf5",
+        "source": "tests/fixtures/import (identity)"
+      },
+      "model_sha256": "c364f98a82f0105b0f9c40673c32b4807ac623f22eeab21d6376e15311aafcf5",
+      "oracle": {
+        "base_score": 3.0,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "identity",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/identity/treelite/import",
+    "load_seconds": {
+      "": 0.00016597
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 892,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "75a5f0876cefbc3c3228140d0ecdc42a119dcaee955edb1a16a0879bf7ea6163",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.002570733,
+    "stop": {
+      "serving": {
+        "blocks": 21,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 3,
+        "rse_pct": {
+          "treewalker/all-on": 0.9480953577280288,
+          "treewalker_research/all-on": 0.1358278606575001,
+          "treewalker_research/disable_varying_precompute": 0.4765792385535044
+        },
+        "seconds": 0.000306806,
+        "totals": {
+          "treewalker/all-on": [
+            100044,
+            2688
+          ],
+          "treewalker_research/all-on": [
+            98808,
+            2688
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            38888,
+            2688
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/lt_zero/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=133, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "1234517412fa9b3be70bd9f16eeea49d457f7a2bf57aba4970f13b1b83ba0c76"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "567b45afde7193e0a2c4cb342b332902ee6a8d11deba7b7dd79189e0e5dd7898"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "1c86a92f04dac7bb3bafa49a582a7227c98032bc4b1249ef5aa5fdc5a0dcfce7"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "lt_zero",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/lt_zero/treelite/import",
+      "key": "695b9d590fe8a78e9421732a1dd5bfcc99d18bfa31f857efbd8a3e5bd079f2c4",
+      "model": {
+        "dir": "../..",
+        "key": "1234517412fa9b3be70bd9f16eeea49d457f7a2bf57aba4970f13b1b83ba0c76",
+        "source": "tests/fixtures/import (lt_zero)"
+      },
+      "model_sha256": "1234517412fa9b3be70bd9f16eeea49d457f7a2bf57aba4970f13b1b83ba0c76",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/lt_zero/treelite/import",
+    "load_seconds": {
+      "": 0.000148708
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 891,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "868434cc777f7e311e04d49d9b3c9ef97b1c5f515eab9bb2106e742184ef2a9f",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.003572555,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 7.772328525599832,
+          "treewalker_research/all-on": 10.129854486717898,
+          "treewalker_research/disable_varying_precompute": 0.5641234981793379
+        },
+        "seconds": 0.001097295,
+        "totals": {
+          "treewalker/all-on": [
+            426514,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            436372,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            203612,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/negative_infinity/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=49, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "2b70df346cf237348d7b2193abd2565163b5a9b5465b097b2283bdef11597e51"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "e9fcbe8fa27a1d6ffa4021fd19f438ee6578fef157dba8e19be5e5fafc758fc2"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "fa47bcc8034ec0a972de434de45254c675d4ee0cb0022fd42b333a4dc625d082"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "negative_infinity",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/negative_infinity/treelite/import",
+      "key": "10bf93fe06af94019b05592d33ca1da4987a48a9ed53412d43ad131fb678f4fe",
+      "model": {
+        "dir": "../..",
+        "key": "2b70df346cf237348d7b2193abd2565163b5a9b5465b097b2283bdef11597e51",
+        "source": "tests/fixtures/import (negative_infinity)"
+      },
+      "model_sha256": "2b70df346cf237348d7b2193abd2565163b5a9b5465b097b2283bdef11597e51",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/negative_infinity/treelite/import",
+    "load_seconds": {
+      "": 0.000154674
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 891,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "7b417e1d24cebfca2bcd4396f0b08fb35a6d5fb553b42324fa440c2fa499505a",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.003563132,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 1.7289940497161218,
+          "treewalker_research/all-on": 1.0330917756094171,
+          "treewalker_research/disable_varying_precompute": 1.367023323063549
+        },
+        "seconds": 0.001085788,
+        "totals": {
+          "treewalker/all-on": [
+            403728,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            403106,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            218304,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/positive_infinity/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=168, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=833, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=168, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "a68ab09d70ddbe5cedfaf91d50b7694818d3614ab91acbe57922fbac3e022d6e"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "5a11c3917770afcc355a2e21e126b6fccd061143a0c1ac6ffedb3b6b99e571dc"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "e2274b5a7dbedc4026c76e735b163006cca129958022d4df8a68081d33506436"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "positive_infinity",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/positive_infinity/treelite/import",
+      "key": "4fa947b58bf1150a91eb438d3c0bf8bf01c314ba60dba6b048933fe7760e18eb",
+      "model": {
+        "dir": "../..",
+        "key": "a68ab09d70ddbe5cedfaf91d50b7694818d3614ab91acbe57922fbac3e022d6e",
+        "source": "tests/fixtures/import (positive_infinity)"
+      },
+      "model_sha256": "a68ab09d70ddbe5cedfaf91d50b7694818d3614ab91acbe57922fbac3e022d6e",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/positive_infinity/treelite/import",
+    "load_seconds": {
+      "": 0.000163366
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 891,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "ecd79d72670688ed764e58bf45feaf085a6625799d9844ec93104f5a725bb2be",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.00362939,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 0.6249267807778309,
+          "treewalker_research/all-on": 0.41269254627421087,
+          "treewalker_research/disable_varying_precompute": 2.06938746563841
+        },
+        "seconds": 0.001126869,
+        "totals": {
+          "treewalker/all-on": [
+            432576,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            426834,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            234224,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/random_forest/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=21, varying=35, unsplit=0, recurse=35, leaf=56, leaf_adds=638, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=567, mask_writes=21"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=21, varying=35, unsplit=0, recurse=35, leaf=56, leaf_adds=638, row_evals=3850, scan_rows=3850, scan_compares=3675, scan_missing=3850, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "9ba33cf405bb45c1ab5d5dd9cb28ee1e2d2689eb15b47a8c0bdb7b38a6b5f3f5"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "2b795d4fd519cfc0a6d6dab26f024b279f7f6fa60e4a65d7c8bdf3c50b724f2a"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "38981e6d4f4e850701667dcce599ace6c9103affecbdc11434e2686fc2fa0519"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "random_forest",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/random_forest/treelite/import",
+      "key": "fa29be024250f21e626cde0e06454b904b6400e3f9dd8bbe24f9d03f4a8544e8",
+      "model": {
+        "dir": "../..",
+        "key": "9ba33cf405bb45c1ab5d5dd9cb28ee1e2d2689eb15b47a8c0bdb7b38a6b5f3f5",
+        "source": "tests/fixtures/import (random_forest)"
+      },
+      "model_sha256": "9ba33cf405bb45c1ab5d5dd9cb28ee1e2d2689eb15b47a8c0bdb7b38a6b5f3f5",
+      "oracle": {
+        "base_score": 0.0,
+        "divisor": 3.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "identity",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/random_forest/treelite/import",
+    "load_seconds": {
+      "": 0.000154334
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 21,
+      "threshold_type": "F64",
+      "trees": 3
+    },
+    "model_bytes": 2606,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "eaf1ad7b659ffdf59005c60e0c21c4284e762bb73d7bc9e9e01424ce351005b5",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.003188807,
+    "stop": {
+      "serving": {
+        "blocks": 49,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 7,
+        "rse_pct": {
+          "treewalker/all-on": 0.5201064407332318,
+          "treewalker_research/all-on": 0.6061090374646327,
+          "treewalker_research/disable_varying_precompute": 0.915520139276729
+        },
+        "seconds": 0.000814822,
+        "totals": {
+          "treewalker/all-on": [
+            262656,
+            6272
+          ],
+          "treewalker_research/all-on": [
+            260770,
+            6272
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            249948,
+            6272
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/ranking/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "0a160e4bb86627add17efb46ac55c4be35b24374b94240ad0c89f8f39b0311f8"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "94854c234668664e8e901a7db26e5a098f81b99c497419a369a7b74a54631cc4"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "a15da41c407b15431617621ea7d3c32e2f163b1fe2f580948f77534b8772546c"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "ranking",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/ranking/treelite/import",
+      "key": "eaea1bca988359c4b7d6dc9d668a304ad21199ea74b43719b68c5316adfcac96",
+      "model": {
+        "dir": "../..",
+        "key": "0a160e4bb86627add17efb46ac55c4be35b24374b94240ad0c89f8f39b0311f8",
+        "source": "tests/fixtures/import (ranking)"
+      },
+      "model_sha256": "0a160e4bb86627add17efb46ac55c4be35b24374b94240ad0c89f8f39b0311f8",
+      "oracle": {
+        "base_score": -0.75,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "identity",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/ranking/treelite/import",
+    "load_seconds": {
+      "": 0.000156245
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 892,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "ff5d7008e4782cda316631488662fc2ed2c4a6c666e1bd6d334f605b373efaea",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.003454945,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 0.3897763445809494,
+          "treewalker_research/all-on": 9.672001136800597,
+          "treewalker_research/disable_varying_precompute": 0.6261909948425517
+        },
+        "seconds": 0.000972271,
+        "totals": {
+          "treewalker/all-on": [
+            331246,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            363496,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            129350,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/sigmoid_alpha/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "48ea8dbe6b518901c893cf5c84db98a36ae2f020c05ca7fc393159ea4c54b6ba"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "4effd75196c3505f9df2bd21c3fb2cdaf40b415d7303c4d8da55f62809252c73"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "f5e7d0cda10746feaf1c11447767f5175d41b8074c5d43a32ec18bdcf00b4954"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "sigmoid_alpha",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/sigmoid_alpha/treelite/import",
+      "key": "b6e68b8b6c42a7cdd989d5ba81741d73285e6baa46d1de0294180688ba29a8da",
+      "model": {
+        "dir": "../..",
+        "key": "48ea8dbe6b518901c893cf5c84db98a36ae2f020c05ca7fc393159ea4c54b6ba",
+        "source": "tests/fixtures/import (sigmoid_alpha)"
+      },
+      "model_sha256": "48ea8dbe6b518901c893cf5c84db98a36ae2f020c05ca7fc393159ea4c54b6ba",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 2.5,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/sigmoid_alpha/treelite/import",
+    "load_seconds": {
+      "": 0.000162691
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 891,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "783d2d884f80553d0c01b03667a7df5a302a659a07bdfc8d7328b2f37da34a3d",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.003663604,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 10.249484172102267,
+          "treewalker_research/all-on": 1.2508332121998824,
+          "treewalker_research/disable_varying_precompute": 12.219859736084505
+        },
+        "seconds": 0.001106096,
+        "totals": {
+          "treewalker/all-on": [
+            464700,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            410376,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            234654,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/sigmoid_f32/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=5565, sweep_compares=259, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "ff3c0909f0d66e618a7eb5bda5ff77cf5de58710655958969dfdd2124b0dc4bd"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "1331e011574a18647d5a7f1fa84e6cce18672c6521d2134bebc0d4c10b491a0f"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "a9b16b0de9df18de171eedc529197614b05d09849ac7f653955defc55dd77f01"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "sigmoid_f32",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/sigmoid_f32/treelite/import",
+      "key": "4256ced6030335ed0eb009cdf51d1c8ea5428b54931d61b9a28f38ab0fdc5359",
+      "model": {
+        "dir": "../..",
+        "key": "ff3c0909f0d66e618a7eb5bda5ff77cf5de58710655958969dfdd2124b0dc4bd",
+        "source": "tests/fixtures/import (sigmoid_f32)"
+      },
+      "model_sha256": "ff3c0909f0d66e618a7eb5bda5ff77cf5de58710655958969dfdd2124b0dc4bd",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/sigmoid_f32/treelite/import",
+    "load_seconds": {
+      "": 0.000169025
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F32",
+      "trees": 2
+    },
+    "model_bytes": 843,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "6173f56ea08b48b8d778bde8f0b678c7d5fab2f890b83fc956af641198981082",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.003757936,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 0.2577036527948819,
+          "treewalker_research/all-on": 7.684430405244696,
+          "treewalker_research/disable_varying_precompute": 0.37439927207972246
+        },
+        "seconds": 0.001109119,
+        "totals": {
+          "treewalker/all-on": [
+            420454,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            463046,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            202906,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 3.5863151670589843e-08,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "fixtures/sigmoid_f64/treelite/import": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d",
+        "test_data": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a",
+        "walker_config": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+      },
+      "dataset": "fixtures",
+      "feature_order": [
+        "x0",
+        "x1"
+      ],
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "e7125f5103aad999bececb6db1008afb4273fc11b9ac80b9d6b7481ee920694d"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "653fdb0833095b19f6a45aac0f925ca83ab57725538a68c4e1b84bac7dd3b630"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "4effd75196c3505f9df2bd21c3fb2cdaf40b415d7303c4d8da55f62809252c73"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "a65882f3748f772f061f4b72bcf40216447fe1b9947e0c2d34cd5cbbfdcc3280"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "3e515fa2d32a5d10917d95209c36e7fe057e34ad9a651d18aacf4af5e3a9c59a"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "408733cb5b817a90b1256ba0c0d517808c4743ae0a5c4f67e1e85f3242240afd"
+        }
+      },
+      "fixture": "sigmoid_f64",
+      "framework": "treelite",
+      "generator": "fixture-v1",
+      "grouping": {
+        "kind": "fixture",
+        "n_groups": 7,
+        "rows": 896,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "id": "fixtures/sigmoid_f64/treelite/import",
+      "key": "65b4471c0c8561be19690486f3cd95ac635b96b77848e2a19c3bf74deb229d36",
+      "model": {
+        "dir": "../..",
+        "key": "653fdb0833095b19f6a45aac0f925ca83ab57725538a68c4e1b84bac7dd3b630",
+        "source": "tests/fixtures/import (sigmoid_f64)"
+      },
+      "model_sha256": "653fdb0833095b19f6a45aac0f925ca83ab57725538a68c4e1b84bac7dd3b630",
+      "oracle": {
+        "base_score": 0.125,
+        "divisor": 1.0,
+        "groups": [
+          2,
+          3,
+          5,
+          6
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "status": "ready",
+      "workload": "fixtures"
+    },
+    "excluded": [],
+    "groups": 7,
+    "id": "fixtures/sigmoid_f64/treelite/import",
+    "load_seconds": {
+      "": 0.001517281
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 6,
+      "threshold_type": "F64",
+      "trees": 2
+    },
+    "model_bytes": 891,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "9ee1ff5cea7e8bd6603ec7d05378d28e3fca0b071f1f7ed60bf4720b58aefd6a",
+    "rows": 896,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.00494851,
+    "stop": {
+      "serving": {
+        "blocks": 70,
+        "blocks_per_round": 7,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "block_cap",
+        "rounds": 10,
+        "rse_pct": {
+          "treewalker/all-on": 3.804394951330101,
+          "treewalker_research/all-on": 3.405935251558317,
+          "treewalker_research/disable_varying_precompute": 4.182701156576455
+        },
+        "seconds": 0.001158497,
+        "totals": {
+          "treewalker/all-on": [
+            453082,
+            8960
+          ],
+          "treewalker_research/all-on": [
+            451158,
+            8960
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            232884,
+            8960
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 7,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 7,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 0.0,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 896
+      }
+    },
+    "xgboost_processes": null
+  },
+  "support/nt500_md4_h16/lightgbm/panel": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=2993787, varying=638475, unsplit=134413, recurse=504062, leaf=1391062, leaf_adds=2829018, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=113536, sort_compares=393828, sweep_compares=450038, mask_writes=377862"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=2993787, varying=638475, unsplit=134413, recurse=504062, leaf=1391062, leaf_adds=2829018, row_evals=8900261, scan_rows=8900261, scan_compares=4784893, scan_missing=8900261, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {
+        "lleaves": {
+          "effective": {
+            "cc": "/usr/bin/x86_64-linux-gnu-gcc-15",
+            "cc_version": "unknown",
+            "codegen": {
+              "codemodel": "default",
+              "cpu": "emeraldrapids",
+              "features": "+64bit,+adx,+aes,-amx-avx512,+amx-bf16,-amx-complex,-amx-fp16,-amx-fp8,+amx-int8,-amx-movrs,-amx-tf32,+amx-tile,+avx,-avx10.1,-avx10.2,+avx2,+avx512bf16,+avx512bitalg,+avx512bw,+avx512cd,+avx512dq,+avx512f,+avx512fp16,+avx512ifma,+avx512vbmi,+avx512vbmi2,+avx512vl,+avx512vnni,-avx512vp2intersect,+avx512vpopcntdq,-avxifma,-avxneconvert,+avxvnni,-avxvnniint16,-avxvnniint8,+bmi,+bmi2,-ccmp,-cf,+cldemote,+clflushopt,+clwb,-clzero,+cmov,-cmpccxadd,+crc32,+cx16,+cx8,-egpr,-enqcmd,+f16c,+fma,-fma4,+fsgsbase,+fxsr,+gfni,-hreset,+invpcid,-kl,-lwp,+lzcnt,+mmx,+movbe,+movdir64b,+movdiri,-movrs,-mwaitx,-ndd,-nf,+pclmul,-pconfig,-pku,+popcnt,-ppx,-prefetchi,+prfchw,-ptwrite,-push2pop2,-raoint,+rdpid,-rdpru,+rdrnd,+rdseed,+rtm,+sahf,+serialize,-sgx,+sha,-sha512,-shstk,-sm3,-sm4,+sse,+sse2,+sse3,+sse4.1,+sse4.2,-sse4a,+ssse3,-tbm,+tsxldtrk,-uintr,-usermsr,+vaes,+vpclmulqdq,-waitpkg,+wbnoinvd,-widekl,-xop,+xsave,+xsavec,+xsaveopt,+xsaves,-zu",
+              "fp_contract": "on (TargetOptions default, FPOpFusion::Standard)",
+              "ir_optimization": "none",
+              "llvm": "22.1.0",
+              "opt": 3,
+              "reloc": "pic",
+              "triple": "x86_64-unknown-linux-gnu"
+            },
+            "fblocksize": 34,
+            "fp_contract": "on",
+            "link_command": [
+              "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "-shared",
+              "-o",
+              "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/lleaves.so",
+              "<objects>"
+            ],
+            "lleaves": "1.4.1",
+            "llvmlite": "0.50.0",
+            "model": "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/model_native.txt",
+            "n_jobs": 4,
+            "opt_level": "3",
+            "output": "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/lleaves.so",
+            "relocation_model": "pic",
+            "target_cpu": "native",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "use_fp64": true
+          },
+          "identity": {
+            "baseline": "lleaves",
+            "cc": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "compile_lock_sha256": "761d1326ad45f3bdea0bc145b92f10c107e3958f1c99e16990faef4ff27a917a",
+            "compile_py_sha256": "fbf03429f403a7e43f9d59801dac7e946c57d2ad8637db4709f90ca9083ab543",
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "c80711586416f0d2ef106c1189dfa2c38217add2d49ce04c9ba54a5d9a9b994a",
+            "schema_version": 2,
+            "settings": {
+              "cc": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "fblocksize": 34,
+              "fp_contract": "on",
+              "n_jobs": 4,
+              "opt_level": "3",
+              "relocation_model": "pic",
+              "target_cpu": "native",
+              "use_fp64": true
+            }
+          },
+          "key": "4da86bddecf046ff095c4672238eda7608bb5459a097c146325c3d2e012a5b90",
+          "library": "lleaves.so",
+          "sha256": "2b92fc84038e46423de1a009f1a5f4c407fd1137aff23d1392f521e167656807",
+          "status": "ready"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 2,
+            "source_files": 32
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "6260a1d225aba8ca0d1fa92034148d87bf5607d2c41d484ff6f0dcf37769dc62",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 32
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "5b6fc2fd98a9acebae467826ef4a8931ea5e290e6d65b9934590427a28690ccf",
+          "library": "tl2cgen.so",
+          "sha256": "ad353971dd0146610d8bdb01fe2e5f46ff14a9509804fbbc19c2e9bbb3fc6d31",
+          "status": "ready"
+        }
+      },
+      "content_key": "723a412700880c3836249d8e02566337e53655453f38f6a1b174795883d757e8",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370",
+        "test_data": "b9b65ce696cacb829901d990e0ae3c7635a7e8a4a8e1cc7215e761715a9b468d",
+        "walker_config": "a356e88bad3b6c8ef8939d0dc137f696a8d79394b2dfc258e3baf0c97c1d8207"
+      },
+      "dataset": "support",
+      "feature_order": [
+        "x0",
+        "x1",
+        "x2",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "x8",
+        "x9",
+        "x10",
+        "x11",
+        "x12",
+        "x13",
+        "time_step",
+        "time_step_sq",
+        "remaining_steps",
+        "remaining_frac_sq",
+        "interaction_x0_t",
+        "hazard_bump"
+      ],
+      "features": {
+        "mono_dec": [
+          "remaining_steps",
+          "remaining_frac_sq"
+        ],
+        "mono_inc": [
+          "time_step",
+          "time_step_sq",
+          "interaction_x0_t"
+        ],
+        "realized_varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ],
+        "varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "../../../entities.npy",
+          "sha256": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370"
+        },
+        "model_native": {
+          "path": "../../model_native.txt",
+          "sha256": "c80711586416f0d2ef106c1189dfa2c38217add2d49ce04c9ba54a5d9a9b994a"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "6260a1d225aba8ca0d1fa92034148d87bf5607d2c41d484ff6f0dcf37769dc62"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "1f7616f5608a0e58f2473d40dcfb2af78ff287200af2bd6ac40a7973e038f3d0"
+        },
+        "predictions": {
+          "path": "../../predictions.npy",
+          "sha256": "1e5ab59b4153efc192c85ad7df2bcb3141be9801e8bec6dbcc496bfa2973b8ad"
+        },
+        "test_data": {
+          "path": "../../../test_data.bin",
+          "sha256": "b9b65ce696cacb829901d990e0ae3c7635a7e8a4a8e1cc7215e761715a9b468d"
+        },
+        "walker_config": {
+          "path": "../../../walker_config.json",
+          "sha256": "a356e88bad3b6c8ef8939d0dc137f696a8d79394b2dfc258e3baf0c97c1d8207"
+        }
+      },
+      "framework": "lightgbm",
+      "generator": "panel-v2",
+      "grouping": {
+        "kind": "panel",
+        "n_groups": 1774,
+        "rows": 28384,
+        "size_max": 16,
+        "size_mean": 16.0,
+        "size_min": 16,
+        "width": 16
+      },
+      "horizon": {
+        "realized": 16,
+        "requested": 16
+      },
+      "id": "support/nt500_md4_h16/lightgbm/panel",
+      "k": null,
+      "key": "1b7fb86bc08487934bdf5eea1984be6d0fb59eb5d764f86f7e4d3d6f01eb55d7",
+      "libraries": {
+        "lightgbm": "4.7.0",
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2"
+      },
+      "limits": [],
+      "max_depth": 4,
+      "model": {
+        "dir": "../..",
+        "key": "201d74cee036b817b00b021141a2092e9d0569ebad0337eda1e13fd102d0c0e7",
+        "structure": {
+          "max_tree_nodes": 29,
+          "total_nodes": 13152,
+          "trees": 500
+        },
+        "varying_predicates_upper_bound": 213
+      },
+      "model_key": "201d74cee036b817b00b021141a2092e9d0569ebad0337eda1e13fd102d0c0e7",
+      "n_trees": 500,
+      "oracle": {
+        "base_score": 0.0,
+        "divisor": 1.0,
+        "groups": [
+          26,
+          86,
+          150,
+          283,
+          384,
+          421,
+          463,
+          492,
+          500,
+          559,
+          566,
+          583,
+          703,
+          731,
+          816,
+          829,
+          844,
+          955,
+          1000,
+          1031,
+          1061,
+          1097,
+          1126,
+          1146,
+          1179,
+          1241,
+          1254,
+          1408,
+          1442,
+          1647,
+          1649,
+          1762
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {},
+      "perturbation": null,
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "split": 1886352030
+      },
+      "split": {
+        "seed": 1886352030,
+        "test_frac": 0.2,
+        "unit": "patient"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 500,
+        "params": {
+          "learning_rate": 0.05,
+          "max_depth": 4,
+          "metric": "binary_logloss",
+          "num_leaves": 15,
+          "objective": "binary",
+          "seed": 42,
+          "verbose": -1
+        }
+      },
+      "warnings": [],
+      "workload": "panel"
+    },
+    "excluded": [],
+    "groups": 1774,
+    "id": "support/nt500_md4_h16/lightgbm/panel",
+    "load_seconds": {
+      "": 0.001914023
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 13152,
+      "threshold_type": "F64",
+      "trees": 500
+    },
+    "model_bytes": 1177061,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "81fc900e8aab0cd6a15407b8c61cd2bd9d5eaee8315da0ef2359c996defb2135",
+    "rows": 28384,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.656531136,
+    "stop": {
+      "serving": {
+        "blocks": 36,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 3,
+        "rse_pct": {
+          "treewalker/all-on": 0.0979394853250976,
+          "treewalker_research/all-on": 0.09186132235329698,
+          "treewalker_research/disable_varying_precompute": 0.10115094490293507
+        },
+        "seconds": 0.384473164,
+        "totals": {
+          "treewalker/all-on": [
+            229950390,
+            85152
+          ],
+          "treewalker_research/all-on": [
+            232171664,
+            85152
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            335605598,
+            85152
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 1774,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 1774,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 32,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 1.0547118733938987e-15,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 28384
+      }
+    },
+    "xgboost_processes": null
+  },
+  "support/nt500_md4_h16/xgboost/panel": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=2899269, varying=627278, unsplit=116229, recurse=511049, leaf=1398049, leaf_adds=2858686, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=85152, sort_compares=179174, sweep_compares=372705, mask_writes=321094"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=2899269, varying=627278, unsplit=116229, recurse=511049, leaf=1398049, leaf_adds=2858686, row_evals=8692926, scan_rows=4583323, scan_compares=4583323, scan_missing=4583323, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {
+        "quickscorer": {
+          "effective": null,
+          "identity": {
+            "baseline": "quickscorer",
+            "model_sha256": "5c70c26d218ab99b64bf048108d25aee5fb32172de8552831fb3aea0e346ae9a",
+            "rule": "threshold = next float32 below t; at most 128 leaves; no categorical splits",
+            "schema_version": 2
+          },
+          "key": "9c07c2059a1560c5a096dc77a0ca2fe648a8a5939b743270488774d046f4ea23",
+          "library": "quickscorer.xml",
+          "sha256": null,
+          "status": "unsupported: tree 0 has categorical splits; QuickScorer has none"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 2,
+            "source_files": 32
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "5c70c26d218ab99b64bf048108d25aee5fb32172de8552831fb3aea0e346ae9a",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 32
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "749befbc1f6bd64e3c5e0ce8df5a1e9608a92d4f3b94ce80e51ddfb03fafafaf",
+          "library": "tl2cgen.so",
+          "sha256": "2f8529247e3db2a0e6a7a92d45b16ebd1947e774934ae265d2c42a69ecf3f93a",
+          "status": "ready"
+        }
+      },
+      "content_key": "e9e8e0426abdac50f106593809c7e4decaec0de86712beac17c7c1bdc17f64e6",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370",
+        "test_data": "b9b65ce696cacb829901d990e0ae3c7635a7e8a4a8e1cc7215e761715a9b468d",
+        "walker_config": "a356e88bad3b6c8ef8939d0dc137f696a8d79394b2dfc258e3baf0c97c1d8207"
+      },
+      "dataset": "support",
+      "feature_order": [
+        "x0",
+        "x1",
+        "x2",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "x8",
+        "x9",
+        "x10",
+        "x11",
+        "x12",
+        "x13",
+        "time_step",
+        "time_step_sq",
+        "remaining_steps",
+        "remaining_frac_sq",
+        "interaction_x0_t",
+        "hazard_bump"
+      ],
+      "features": {
+        "mono_dec": [
+          "remaining_steps",
+          "remaining_frac_sq"
+        ],
+        "mono_inc": [
+          "time_step",
+          "time_step_sq",
+          "interaction_x0_t"
+        ],
+        "realized_varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ],
+        "varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "../../../entities.npy",
+          "sha256": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370"
+        },
+        "model_native": {
+          "path": "../../model_native.json",
+          "sha256": "b4932b8caaa086428cae13c6559aaa19c96304e33f6032b5ca180dde2961556f"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "5c70c26d218ab99b64bf048108d25aee5fb32172de8552831fb3aea0e346ae9a"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "42115de2b0312df00728278b952ecf9eb389cc25faeafea86771b8b9fb283450"
+        },
+        "predictions": {
+          "path": "../../predictions.npy",
+          "sha256": "2b57e926a8f24c165739320a63252dd65f3e33909d4bf63f3508f507ed298038"
+        },
+        "test_data": {
+          "path": "../../../test_data.bin",
+          "sha256": "b9b65ce696cacb829901d990e0ae3c7635a7e8a4a8e1cc7215e761715a9b468d"
+        },
+        "walker_config": {
+          "path": "../../../walker_config.json",
+          "sha256": "a356e88bad3b6c8ef8939d0dc137f696a8d79394b2dfc258e3baf0c97c1d8207"
+        }
+      },
+      "framework": "xgboost",
+      "generator": "panel-v2",
+      "grouping": {
+        "kind": "panel",
+        "n_groups": 1774,
+        "rows": 28384,
+        "size_max": 16,
+        "size_mean": 16.0,
+        "size_min": 16,
+        "width": 16
+      },
+      "horizon": {
+        "realized": 16,
+        "requested": 16
+      },
+      "id": "support/nt500_md4_h16/xgboost/panel",
+      "k": null,
+      "key": "fa86b46592a57f7072587b66d5c7080d06bbd514c71c6a946ffd9d615350bd0d",
+      "libraries": {
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2",
+        "xgboost": "3.4.1"
+      },
+      "limits": [],
+      "max_depth": 4,
+      "model": {
+        "dir": "../..",
+        "key": "b08fc6696e69b510b0ad999f43676f5c6577711a1b03be3b1746fd15bd99c52b",
+        "structure": {
+          "max_tree_nodes": 31,
+          "total_nodes": 13422,
+          "trees": 500
+        },
+        "varying_predicates_upper_bound": 181
+      },
+      "model_key": "b08fc6696e69b510b0ad999f43676f5c6577711a1b03be3b1746fd15bd99c52b",
+      "n_trees": 500,
+      "oracle": {
+        "base_score": -2.6870591811896656,
+        "divisor": 1.0,
+        "groups": [
+          26,
+          86,
+          150,
+          283,
+          384,
+          421,
+          463,
+          492,
+          500,
+          559,
+          566,
+          583,
+          703,
+          731,
+          816,
+          829,
+          844,
+          955,
+          1000,
+          1031,
+          1061,
+          1097,
+          1126,
+          1146,
+          1179,
+          1241,
+          1254,
+          1408,
+          1442,
+          1647,
+          1649,
+          1762
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {},
+      "perturbation": null,
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "split": 1886352030
+      },
+      "split": {
+        "seed": 1886352030,
+        "test_frac": 0.2,
+        "unit": "patient"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 500,
+        "params": {
+          "eval_metric": "logloss",
+          "learning_rate": 0.05,
+          "max_depth": 4,
+          "objective": "binary:logistic",
+          "seed": 42,
+          "tree_method": "hist"
+        }
+      },
+      "warnings": [],
+      "workload": "panel"
+    },
+    "excluded": [],
+    "groups": 1774,
+    "id": "support/nt500_md4_h16/xgboost/panel",
+    "load_seconds": {
+      "": 0.002118968
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": true,
+      "nodes": 13422,
+      "threshold_type": "F32",
+      "trees": 500
+    },
+    "model_bytes": 1101209,
+    "required_methods": [
+      "treewalker"
+    ],
+    "resume_key": "4d96797094716194d171330748d8fbbbc649d171b119a05f27d2e458877e8c1c",
+    "rows": 28384,
+    "run": {
+      "batch_rows": 1024,
+      "hardware_counters": true,
+      "max_rounds": 10,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 3,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 3.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.646906693,
+    "stop": {
+      "serving": {
+        "blocks": 36,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 3,
+        "rse_pct": {
+          "treewalker/all-on": 0.16451464356410175,
+          "treewalker_research/all-on": 0.10997844207817026,
+          "treewalker_research/disable_varying_precompute": 0.08955810270104529
+        },
+        "seconds": 0.368424174,
+        "totals": {
+          "treewalker/all-on": [
+            227303148,
+            85152
+          ],
+          "treewalker_research/all-on": [
+            229745518,
+            85152
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            302393486,
+            85152
+          ]
+        }
+      }
+    },
+    "suite": "acceptance",
+    "timed_groups": 1774,
+    "validation": {
+      "checks": [
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 1774,
+      "oracle": {
+        "exact_sums": true,
+        "groups": 32,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": true,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 5.639916916266863e-07,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 28384
+      }
+    },
+    "xgboost_processes": null
+  }
+}

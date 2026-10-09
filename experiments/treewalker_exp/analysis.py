@@ -471,28 +471,44 @@ def serving_intervals(
     return out
 
 
-def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) -> list[str]:
-    """The run cell by cell: exclusions, the sample, the oracle, each mode's rounds,
-    probes and conversion, XGBoost's modes, and per method p50, p99, us/row and the
-    speedup with its interval. Every table is computed for all cells at once."""
+SAMPLE_COLUMNS = [
+    "cell",
+    "method",
+    "variant",
+    "mode",
+    "process",
+    "block",
+    "batch",
+    "group",
+    "repetition",
+    "rows",
+    "ticks",
+]
+
+
+def estimates(
+    d: dict[str, Any], reference: str = "treewalker", n_boot: int = 1000
+) -> dict[str, Any]:
+    """Every cell's estimates, for summarize and the paper's figures and tables.
+
+    ``by_cell[cell]`` lists, per method, variant and mode (in mode order, then
+    us/row), p5, p50, p95 and p99 per group in us, us/row, and the ratio to ``reference``
+    (variant all-on): in serving mode the paired bootstrap ratio with its interval
+    (`serving_intervals`), in batch mode the ratio of us/row; NaN without a
+    reference. ``xgboost[(cell, mode)]`` is `xgboost_faster_mode`'s result, with
+    ``tw``, the reference's ticks per row over the same batches and weights, where
+    it has a headline. ``d`` is `load`'s, with at least `SAMPLE_COLUMNS`."""
     import polars as pl
 
-    columns = ["cell", "method", "variant", "mode", "process", "block", "batch", "group"]
-    d = load(run_dir, [*columns, "repetition", "rows", "ticks"])
-    timer = d["run"]["timer"]["calibration"]
-    hz = float(timer["hz"])
+    hz = float(d["run"]["timer"]["calibration"]["hz"])
     s = d["samples"].with_columns(us=pl.col("ticks") / hz * 1e6)
     if "process" in s.columns:
         s = s.filter(pl.col("process") == 0)
-    lines = [
-        f"run {run_dir.name}: timer {timer['counter']} at {hz:.0f} Hz ({timer['source']}), "
-        f"read-pair overhead p50 {timer['overhead']['p50']} ticks",
-    ]
-    lines += sentinel_lines(d["run"])
-
     keys = ["cell", "method", "variant", "mode"]
     stats = s.group_by(keys).agg(
+        p5=pl.col("us").quantile(0.05),
         p50=pl.col("us").quantile(0.5),
+        p95=pl.col("us").quantile(0.95),
         p99=pl.col("us").quantile(0.99),
         per_row=pl.col("us").sum() / pl.col("rows").sum(),
     )
@@ -503,14 +519,26 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
         .select(pl.col("cell", "mode").cast(pl.String), "per_row")
         .iter_rows()
     }
-    by_cell = {
-        cell: g.drop("cell").to_dicts()
-        for (cell,), g in stats.sort("cell", "mode", "per_row")
+    intervals = serving_intervals(s, d["groups"], reference, n_boot)
+    by_cell: dict[str, list[dict[str, Any]]] = {}
+    for (cell,), g in (
+        stats.sort("cell", "mode", "per_row")
         .partition_by("cell", as_dict=True, maintain_order=True)
         .items()
-    }
-    intervals = serving_intervals(s, d["groups"], reference, n_boot)
-    xgb = {
+    ):
+        rows = []
+        for row in g.drop("cell").iter_rows(named=True):
+            ratio, lo, hi = float("nan"), None, None
+            ref = ref_per_row.get((cell, row["mode"]))
+            if row["mode"] == "serving" and ref is not None:
+                hit = intervals.get((cell, row["method"], row["variant"]))
+                if hit is not None:
+                    ratio, lo, hi = hit
+            elif ref is not None:
+                ratio = row["per_row"] / ref
+            rows.append({**row, "ratio": ratio, "lo": lo, "hi": hi})
+        by_cell[cell] = rows
+    blocks = {
         (cell, mode): g.drop("cell", "mode")
         for (cell, mode), g in xgboost_block_table(d["samples"], d["hw"])
         .partition_by("cell", "mode", as_dict=True, maintain_order=True)
@@ -526,7 +554,33 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
     }
     # On the Linux VMs (x86 and Arm) XGBoost's counters are required.
     required = (d["run"].get("host") or {}).get("os") == "linux"
+    xgb: dict[tuple[str, str], dict[str, Any]] = {}
+    for cell, m in d["manifests"].items():
+        for mode in m["stop"]:
+            b = blocks.get((cell, mode))
+            r = None if b is None else xgboost_faster_mode(b, counters_required=required)
+            if r is None:
+                continue
+            per_batch = ref_batches.get((cell, mode))
+            if "weights" in r and per_batch is not None:
+                r["tw"] = batch_weighted(per_batch, r["weights"])
+            xgb[(cell, mode)] = r
+    return {"hz": hz, "by_cell": by_cell, "xgboost": xgb}
 
+
+def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) -> list[str]:
+    """The run cell by cell: exclusions, the sample, the oracle, each mode's rounds,
+    probes and conversion, XGBoost's modes, and per method p50, p99, us/row and the
+    speedup with its interval (`estimates`)."""
+    d = load(run_dir, SAMPLE_COLUMNS)
+    timer = d["run"]["timer"]["calibration"]
+    est = estimates(d, reference, n_boot)
+    hz = est["hz"]
+    lines = [
+        f"run {run_dir.name}: timer {timer['counter']} at {hz:.0f} Hz ({timer['source']}), "
+        f"read-pair overhead p50 {timer['overhead']['p50']} ticks",
+    ]
+    lines += sentinel_lines(d["run"])
     for cell, m in d["manifests"].items():
         lines.append(f"\n{cell}: {m['groups']} groups, {m['rows']} rows")
         for e in m["excluded"]:
@@ -562,8 +616,7 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
             lines.append(f"  XGBoost process {p['process']} {p['mode']}: {p['status']}")
         fasters = {}
         for mode in m["stop"]:
-            blocks = xgb.get((cell, mode))
-            r = None if blocks is None else xgboost_faster_mode(blocks, counters_required=required)
+            r = est["xgboost"].get((cell, mode))
             if r is None:
                 continue
             lines.append(xgboost_line(mode, r, 1e6 / hz))
@@ -573,29 +626,18 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
             f"  {'method':<24}{'variant':<34}{'mode':<8}{'p50 us':>10}{'p99 us':>10}"
             f"{'us/row':>10}{'speedup':>9}  95% interval (preliminary)"
         )
-        for row in by_cell.get(cell, []):
-            interval = ""
-            ratio = float("nan")
-            ref = ref_per_row.get((cell, row["mode"]))
-            if row["mode"] == "serving" and ref is not None:
-                hit = intervals.get((cell, row["method"], row["variant"]))
-                if hit is not None:
-                    ratio, lo, hi = hit
-                    interval = f"[{lo:.3f}, {hi:.3f}]"
-            elif ref is not None:
-                ratio = row["per_row"] / ref
+        for row in est["by_cell"].get(cell, []):
+            interval = "" if row["lo"] is None else f"[{row['lo']:.3f}, {row['hi']:.3f}]"
             p99 = f"{row['p99']:>10.2f}" if row["mode"] == "serving" else f"{'-':>10}"
             variant = "[process 0]" if row["method"] == "xgboost_native" else row["variant"]
             lines.append(
                 f"  {row['method']:<24}{variant[:33]:<34}{row['mode']:<8}"
-                f"{row['p50']:>10.2f}{p99}{row['per_row']:>10.4f}{ratio:>9.3f}  {interval}"
+                f"{row['p50']:>10.2f}{p99}{row['per_row']:>10.4f}{row['ratio']:>9.3f}  {interval}"
             )
         # XGBoost's faster mode against TreeWalker over the same batches and weights.
         for mode, r in fasters.items():
-            per_batch = ref_batches.get((cell, mode))
-            if per_batch is None:
+            if "tw" not in r:
                 continue
-            tw = batch_weighted(per_batch, r["weights"])
             label = (
                 "[faster mode, all processes]"
                 if r["outcome"] == "two modes"
@@ -603,7 +645,7 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
             )
             lines.append(
                 f"  {'xgboost_native':<24}{label:<34}{mode:<8}"
-                f"{'-':>10}{'-':>10}{r['faster'] / hz * 1e6:>10.4f}{r['faster'] / tw:>9.3f}"
+                f"{'-':>10}{'-':>10}{r['faster'] / hz * 1e6:>10.4f}{r['faster'] / r['tw']:>9.3f}"
                 "  no interval until PR 4"
             )
     return lines

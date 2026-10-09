@@ -70,6 +70,11 @@ class Paths:
         return self.data / "runs"
 
     @property
+    def figures(self) -> Path:
+        """The paper's figures, tables and numbers, regenerated from the runs."""
+        return self.experiments / "figures"
+
+    @property
     def manifests(self) -> Path:
         return self.artifacts / "manifests"
 

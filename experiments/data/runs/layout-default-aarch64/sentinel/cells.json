@@ -1,0 +1,864 @@
+{
+  "000": {
+    "support/nt500_md4_h16/lightgbm/panel": {
+      "ablations": {},
+      "cell": {
+        "baselines": {
+          "lleaves": {
+            "effective": {
+              "cc": "/usr/bin/aarch64-linux-gnu-gcc-15",
+              "cc_version": "unknown",
+              "codegen": {
+                "codemodel": "default",
+                "cpu": "neoverse-v2",
+                "features": "+aes,+crc,+fp-armv8,+lse,+neon,+rand,+sha2,+sha3,+sm4,+sve,+sve-aes,+sve-sha3,+sve-sm4,+sve2",
+                "fp_contract": "on (TargetOptions default, FPOpFusion::Standard)",
+                "ir_optimization": "none",
+                "llvm": "22.1.0",
+                "opt": 3,
+                "reloc": "pic",
+                "triple": "aarch64-unknown-linux-gnu"
+              },
+              "fblocksize": 34,
+              "fp_contract": "on",
+              "link_command": [
+                "/usr/bin/aarch64-linux-gnu-gcc-15",
+                "-shared",
+                "-o",
+                "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/lleaves.so",
+                "<objects>"
+              ],
+              "lleaves": "1.4.1",
+              "llvmlite": "0.50.0",
+              "model": "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/model_native.txt",
+              "n_jobs": 4,
+              "opt_level": "3",
+              "output": "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/lleaves.so",
+              "relocation_model": "pic",
+              "target_cpu": "native",
+              "target_triple": "aarch64-unknown-linux-gnu",
+              "use_fp64": true
+            },
+            "identity": {
+              "baseline": "lleaves",
+              "cc": {
+                "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+                "target": "aarch64-linux-gnu",
+                "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+              },
+              "compile_lock_sha256": "761d1326ad45f3bdea0bc145b92f10c107e3958f1c99e16990faef4ff27a917a",
+              "compile_py_sha256": "fbf03429f403a7e43f9d59801dac7e946c57d2ad8637db4709f90ca9083ab543",
+              "host_cpu": "unknown",
+              "model_sha256": "c80711586416f0d2ef106c1189dfa2c38217add2d49ce04c9ba54a5d9a9b994a",
+              "schema_version": 2,
+              "settings": {
+                "cc": "/usr/bin/aarch64-linux-gnu-gcc-15",
+                "fblocksize": 34,
+                "fp_contract": "on",
+                "n_jobs": 4,
+                "opt_level": "3",
+                "relocation_model": "pic",
+                "target_cpu": "native",
+                "use_fp64": true
+              }
+            },
+            "key": "503c709bb4600366a46397b7caca519934c02deac2f2b6f2a9426f9baca5e594",
+            "library": "lleaves.so",
+            "sha256": "6afd1b575c52ab77a4c9ef55ec493c8d4f678337f215aae2f2533227b16d3c88",
+            "status": "ready"
+          },
+          "tl2cgen": {
+            "effective": {
+              "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+              "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+              "nthread": 2,
+              "source_files": 32
+            },
+            "identity": {
+              "baseline": "tl2cgen",
+              "compiler": {
+                "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+                "target": "aarch64-linux-gnu",
+                "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+              },
+              "host_cpu": "unknown",
+              "model_sha256": "6260a1d225aba8ca0d1fa92034148d87bf5607d2c41d484ff6f0dcf37769dc62",
+              "schema_version": 2,
+              "settings": {
+                "max_nodes_per_file": 8000,
+                "options": [
+                  "-march=native"
+                ],
+                "params": {
+                  "parallel_comp": 32
+                },
+                "toolchain": "gcc"
+              },
+              "tl2cgen": "1.0.0",
+              "treelite": "4.7.2"
+            },
+            "key": "553e4fb9aa07b6f41847bea9b266a8fd82d4e359a228efe3de10de5e1cfcb455",
+            "library": "tl2cgen.so",
+            "sha256": "33beae95281147d140fc9609a5ae25935f013c53d90674470df038b2c4f91323",
+            "status": "ready"
+          }
+        },
+        "content_key": "723a412700880c3836249d8e02566337e53655453f38f6a1b174795883d757e8",
+        "contracts": {
+          "missing_in_monotonic": {},
+          "ok": true,
+          "violations": []
+        },
+        "data_sha256": {
+          "entities": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370",
+          "test_data": "b9b65ce696cacb829901d990e0ae3c7635a7e8a4a8e1cc7215e761715a9b468d",
+          "walker_config": "a356e88bad3b6c8ef8939d0dc137f696a8d79394b2dfc258e3baf0c97c1d8207"
+        },
+        "dataset": "support",
+        "feature_order": [
+          "x0",
+          "x1",
+          "x2",
+          "x3",
+          "x4",
+          "x5",
+          "x6",
+          "x7",
+          "x8",
+          "x9",
+          "x10",
+          "x11",
+          "x12",
+          "x13",
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ],
+        "features": {
+          "mono_dec": [
+            "remaining_steps",
+            "remaining_frac_sq"
+          ],
+          "mono_inc": [
+            "time_step",
+            "time_step_sq",
+            "interaction_x0_t"
+          ],
+          "realized_varying": [
+            "time_step",
+            "time_step_sq",
+            "remaining_steps",
+            "remaining_frac_sq",
+            "interaction_x0_t",
+            "hazard_bump"
+          ],
+          "varying": [
+            "time_step",
+            "time_step_sq",
+            "remaining_steps",
+            "remaining_frac_sq",
+            "interaction_x0_t",
+            "hazard_bump"
+          ]
+        },
+        "files": {
+          "entities": {
+            "path": "../../../entities.npy",
+            "sha256": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370"
+          },
+          "model_native": {
+            "path": "../../model_native.txt",
+            "sha256": "c80711586416f0d2ef106c1189dfa2c38217add2d49ce04c9ba54a5d9a9b994a"
+          },
+          "model_treelite_bin": {
+            "path": "../../model_treelite.bin",
+            "sha256": "6260a1d225aba8ca0d1fa92034148d87bf5607d2c41d484ff6f0dcf37769dc62"
+          },
+          "oracle": {
+            "path": "oracle.bin",
+            "sha256": "1f7616f5608a0e58f2473d40dcfb2af78ff287200af2bd6ac40a7973e038f3d0"
+          },
+          "predictions": {
+            "path": "../../predictions.npy",
+            "sha256": "1e5ab59b4153efc192c85ad7df2bcb3141be9801e8bec6dbcc496bfa2973b8ad"
+          },
+          "test_data": {
+            "path": "../../../test_data.bin",
+            "sha256": "b9b65ce696cacb829901d990e0ae3c7635a7e8a4a8e1cc7215e761715a9b468d"
+          },
+          "walker_config": {
+            "path": "../../../walker_config.json",
+            "sha256": "a356e88bad3b6c8ef8939d0dc137f696a8d79394b2dfc258e3baf0c97c1d8207"
+          }
+        },
+        "framework": "lightgbm",
+        "generator": "panel-v2",
+        "grouping": {
+          "kind": "panel",
+          "n_groups": 1774,
+          "rows": 28384,
+          "size_max": 16,
+          "size_mean": 16.0,
+          "size_min": 16,
+          "width": 16
+        },
+        "horizon": {
+          "realized": 16,
+          "requested": 16
+        },
+        "id": "support/nt500_md4_h16/lightgbm/panel",
+        "k": null,
+        "key": "1b7fb86bc08487934bdf5eea1984be6d0fb59eb5d764f86f7e4d3d6f01eb55d7",
+        "libraries": {
+          "lightgbm": "4.7.0",
+          "numpy": "2.5.3",
+          "polars": "1.44.2",
+          "treelite": "4.7.2"
+        },
+        "limits": [],
+        "max_depth": 4,
+        "model": {
+          "dir": "../..",
+          "key": "201d74cee036b817b00b021141a2092e9d0569ebad0337eda1e13fd102d0c0e7",
+          "structure": {
+            "max_tree_nodes": 29,
+            "total_nodes": 13152,
+            "trees": 500
+          },
+          "varying_predicates_upper_bound": 213
+        },
+        "model_key": "201d74cee036b817b00b021141a2092e9d0569ebad0337eda1e13fd102d0c0e7",
+        "n_trees": 500,
+        "oracle": {
+          "base_score": 0.0,
+          "divisor": 1.0,
+          "groups": [
+            26,
+            86,
+            150,
+            283,
+            384,
+            421,
+            463,
+            492,
+            500,
+            559,
+            566,
+            583,
+            703,
+            731,
+            816,
+            829,
+            844,
+            955,
+            1000,
+            1031,
+            1061,
+            1097,
+            1126,
+            1146,
+            1179,
+            1241,
+            1254,
+            1408,
+            1442,
+            1647,
+            1649,
+            1762
+          ],
+          "postprocessor": "sigmoid",
+          "sigmoid_alpha": 1.0,
+          "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+        },
+        "params": {},
+        "perturbation": null,
+        "prep_policy": 3,
+        "schema_version": 1,
+        "seeds": {
+          "split": 1886352030
+        },
+        "split": {
+          "seed": 1886352030,
+          "test_frac": 0.2,
+          "unit": "patient"
+        },
+        "status": "ready",
+        "train": {
+          "num_boost_round": 500,
+          "params": {
+            "learning_rate": 0.05,
+            "max_depth": 4,
+            "metric": "binary_logloss",
+            "num_leaves": 15,
+            "objective": "binary",
+            "seed": 42,
+            "verbose": -1
+          }
+        },
+        "warnings": [],
+        "workload": "panel"
+      },
+      "excluded": [],
+      "groups": 1774,
+      "id": "support/nt500_md4_h16/lightgbm/panel",
+      "load_seconds": {
+        "": 0.001104405
+      },
+      "methods": [
+        {
+          "candidates": [
+            "predict_group"
+          ],
+          "interface_one_row": "predict_group",
+          "interfaces": {
+            "serving": "predict_group"
+          },
+          "method": "treewalker",
+          "precision": "F64",
+          "settings": null,
+          "tolerance": 1e-13,
+          "validated": [
+            "predict_group"
+          ],
+          "variant": "all-on"
+        }
+      ],
+      "model": {
+        "bitset_bytes": 0,
+        "exact_sums": true,
+        "nodes": 13152,
+        "threshold_type": "F64",
+        "trees": 500
+      },
+      "model_bytes": 1177061,
+      "required_methods": [
+        "treewalker"
+      ],
+      "resume_key": "1553bfb2d87068f4f21c1d9bf226b5f2dd10c3f89192fc8d262727dc544d3a34",
+      "rows": 28384,
+      "run": {
+        "batch_rows": 1024,
+        "hardware_counters": true,
+        "max_rounds": 10,
+        "max_rows_per_round": 65536,
+        "min_groups_per_round": 200,
+        "min_rounds": 3,
+        "mode_budget_secs": 120.0,
+        "precision_pct": 1.0,
+        "seed": 42,
+        "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+        "sentinel_drift_pct": 3.0,
+        "sentinel_every": 25,
+        "target_batches": 12,
+        "xgboost_process_arches": [
+          "x86_64"
+        ],
+        "xgboost_processes": 6
+      },
+      "sample": null,
+      "seconds": 0.166003219,
+      "stop": {
+        "serving": {
+          "blocks": 36,
+          "blocks_per_round": 12,
+          "conversion": [],
+          "cycle": 1,
+          "failures": [],
+          "incomplete_reads": 0,
+          "probes": [],
+          "reason": "precision",
+          "rounds": 3,
+          "rse_pct": {
+            "treewalker/all-on": 0.24703500236546663
+          },
+          "seconds": 0.073949695,
+          "totals": {
+            "treewalker/all-on": [
+              65093412,
+              85152
+            ]
+          }
+        }
+      },
+      "suite": "acceptance",
+      "timed_groups": 1774,
+      "validation": {
+        "checks": [
+          {
+            "against": "predict",
+            "bitwise": true,
+            "interface": "predict_group",
+            "max_abs": 0.0,
+            "method": "treewalker",
+            "mismatches": 0,
+            "mode": "serving",
+            "passed": true,
+            "rows": 28384,
+            "tolerance": 0.0,
+            "variant": "all-on"
+          }
+        ],
+        "groups": 1774,
+        "oracle": {
+          "exact_sums": true,
+          "groups": 32,
+          "output_vs_predict": {
+            "mismatches": 0
+          },
+          "raw_margin": {
+            "bitwise": true,
+            "max_abs": 0.0,
+            "mismatches": 0
+          },
+          "rows": 512,
+          "status": "pass",
+          "tree_sum": {
+            "bitwise": true,
+            "max_abs": 0.0,
+            "mismatches": 0
+          }
+        },
+        "reference": {
+          "max_abs_vs_predict": 1.0547118733938987e-15,
+          "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+          "rows": 28384
+        }
+      },
+      "xgboost_processes": null
+    }
+  },
+  "001": {
+    "support/nt500_md4_h16/lightgbm/panel": {
+      "ablations": {},
+      "cell": {
+        "baselines": {
+          "lleaves": {
+            "effective": {
+              "cc": "/usr/bin/aarch64-linux-gnu-gcc-15",
+              "cc_version": "unknown",
+              "codegen": {
+                "codemodel": "default",
+                "cpu": "neoverse-v2",
+                "features": "+aes,+crc,+fp-armv8,+lse,+neon,+rand,+sha2,+sha3,+sm4,+sve,+sve-aes,+sve-sha3,+sve-sm4,+sve2",
+                "fp_contract": "on (TargetOptions default, FPOpFusion::Standard)",
+                "ir_optimization": "none",
+                "llvm": "22.1.0",
+                "opt": 3,
+                "reloc": "pic",
+                "triple": "aarch64-unknown-linux-gnu"
+              },
+              "fblocksize": 34,
+              "fp_contract": "on",
+              "link_command": [
+                "/usr/bin/aarch64-linux-gnu-gcc-15",
+                "-shared",
+                "-o",
+                "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/lleaves.so",
+                "<objects>"
+              ],
+              "lleaves": "1.4.1",
+              "llvmlite": "0.50.0",
+              "model": "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/model_native.txt",
+              "n_jobs": 4,
+              "opt_level": "3",
+              "output": "/home/bench/treewalker/experiments/artifacts/support/nt500_md4_h16/lightgbm/lleaves.so",
+              "relocation_model": "pic",
+              "target_cpu": "native",
+              "target_triple": "aarch64-unknown-linux-gnu",
+              "use_fp64": true
+            },
+            "identity": {
+              "baseline": "lleaves",
+              "cc": {
+                "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+                "target": "aarch64-linux-gnu",
+                "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+              },
+              "compile_lock_sha256": "761d1326ad45f3bdea0bc145b92f10c107e3958f1c99e16990faef4ff27a917a",
+              "compile_py_sha256": "fbf03429f403a7e43f9d59801dac7e946c57d2ad8637db4709f90ca9083ab543",
+              "host_cpu": "unknown",
+              "model_sha256": "c80711586416f0d2ef106c1189dfa2c38217add2d49ce04c9ba54a5d9a9b994a",
+              "schema_version": 2,
+              "settings": {
+                "cc": "/usr/bin/aarch64-linux-gnu-gcc-15",
+                "fblocksize": 34,
+                "fp_contract": "on",
+                "n_jobs": 4,
+                "opt_level": "3",
+                "relocation_model": "pic",
+                "target_cpu": "native",
+                "use_fp64": true
+              }
+            },
+            "key": "503c709bb4600366a46397b7caca519934c02deac2f2b6f2a9426f9baca5e594",
+            "library": "lleaves.so",
+            "sha256": "6afd1b575c52ab77a4c9ef55ec493c8d4f678337f215aae2f2533227b16d3c88",
+            "status": "ready"
+          },
+          "tl2cgen": {
+            "effective": {
+              "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+              "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+              "nthread": 2,
+              "source_files": 32
+            },
+            "identity": {
+              "baseline": "tl2cgen",
+              "compiler": {
+                "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+                "target": "aarch64-linux-gnu",
+                "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+              },
+              "host_cpu": "unknown",
+              "model_sha256": "6260a1d225aba8ca0d1fa92034148d87bf5607d2c41d484ff6f0dcf37769dc62",
+              "schema_version": 2,
+              "settings": {
+                "max_nodes_per_file": 8000,
+                "options": [
+                  "-march=native"
+                ],
+                "params": {
+                  "parallel_comp": 32
+                },
+                "toolchain": "gcc"
+              },
+              "tl2cgen": "1.0.0",
+              "treelite": "4.7.2"
+            },
+            "key": "553e4fb9aa07b6f41847bea9b266a8fd82d4e359a228efe3de10de5e1cfcb455",
+            "library": "tl2cgen.so",
+            "sha256": "33beae95281147d140fc9609a5ae25935f013c53d90674470df038b2c4f91323",
+            "status": "ready"
+          }
+        },
+        "content_key": "723a412700880c3836249d8e02566337e53655453f38f6a1b174795883d757e8",
+        "contracts": {
+          "missing_in_monotonic": {},
+          "ok": true,
+          "violations": []
+        },
+        "data_sha256": {
+          "entities": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370",
+          "test_data": "b9b65ce696cacb829901d990e0ae3c7635a7e8a4a8e1cc7215e761715a9b468d",
+          "walker_config": "a356e88bad3b6c8ef8939d0dc137f696a8d79394b2dfc258e3baf0c97c1d8207"
+        },
+        "dataset": "support",
+        "feature_order": [
+          "x0",
+          "x1",
+          "x2",
+          "x3",
+          "x4",
+          "x5",
+          "x6",
+          "x7",
+          "x8",
+          "x9",
+          "x10",
+          "x11",
+          "x12",
+          "x13",
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ],
+        "features": {
+          "mono_dec": [
+            "remaining_steps",
+            "remaining_frac_sq"
+          ],
+          "mono_inc": [
+            "time_step",
+            "time_step_sq",
+            "interaction_x0_t"
+          ],
+          "realized_varying": [
+            "time_step",
+            "time_step_sq",
+            "remaining_steps",
+            "remaining_frac_sq",
+            "interaction_x0_t",
+            "hazard_bump"
+          ],
+          "varying": [
+            "time_step",
+            "time_step_sq",
+            "remaining_steps",
+            "remaining_frac_sq",
+            "interaction_x0_t",
+            "hazard_bump"
+          ]
+        },
+        "files": {
+          "entities": {
+            "path": "../../../entities.npy",
+            "sha256": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370"
+          },
+          "model_native": {
+            "path": "../../model_native.txt",
+            "sha256": "c80711586416f0d2ef106c1189dfa2c38217add2d49ce04c9ba54a5d9a9b994a"
+          },
+          "model_treelite_bin": {
+            "path": "../../model_treelite.bin",
+            "sha256": "6260a1d225aba8ca0d1fa92034148d87bf5607d2c41d484ff6f0dcf37769dc62"
+          },
+          "oracle": {
+            "path": "oracle.bin",
+            "sha256": "1f7616f5608a0e58f2473d40dcfb2af78ff287200af2bd6ac40a7973e038f3d0"
+          },
+          "predictions": {
+            "path": "../../predictions.npy",
+            "sha256": "1e5ab59b4153efc192c85ad7df2bcb3141be9801e8bec6dbcc496bfa2973b8ad"
+          },
+          "test_data": {
+            "path": "../../../test_data.bin",
+            "sha256": "b9b65ce696cacb829901d990e0ae3c7635a7e8a4a8e1cc7215e761715a9b468d"
+          },
+          "walker_config": {
+            "path": "../../../walker_config.json",
+            "sha256": "a356e88bad3b6c8ef8939d0dc137f696a8d79394b2dfc258e3baf0c97c1d8207"
+          }
+        },
+        "framework": "lightgbm",
+        "generator": "panel-v2",
+        "grouping": {
+          "kind": "panel",
+          "n_groups": 1774,
+          "rows": 28384,
+          "size_max": 16,
+          "size_mean": 16.0,
+          "size_min": 16,
+          "width": 16
+        },
+        "horizon": {
+          "realized": 16,
+          "requested": 16
+        },
+        "id": "support/nt500_md4_h16/lightgbm/panel",
+        "k": null,
+        "key": "1b7fb86bc08487934bdf5eea1984be6d0fb59eb5d764f86f7e4d3d6f01eb55d7",
+        "libraries": {
+          "lightgbm": "4.7.0",
+          "numpy": "2.5.3",
+          "polars": "1.44.2",
+          "treelite": "4.7.2"
+        },
+        "limits": [],
+        "max_depth": 4,
+        "model": {
+          "dir": "../..",
+          "key": "201d74cee036b817b00b021141a2092e9d0569ebad0337eda1e13fd102d0c0e7",
+          "structure": {
+            "max_tree_nodes": 29,
+            "total_nodes": 13152,
+            "trees": 500
+          },
+          "varying_predicates_upper_bound": 213
+        },
+        "model_key": "201d74cee036b817b00b021141a2092e9d0569ebad0337eda1e13fd102d0c0e7",
+        "n_trees": 500,
+        "oracle": {
+          "base_score": 0.0,
+          "divisor": 1.0,
+          "groups": [
+            26,
+            86,
+            150,
+            283,
+            384,
+            421,
+            463,
+            492,
+            500,
+            559,
+            566,
+            583,
+            703,
+            731,
+            816,
+            829,
+            844,
+            955,
+            1000,
+            1031,
+            1061,
+            1097,
+            1126,
+            1146,
+            1179,
+            1241,
+            1254,
+            1408,
+            1442,
+            1647,
+            1649,
+            1762
+          ],
+          "postprocessor": "sigmoid",
+          "sigmoid_alpha": 1.0,
+          "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+        },
+        "params": {},
+        "perturbation": null,
+        "prep_policy": 3,
+        "schema_version": 1,
+        "seeds": {
+          "split": 1886352030
+        },
+        "split": {
+          "seed": 1886352030,
+          "test_frac": 0.2,
+          "unit": "patient"
+        },
+        "status": "ready",
+        "train": {
+          "num_boost_round": 500,
+          "params": {
+            "learning_rate": 0.05,
+            "max_depth": 4,
+            "metric": "binary_logloss",
+            "num_leaves": 15,
+            "objective": "binary",
+            "seed": 42,
+            "verbose": -1
+          }
+        },
+        "warnings": [],
+        "workload": "panel"
+      },
+      "excluded": [],
+      "groups": 1774,
+      "id": "support/nt500_md4_h16/lightgbm/panel",
+      "load_seconds": {
+        "": 0.00126586
+      },
+      "methods": [
+        {
+          "candidates": [
+            "predict_group"
+          ],
+          "interface_one_row": "predict_group",
+          "interfaces": {
+            "serving": "predict_group"
+          },
+          "method": "treewalker",
+          "precision": "F64",
+          "settings": null,
+          "tolerance": 1e-13,
+          "validated": [
+            "predict_group"
+          ],
+          "variant": "all-on"
+        }
+      ],
+      "model": {
+        "bitset_bytes": 0,
+        "exact_sums": true,
+        "nodes": 13152,
+        "threshold_type": "F64",
+        "trees": 500
+      },
+      "model_bytes": 1177061,
+      "required_methods": [
+        "treewalker"
+      ],
+      "resume_key": "1553bfb2d87068f4f21c1d9bf226b5f2dd10c3f89192fc8d262727dc544d3a34",
+      "rows": 28384,
+      "run": {
+        "batch_rows": 1024,
+        "hardware_counters": true,
+        "max_rounds": 10,
+        "max_rows_per_round": 65536,
+        "min_groups_per_round": 200,
+        "min_rounds": 3,
+        "mode_budget_secs": 120.0,
+        "precision_pct": 1.0,
+        "seed": 42,
+        "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+        "sentinel_drift_pct": 3.0,
+        "sentinel_every": 25,
+        "target_batches": 12,
+        "xgboost_process_arches": [
+          "x86_64"
+        ],
+        "xgboost_processes": 6
+      },
+      "sample": null,
+      "seconds": 0.16364584,
+      "stop": {
+        "serving": {
+          "blocks": 36,
+          "blocks_per_round": 12,
+          "conversion": [],
+          "cycle": 1,
+          "failures": [],
+          "incomplete_reads": 0,
+          "probes": [],
+          "reason": "precision",
+          "rounds": 3,
+          "rse_pct": {
+            "treewalker/all-on": 0.26815480649663526
+          },
+          "seconds": 0.073838592,
+          "totals": {
+            "treewalker/all-on": [
+              64873361,
+              85152
+            ]
+          }
+        }
+      },
+      "suite": "acceptance",
+      "timed_groups": 1774,
+      "validation": {
+        "checks": [
+          {
+            "against": "predict",
+            "bitwise": true,
+            "interface": "predict_group",
+            "max_abs": 0.0,
+            "method": "treewalker",
+            "mismatches": 0,
+            "mode": "serving",
+            "passed": true,
+            "rows": 28384,
+            "tolerance": 0.0,
+            "variant": "all-on"
+          }
+        ],
+        "groups": 1774,
+        "oracle": {
+          "exact_sums": true,
+          "groups": 32,
+          "output_vs_predict": {
+            "mismatches": 0
+          },
+          "raw_margin": {
+            "bitwise": true,
+            "max_abs": 0.0,
+            "mismatches": 0
+          },
+          "rows": 512,
+          "status": "pass",
+          "tree_sum": {
+            "bitwise": true,
+            "max_abs": 0.0,
+            "mismatches": 0
+          }
+        },
+        "reference": {
+          "max_abs_vs_predict": 1.0547118733938987e-15,
+          "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+          "rows": 28384
+        }
+      },
+      "xgboost_processes": null
+    }
+  }
+}

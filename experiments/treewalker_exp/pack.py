@@ -84,9 +84,21 @@ def is_packed(run_dir: Path) -> bool:
     return (run_dir / CELLS).exists()
 
 
+# The first line of a git-lfs pointer file, which a checkout without `git lfs pull`
+# (or a `git archive`) leaves in place of the Parquet.
+LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
+
+
 def require_packed(run_dir: Path) -> None:
+    """A packed run whose tables are real Parquet, not git-lfs pointers."""
     if not is_packed(run_dir):
         raise ValueError(f"{run_dir} is not packed: treewalker-exp pack {run_dir}")
+    for table in TABLES:
+        path = Path(run_dir) / f"{table}.parquet"
+        if path.exists():
+            with path.open("rb") as f:
+                if f.read(len(LFS_POINTER)) == LFS_POINTER:
+                    raise ValueError(f"{path} is a git-lfs pointer: run `git lfs pull`")
 
 
 def target_schema(source: Any, table: str) -> Any:

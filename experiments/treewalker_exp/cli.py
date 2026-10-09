@@ -412,6 +412,71 @@ def pack(
 
 
 @app.command()
+def figures(
+    out: Annotated[
+        Path | None, typer.Option(help="Output directory (experiments/figures).")
+    ] = None,
+) -> None:
+    """The paper's figures from the final runs: PNG and PDF, and the heatmap as TikZ."""
+    from . import figures as fg
+
+    paths = _paths()
+    fg.generate(paths.runs, out or paths.figures)
+
+
+@app.command()
+def tables(
+    out: Annotated[
+        Path | None, typer.Option(help="Output directory (experiments/figures).")
+    ] = None,
+) -> None:
+    """The paper's tables from the final runs: Table 1 as TeX, Tables 3 and 10 as Markdown."""
+    from . import tables as tb
+
+    paths = _paths()
+    tb.generate(paths.runs, out or paths.figures)
+
+
+@app.command()
+def numbers(
+    out: Annotated[
+        Path | None, typer.Option(help="Output directory (experiments/figures).")
+    ] = None,
+) -> None:
+    """The paper's in-text numbers from the final runs, with their paper locations."""
+    from . import numbers as nb
+
+    paths = _paths()
+    print("\n".join(nb.generate(paths.runs, out or paths.figures)))
+
+
+@app.command("audit-f32")
+def audit_f32(
+    list_missing: Annotated[
+        bool, typer.Option(help="Print the artifacts the audit needs that are not present.")
+    ] = False,
+    out: Annotated[
+        Path | None, typer.Option(help="Output directory (experiments/figures).")
+    ] = None,
+) -> None:
+    """App. A.3: native XGBoost's raw margins against the correctly rounded reference
+    (the stage oracle), one factorial cell per model; TreeWalker's side is the final
+    run's bit-for-bit oracle check."""
+    from . import audit, grids
+
+    paths = _paths()
+    doc = grids.load(paths.grids)
+    if list_missing:
+        print("\n".join(str(p) for p in audit.missing(paths.artifacts, doc)))
+        return
+    lines = audit.report(paths.runs, paths.artifacts, doc)
+    target = out or paths.figures
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "audit_f32.md").write_text("\n".join(lines) + "\n")
+    print("\n".join(lines[:9]))
+
+
+@app.command()
 def summarize(
     run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
     reference: Annotated[str, typer.Option(help="The method speedups are against.")] = "treewalker",

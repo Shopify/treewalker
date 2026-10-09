@@ -6,13 +6,14 @@ Inference** (Durmus Karatay and Richard Newman, NeurIPS 2026).
 TreeWalker evaluates a trained tree ensemble on groups of rows that share most
 feature values. It walks each tree once per group, partitions a row bitmask at
 splits on varying features, and skips empty subtrees. This repository contains
-the engine, the benchmark harness, the scripts that turn public datasets into
-models and benchmark runs, the result CSVs behind every number in the paper,
-and the cloud setup used for the measurements.
+the engine, the benchmark harness, the `treewalker-exp` package that turns
+public datasets into models, runs the benchmark suites and computes the
+paper's figures, tables and numbers, the raw measurements of the final run,
+and the cloud setup used for them.
 
-The released results use the engine preserved under the `neurips2026` tag.
-The current library adds validated scalar Treelite loading. These changes are
-separate from the archived paper measurements.
+The measurements here are the 2.0 engine's final run (October 2026). The
+paper as submitted, its engine, its result CSVs and the scripts that read them
+are preserved under the `neurips2026` tag.
 
 This repository serves two purposes: as a source for the library and as a
 permanent archive of the code at time of submission. The latter can always be
@@ -26,8 +27,8 @@ found [under the neurips2026 tag](https://github.com/Shopify/treewalker/releases
 | `experiments/benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
 | `experiments/treewalker_exp/` | `treewalker-exp`: dataset preparation, workloads, training, compiled baselines |
 | `experiments/grids.toml` | the benchmark suites, resolved by `treewalker-exp` into execution manifests |
-| `experiments/scripts/` | figures, tables and the chunked-G run, on the released CSVs |
-| `experiments/data/` | released result CSVs and machine descriptions |
+| `experiments/data/runs/` | the final run's raw measurements: packed runs, Parquet in git-lfs |
+| `experiments/figures/` | figures, tables and numbers `treewalker-exp` generates (git-ignored) |
 | `infra/` | Terraform and VM startup script for the two GCE benchmark machines |
 
 ## Building and packaging the library
@@ -166,58 +167,67 @@ The factorial suite also prepares two kinds of derived models
 
 ## Released results
 
-All latencies are medians of per-block medians, in µs per observation (group);
-`p5_us` and `p95_us` are over block medians and `iters` is the number of
-blocks.
+`experiments/data/runs/` holds the final run, one directory per run ID, packed
+with `treewalker-exp pack`: `run.json` (configuration, host, timer, sentinel and
+the order cells ran in), `cells.json` (each cell's manifest: its sample,
+validation, stopping, probes and XGBoost's processes), the `samples`, `groups`,
+`counters` and `hw` tables, `timer.parquet`, and the sentinel's cells under
+`sentinel/`. The tables are Parquet in git-lfs: run `git lfs pull` after cloning.
 
-| File | Experiment |
+| Run | Contents |
 |---|---|
-| `grid1_results_{intel,arm}.csv` | factorial grid: 3 datasets × 2 frameworks × 4 T × 4 L × 8 G, all methods |
-| `grid3_results_{intel,arm}.csv`, `grid3_stats_{intel,arm}.csv` | ablations (timing) and work counters |
-| `grid4_results_{intel,arm}.csv` | Expedia group-size distributions |
-| `scenario_credit_{results,stats}_{intel,arm}.csv` | scenario-analysis benchmark (§5.6, App. E); latencies are per scenario set of G variants |
-| `chunked_g_results_{intel,arm}.csv` | groups wider than 128 rows (App. F), µs per row |
-| `system_info_{intel,arm}.txt` | machine and toolchain for the scenario and chunked runs |
+| `acceptance-{x86_64,aarch64}` | 17 acceptance cells |
+| `factorial-{x86_64,aarch64}` | 1,134 cells: survival panels (SUPPORT and FLCHAIN, horizons 1-128; FLCHAIN also 256-1,024), Expedia sessions, cohorts of 4-32 rows and filled missing values, the credit and reference what-ifs, and seed replicates |
+| `ablation-{x86_64,aarch64}` | 36 cells with every switch and their combinations, in serving and batch mode |
+| `layout-{default,align64}-{x86_64,aarch64}` | the acceptance cells with default and 64-byte-aligned functions |
 
 ## Reproducing the tables and figures
 
-This needs only Python 3.14 (`.python-version`) and [uv](https://docs.astral.sh/uv/), not the
-benchmark machines. From the repository root:
+This needs Python 3.14 (`.python-version`), [uv](https://docs.astral.sh/uv/) and
+git-lfs, not the benchmark machines. From the repository root:
 
 ```bash
+git lfs pull
 uv sync
-uv run python3 experiments/scripts/plot.py                    # Figures 3, 4, 6-9
-uv run python3 experiments/scripts/gen_heatmap_tex.py         # Figure 2
-uv run python3 experiments/scripts/decomposition_validation.py  # Table 1, Figure 5
-uv run python3 experiments/scripts/summarize_scenario.py --arch arm   # Tables 3, 10 (also --arch intel)
-uv run python3 experiments/scripts/paper_numbers.py           # every in-text number
+uv run treewalker-exp figures   # Figures 2-9: PNG and PDF, and the heatmap as TikZ
+uv run treewalker-exp tables    # Table 1 (TeX), Tables 3 and 10 (Markdown)
+uv run treewalker-exp numbers   # every in-text number, with its paper location
+uv run treewalker-exp summarize experiments/data/runs/factorial-x86_64   # one run, cell by cell
 ```
 
-Outputs go to `experiments/figures/`. `paper_numbers.py` prints each
-number next to the value printed in the paper.
+Outputs go to `experiments/figures/`. The f32 audit also needs prepared models
+and cells under `experiments/artifacts/`; `treewalker-exp audit-f32
+--list-missing` lists the files it reads.
 
-| Paper item | Source |
-|---|---|
-| Table 1, Figure 5 | `decomposition_validation.py` on `grid3_stats_intel.csv` |
-| Figure 2 (heatmap) | `gen_heatmap_tex.py` on `grid1_results_intel.csv` |
-| Figures 3, 4, 6-9 | `plot.py` on `grid1`, `grid3`, `grid4` |
-| Tables 3 and 10 | `summarize_scenario.py`, `scenario_credit_*` |
-| Table 11 | `chunked_g_results_*.csv` |
-| Tables 9 and in-text counts (§5, §6, App. A.6, App. D) | `paper_numbers.py` |
-| App. A.3 (f32 audit) | `audit_f32.py` (needs prepared artifacts) |
+| Paper item | Command | Output |
+|---|---|---|
+| Figure 2 (heatmap) | `figures` | `speedup_heatmap.{pdf,png,tex}` |
+| Figures 3, 4, 6-9 | `figures` | `horizon_amortization`, `method_comparison`, `cross_platform`, `ablation_waterfall`, `ablation_nodes`, `depth_sensitivity`, `ntrees_scaling` |
+| Table 1, Figure 5 | `tables`, `figures` | `decomposition_table.tex`, `asymptotic_convergence` |
+| Tables 3 and 10 | `tables` | `scenario_credit_{intel,arm}.md` |
+| Tables 9 and 11, in-text numbers (§4-§7, App. A.6, D, F) | `numbers` | `paper_numbers.txt` |
+| App. A.3 (f32 audit) | `audit-f32` | `audit_f32.md` |
+
+A speedup is the ratio of mean time per row over the same groups, with a 95%
+bootstrap interval that resamples entities and rounds as crossed clusters;
+latencies are the median per group. LightGBM native is corrected for the drift
+the sentinel measured over the run, and XGBoost native is its faster mode where
+it shows two. The v1 scripts compared medians; `numbers` keeps their items, and
+its module docstring says where an item changed.
 
 ## Rerunning the benchmarks
 
-The paper's measurements ran on two Google Compute Engine VMs in
-`us-central1-a`: `c4-standard-32` (Intel Xeon Platinum 8581C) and
-`c4a-highmem-16` (Google Axion, Neoverse V2), Ubuntu 24.04, SMT disabled,
-performance governor, ASLR off, pinned to one core with `taskset -c 0`.
-LightGBM 4.6.0 and XGBoost 3.2.0 were built from source with `-march=native`,
-TreeWalker with `-C target-cpu=native` (`.cargo/config.toml`). The factorial
-grid used Rust 1.94.1; the scenario and chunked runs used Rust 1.97.1, the
-version now pinned in `rust-toolchain.toml`. `infra/scripts/startup.sh` is the
-full machine recipe; it now builds the versions `uv.lock` installs, LightGBM
-4.7.0 and XGBoost 3.4.1.
+The final run ran on two Google Compute Engine VMs in `us-east4-a`:
+`c4-standard-32` (Intel Xeon Platinum 8581C, at its all-core turbo) and
+`c4a-highmem-16` (Google Axion, Neoverse V2), Ubuntu 26.04, SMT disabled, ASLR
+off, hardware counters at the PMU's `STANDARD` level, pinned to one core with
+`taskset -c 0`. LightGBM 4.7.0 and XGBoost 3.4.1, the versions `uv.lock`
+installs, were built from source for the host, and TreeWalker with
+`-C target-cpu=native` and Rust 1.97.1 (`rust-toolchain.toml`). Each
+`run.json` records the rest (`host`, `system_info`).
+`infra/scripts/startup.sh` is the full machine recipe. The paper's
+measurements (the `neurips2026` tag) ran on the same machine types in
+`us-central1-a`.
 
 ### On GCE with Terraform
 
@@ -337,17 +347,13 @@ over any index in a user's uv configuration. Relock with `uv lock`,
 
 ### What to expect from a rerun
 
-A clean-room rerun (September 2026, fresh VMs of the same machine types in
-`us-east4-a`, built from this repository) reproduced every work counter
-exactly: all 932 ablation-grid rows per architecture and all 32
-scenario-analysis rows match the released CSVs, because training is
-deterministic (seed 42) and the engine does identical work. Timings vary with
-the host. On Arm, algorithmic speedups moved by a median of +0.9%, and 91% of
-the 544 grid cells were within 5% of the released values. On Intel, the whole
-VM ran about 19% faster (median TreeWalker latency), and speedups moved by a
-median of +3.4% (interquartile range -0.5% to +9.2%). Every qualitative result
-held, but exact values move, so `paper_numbers.py` matches the paper exactly
-only on the released CSVs.
+Work counters are deterministic: the final run's counts are identical on both
+machines, and on the paper's models they equal the paper's (Table 1's FLCHAIN
+row, for one). Timings vary with the host. Each cell stops at a 1% precision
+target, or its block cap or time budget, and reports bootstrap intervals; the
+sentinel measures drift over the run (LightGBM native rose by up to 6.9% on
+Intel, which `figures` and `numbers` correct). Exact values move between
+reruns.
 
 ## Correctness
 
@@ -380,5 +386,5 @@ FLCHAIN at horizon 1,024; the XGBoost models' outputs are bit-identical.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). This covers the code and the released result
-CSVs; the datasets keep their own terms (see Datasets).
+MIT, see [LICENSE](LICENSE). This covers the code and the released
+measurements; the datasets keep their own terms (see Datasets).
