@@ -147,9 +147,20 @@ export DEBIAN_FRONTEND=noninteractive
 if [ -n "$APT_SNAPSHOT" ]; then
   echo "APT::Snapshot \"$APT_SNAPSHOT\";" > /etc/apt/apt.conf.d/50snapshot
 fi
-apt-get update -qq
-apt-get upgrade -y -qq
-apt-get install -y -qq build-essential cmake git curl pkg-config libgomp1
+# snapshot.ubuntu.com sometimes answers 503 for some index files, and apt goes on
+# without them, so the install finds no packages (two deployments failed so on
+# 2026-10-09). Retry until every index downloads; package downloads retry too.
+for attempt in $(seq 1 30); do
+  apt-get update -qq > /tmp/apt-update.log 2>&1 || true
+  if ! grep -q -E '^(W: Failed to fetch|E: )' /tmp/apt-update.log; then
+    break
+  fi
+  [ "$attempt" -lt 30 ] || { cat /tmp/apt-update.log; fail "apt-get update: indexes still failing after 30 attempts"; }
+  log "apt-get update: some indexes failed (attempt $attempt of 30); retrying in 20 s"
+  sleep 20
+done
+apt-get upgrade -y -qq -o Acquire::Retries=5
+apt-get install -y -qq -o Acquire::Retries=5 build-essential cmake git curl pkg-config libgomp1
 log "cmake: $(cmake --version | head -1); gcc: $(gcc --version | head -1)"
 log "apt: $(apt-cache policy gcc | grep -m1 -E 'https?://' | sed -E 's/^ +//')"
 
