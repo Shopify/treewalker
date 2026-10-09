@@ -1,0 +1,6193 @@
+{
+  "binary_sha256": "2b237d980fa603c6479f3b926686a71bff8313faa92a2576f4f0857585b19061",
+  "events": {
+    "events": [
+      {
+        "code": 17,
+        "column": "cycles",
+        "kind": "raw",
+        "name": "CPU_CYCLES"
+      },
+      {
+        "code": 8,
+        "column": "instructions",
+        "kind": "raw",
+        "name": "INST_RETIRED"
+      },
+      {
+        "code": 16,
+        "column": "branch_misses",
+        "kind": "raw",
+        "name": "BR_MIS_PRED"
+      },
+      {
+        "code": 57,
+        "column": "l1d_load_misses",
+        "kind": "raw",
+        "name": "L1D_CACHE_LMISS_RD"
+      },
+      {
+        "code": 16393,
+        "column": "l2_data_read_misses",
+        "kind": "raw",
+        "name": "L2D_CACHE_LMISS_RD"
+      },
+      {
+        "code": 3,
+        "column": "context_switches",
+        "kind": "software",
+        "name": "PERF_COUNT_SW_CONTEXT_SWITCHES"
+      },
+      {
+        "code": 1,
+        "column": "task_clock_ns",
+        "kind": "software",
+        "name": "PERF_COUNT_SW_TASK_CLOCK"
+      }
+    ],
+    "table": "neoverse-v2"
+  },
+  "hardware_counters": "ok",
+  "host": {
+    "arch": "aarch64",
+    "aslr": "0",
+    "cpu": "0xd4f",
+    "cpu_id": {
+      "cpu_family": null,
+      "cpu_implementer": "0x41",
+      "cpu_part": "0xd4f",
+      "model": null,
+      "stepping": null,
+      "vendor_id": null
+    },
+    "features": [
+      "external-bench",
+      "quickscorer-bench",
+      "pmu"
+    ],
+    "governor": null,
+    "kernel": "7.0.0-1011-gcp",
+    "kernel_version": "#11-Ubuntu SMP PREEMPT Tue Aug 11 17:16:20 UTC 2026",
+    "logical_cpus": 1,
+    "os": "linux",
+    "perf_event_paranoid": "2",
+    "pinned_cpus": [
+      0
+    ],
+    "profile": "release",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "rustflags": "-C target-cpu=native",
+    "smt_active": "0"
+  },
+  "invocations": [
+    {
+      "cells_done": [
+        {
+          "id": "support/nt50_md2_h1/lightgbm/panel",
+          "seconds": 0.038124097
+        },
+        {
+          "id": "support/nt50_md2_h1/xgboost/panel",
+          "seconds": 0.188722063
+        },
+        {
+          "id": "support/nt50_md2_h2/lightgbm/panel",
+          "seconds": 0.061149108
+        },
+        {
+          "id": "support/nt50_md2_h2/xgboost/panel",
+          "seconds": 0.159103018
+        },
+        {
+          "id": "support/nt50_md2_h4/lightgbm/panel",
+          "seconds": 0.111910936
+        },
+        {
+          "id": "support/nt50_md2_h4/xgboost/panel",
+          "seconds": 0.153474954
+        },
+        {
+          "id": "support/nt50_md2_h8/lightgbm/panel",
+          "seconds": 0.119841694
+        },
+        {
+          "id": "support/nt50_md2_h8/xgboost/panel",
+          "seconds": 0.223266297
+        },
+        {
+          "id": "support/nt50_md2_h16/lightgbm/panel",
+          "seconds": 0.196160199
+        },
+        {
+          "id": "support/nt50_md2_h16/xgboost/panel",
+          "seconds": 0.361793697
+        },
+        {
+          "id": "support/nt50_md2_h32/lightgbm/panel",
+          "seconds": 0.340998907
+        },
+        {
+          "id": "support/nt50_md2_h32/xgboost/panel",
+          "seconds": 0.643132408
+        },
+        {
+          "id": "support/nt50_md2_h64/lightgbm/panel",
+          "seconds": 0.380863956
+        },
+        {
+          "id": "support/nt50_md2_h64/xgboost/panel",
+          "seconds": 0.713718706
+        },
+        {
+          "id": "support/nt50_md2_h128/lightgbm/panel",
+          "seconds": 0.373335991
+        },
+        {
+          "id": "support/nt50_md2_h128/xgboost/panel",
+          "seconds": 0.702379249
+        },
+        {
+          "id": "support/nt50_md4_h1/lightgbm/panel",
+          "seconds": 0.13113786
+        },
+        {
+          "id": "support/nt50_md4_h1/xgboost/panel",
+          "seconds": 0.217995207
+        },
+        {
+          "id": "support/nt50_md4_h2/lightgbm/panel",
+          "seconds": 0.212711031
+        },
+        {
+          "id": "support/nt50_md4_h2/xgboost/panel",
+          "seconds": 0.388515992
+        },
+        {
+          "id": "support/nt50_md4_h4/lightgbm/panel",
+          "seconds": 0.141596744
+        },
+        {
+          "id": "support/nt50_md4_h4/xgboost/panel",
+          "seconds": 0.267466865
+        },
+        {
+          "id": "support/nt50_md4_h8/lightgbm/panel",
+          "seconds": 0.225180936
+        },
+        {
+          "id": "support/nt50_md4_h8/xgboost/panel",
+          "seconds": 0.365009932
+        },
+        {
+          "id": "support/nt50_md4_h16/lightgbm/panel",
+          "seconds": 0.355430212
+        },
+        {
+          "id": "support/nt50_md4_h16/xgboost/panel",
+          "seconds": 0.490263764
+        },
+        {
+          "id": "support/nt50_md4_h32/lightgbm/panel",
+          "seconds": 0.599630462
+        },
+        {
+          "id": "support/nt50_md4_h32/xgboost/panel",
+          "seconds": 0.831587021
+        },
+        {
+          "id": "support/nt50_md4_h64/lightgbm/panel",
+          "seconds": 0.640087581
+        },
+        {
+          "id": "support/nt50_md4_h64/xgboost/panel",
+          "seconds": 0.991867019
+        },
+        {
+          "id": "support/nt50_md4_h128/lightgbm/panel",
+          "seconds": 0.721105824
+        },
+        {
+          "id": "support/nt50_md4_h128/xgboost/panel",
+          "seconds": 0.97013652
+        },
+        {
+          "id": "support/nt50_md8_h1/lightgbm/panel",
+          "seconds": 0.250152081
+        },
+        {
+          "id": "support/nt50_md8_h1/xgboost/panel",
+          "seconds": 0.342793391
+        },
+        {
+          "id": "support/nt50_md8_h2/lightgbm/panel",
+          "seconds": 0.446918848
+        },
+        {
+          "id": "support/nt50_md8_h2/xgboost/panel",
+          "seconds": 0.354385339
+        },
+        {
+          "id": "support/nt50_md8_h4/lightgbm/panel",
+          "seconds": 0.331924812
+        },
+        {
+          "id": "support/nt50_md8_h4/xgboost/panel",
+          "seconds": 0.553022975
+        },
+        {
+          "id": "support/nt50_md8_h8/lightgbm/panel",
+          "seconds": 0.537561982
+        },
+        {
+          "id": "support/nt50_md8_h8/xgboost/panel",
+          "seconds": 0.852432894
+        },
+        {
+          "id": "support/nt50_md8_h16/lightgbm/panel",
+          "seconds": 0.842731122
+        },
+        {
+          "id": "support/nt50_md8_h16/xgboost/panel",
+          "seconds": 1.134609776
+        },
+        {
+          "id": "support/nt50_md8_h32/lightgbm/panel",
+          "seconds": 1.310586753
+        },
+        {
+          "id": "support/nt50_md8_h32/xgboost/panel",
+          "seconds": 1.684361617
+        },
+        {
+          "id": "support/nt50_md8_h64/lightgbm/panel",
+          "seconds": 1.265156925
+        },
+        {
+          "id": "support/nt50_md8_h64/xgboost/panel",
+          "seconds": 1.605091271
+        },
+        {
+          "id": "support/nt50_md8_h128/lightgbm/panel",
+          "seconds": 1.194078841
+        },
+        {
+          "id": "support/nt50_md8_h128/xgboost/panel",
+          "seconds": 1.49265483
+        },
+        {
+          "id": "support/nt50_md16_h1/lightgbm/panel",
+          "seconds": 0.198924276
+        },
+        {
+          "id": "support/nt50_md16_h1/xgboost/panel",
+          "seconds": 0.317913111
+        },
+        {
+          "id": "support/nt50_md16_h2/lightgbm/panel",
+          "seconds": 0.543724932
+        },
+        {
+          "id": "support/nt50_md16_h2/xgboost/panel",
+          "seconds": 1.551711464
+        },
+        {
+          "id": "support/nt50_md16_h4/lightgbm/panel",
+          "seconds": 0.692453743
+        },
+        {
+          "id": "support/nt50_md16_h4/xgboost/panel",
+          "seconds": 2.340793061
+        },
+        {
+          "id": "support/nt50_md16_h8/lightgbm/panel",
+          "seconds": 1.281475607
+        },
+        {
+          "id": "support/nt50_md16_h8/xgboost/panel",
+          "seconds": 3.306649162
+        },
+        {
+          "id": "support/nt50_md16_h16/lightgbm/panel",
+          "seconds": 2.344748967
+        },
+        {
+          "id": "support/nt50_md16_h16/xgboost/panel",
+          "seconds": 4.466648757
+        },
+        {
+          "id": "support/nt50_md16_h32/lightgbm/panel",
+          "seconds": 4.213603496
+        },
+        {
+          "id": "support/nt50_md16_h32/xgboost/panel",
+          "seconds": 6.468061663
+        },
+        {
+          "id": "support/nt50_md16_h64/lightgbm/panel",
+          "seconds": 3.750036838
+        },
+        {
+          "id": "support/nt50_md16_h64/xgboost/panel",
+          "seconds": 5.691585255
+        },
+        {
+          "id": "support/nt50_md16_h128/lightgbm/panel",
+          "seconds": 3.591510076
+        },
+        {
+          "id": "support/nt50_md16_h128/xgboost/panel",
+          "seconds": 4.792112087
+        },
+        {
+          "id": "support/nt500_md2_h1/lightgbm/panel",
+          "seconds": 0.193837941
+        },
+        {
+          "id": "support/nt500_md2_h1/xgboost/panel",
+          "seconds": 0.238710594
+        },
+        {
+          "id": "support/nt500_md2_h2/lightgbm/panel",
+          "seconds": 0.297516966
+        },
+        {
+          "id": "support/nt500_md2_h2/xgboost/panel",
+          "seconds": 0.445776745
+        },
+        {
+          "id": "support/nt500_md2_h4/lightgbm/panel",
+          "seconds": 0.493578587
+        },
+        {
+          "id": "support/nt500_md2_h4/xgboost/panel",
+          "seconds": 0.614535033
+        },
+        {
+          "id": "support/nt500_md2_h8/lightgbm/panel",
+          "seconds": 0.834169125
+        },
+        {
+          "id": "support/nt500_md2_h8/xgboost/panel",
+          "seconds": 0.946298569
+        },
+        {
+          "id": "support/nt500_md2_h16/lightgbm/panel",
+          "seconds": 1.489012256
+        },
+        {
+          "id": "support/nt500_md2_h16/xgboost/panel",
+          "seconds": 1.594026897
+        },
+        {
+          "id": "support/nt500_md2_h32/lightgbm/panel",
+          "seconds": 2.685995088
+        },
+        {
+          "id": "support/nt500_md2_h32/xgboost/panel",
+          "seconds": 2.869009194
+        },
+        {
+          "id": "support/nt500_md2_h64/lightgbm/panel",
+          "seconds": 2.9477776970000003
+        },
+        {
+          "id": "support/nt500_md2_h64/xgboost/panel",
+          "seconds": 3.150005978
+        },
+        {
+          "id": "support/nt500_md2_h128/lightgbm/panel",
+          "seconds": 2.782790004
+        },
+        {
+          "id": "support/nt500_md2_h128/xgboost/panel",
+          "seconds": 3.121982173
+        },
+        {
+          "id": "support/nt500_md4_h1/lightgbm/panel",
+          "seconds": 0.416827738
+        },
+        {
+          "id": "support/nt500_md4_h1/xgboost/panel",
+          "seconds": 0.375097846
+        },
+        {
+          "id": "support/nt500_md4_h2/lightgbm/panel",
+          "seconds": 0.67111806
+        },
+        {
+          "id": "support/nt500_md4_h2/xgboost/panel",
+          "seconds": 0.794739174
+        },
+        {
+          "id": "support/nt500_md4_h4/lightgbm/panel",
+          "seconds": 1.116416533
+        },
+        {
+          "id": "support/nt500_md4_h4/xgboost/panel",
+          "seconds": 1.259965768
+        },
+        {
+          "id": "support/nt500_md4_h8/lightgbm/panel",
+          "seconds": 1.807150722
+        },
+        {
+          "id": "support/nt500_md4_h8/xgboost/panel",
+          "seconds": 1.830739759
+        },
+        {
+          "id": "support/nt500_md4_h16/lightgbm/panel",
+          "seconds": 2.970327414
+        },
+        {
+          "id": "support/nt500_md4_h16/xgboost/panel",
+          "seconds": 2.841746203
+        },
+        {
+          "id": "support/nt500_md4_h32/lightgbm/panel",
+          "seconds": 5.236059671
+        },
+        {
+          "id": "support/nt500_md4_h32/xgboost/panel",
+          "seconds": 4.848165442
+        },
+        {
+          "id": "support/nt500_md4_h64/lightgbm/panel",
+          "seconds": 5.52848072
+        },
+        {
+          "id": "support/nt500_md4_h64/xgboost/panel",
+          "seconds": 5.125066512
+        },
+        {
+          "id": "support/nt500_md4_h128/lightgbm/panel",
+          "seconds": 5.17148291
+        },
+        {
+          "id": "support/nt500_md4_h128/xgboost/panel",
+          "seconds": 4.991734343
+        },
+        {
+          "id": "support/nt500_md8_h1/lightgbm/panel",
+          "seconds": 0.797939145
+        },
+        {
+          "id": "support/nt500_md8_h1/xgboost/panel",
+          "seconds": 1.012145368
+        },
+        {
+          "id": "support/nt500_md8_h2/lightgbm/panel",
+          "seconds": 1.622422253
+        },
+        {
+          "id": "support/nt500_md8_h2/xgboost/panel",
+          "seconds": 2.927948953
+        },
+        {
+          "id": "support/nt500_md8_h4/lightgbm/panel",
+          "seconds": 2.983901741
+        },
+        {
+          "id": "support/nt500_md8_h4/xgboost/panel",
+          "seconds": 4.39424266
+        },
+        {
+          "id": "support/nt500_md8_h8/lightgbm/panel",
+          "seconds": 5.359462132
+        },
+        {
+          "id": "support/nt500_md8_h8/xgboost/panel",
+          "seconds": 6.313103929
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/panel",
+          "seconds": 8.895966785
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/panel",
+          "seconds": 9.540385807
+        },
+        {
+          "id": "support/nt500_md8_h32/lightgbm/panel",
+          "seconds": 14.71137539
+        },
+        {
+          "id": "support/nt500_md8_h32/xgboost/panel",
+          "seconds": 13.582400314
+        },
+        {
+          "id": "support/nt500_md8_h64/lightgbm/panel",
+          "seconds": 13.4058996
+        },
+        {
+          "id": "support/nt500_md8_h64/xgboost/panel",
+          "seconds": 12.628700227
+        },
+        {
+          "id": "support/nt500_md8_h128/lightgbm/panel",
+          "seconds": 12.3817461
+        },
+        {
+          "id": "support/nt500_md8_h128/xgboost/panel",
+          "seconds": 11.223654743
+        },
+        {
+          "id": "support/nt500_md16_h1/lightgbm/panel",
+          "seconds": 2.215793649
+        },
+        {
+          "id": "support/nt500_md16_h1/xgboost/panel",
+          "seconds": 2.968470664
+        },
+        {
+          "id": "support/nt500_md16_h2/lightgbm/panel",
+          "seconds": 5.896905543
+        },
+        {
+          "id": "support/nt500_md16_h2/xgboost/panel",
+          "seconds": 11.540679258
+        },
+        {
+          "id": "support/nt500_md16_h4/lightgbm/panel",
+          "seconds": 12.122830931
+        },
+        {
+          "id": "support/nt500_md16_h4/xgboost/panel",
+          "seconds": 19.155038182
+        },
+        {
+          "id": "support/nt500_md16_h8/lightgbm/panel",
+          "seconds": 23.687985532
+        },
+        {
+          "id": "support/nt500_md16_h8/xgboost/panel",
+          "seconds": 28.5878465
+        },
+        {
+          "id": "support/nt500_md16_h16/lightgbm/panel",
+          "seconds": 42.268741441
+        },
+        {
+          "id": "support/nt500_md16_h16/xgboost/panel",
+          "seconds": 40.72160107
+        },
+        {
+          "id": "support/nt500_md16_h32/lightgbm/panel",
+          "seconds": 75.860440152
+        },
+        {
+          "id": "support/nt500_md16_h32/xgboost/panel",
+          "seconds": 59.033838477
+        },
+        {
+          "id": "support/nt500_md16_h64/lightgbm/panel",
+          "seconds": 74.053634227
+        },
+        {
+          "id": "support/nt500_md16_h64/xgboost/panel",
+          "seconds": 47.871453817
+        },
+        {
+          "id": "support/nt500_md16_h128/lightgbm/panel",
+          "seconds": 81.228965895
+        },
+        {
+          "id": "support/nt500_md16_h128/xgboost/panel",
+          "seconds": 38.93484293
+        },
+        {
+          "id": "support/nt1000_md2_h1/lightgbm/panel",
+          "seconds": 0.311370636
+        },
+        {
+          "id": "support/nt1000_md2_h1/xgboost/panel",
+          "seconds": 0.418777715
+        },
+        {
+          "id": "support/nt1000_md2_h2/lightgbm/panel",
+          "seconds": 0.589981777
+        },
+        {
+          "id": "support/nt1000_md2_h2/xgboost/panel",
+          "seconds": 0.795556618
+        },
+        {
+          "id": "support/nt1000_md2_h4/lightgbm/panel",
+          "seconds": 1.010461186
+        },
+        {
+          "id": "support/nt1000_md2_h4/xgboost/panel",
+          "seconds": 1.130274204
+        },
+        {
+          "id": "support/nt1000_md2_h8/lightgbm/panel",
+          "seconds": 1.742924797
+        },
+        {
+          "id": "support/nt1000_md2_h8/xgboost/panel",
+          "seconds": 1.727104384
+        },
+        {
+          "id": "support/nt1000_md2_h16/lightgbm/panel",
+          "seconds": 3.076366281
+        },
+        {
+          "id": "support/nt1000_md2_h16/xgboost/panel",
+          "seconds": 2.927065177
+        },
+        {
+          "id": "support/nt1000_md2_h32/lightgbm/panel",
+          "seconds": 5.57273292
+        },
+        {
+          "id": "support/nt1000_md2_h32/xgboost/panel",
+          "seconds": 5.282636667
+        },
+        {
+          "id": "support/nt1000_md2_h64/lightgbm/panel",
+          "seconds": 5.917433888
+        },
+        {
+          "id": "support/nt1000_md2_h64/xgboost/panel",
+          "seconds": 5.790242199
+        },
+        {
+          "id": "support/nt1000_md2_h128/lightgbm/panel",
+          "seconds": 5.672857066
+        },
+        {
+          "id": "support/nt1000_md2_h128/xgboost/panel",
+          "seconds": 5.740884365
+        },
+        {
+          "id": "support/nt1000_md4_h1/lightgbm/panel",
+          "seconds": 0.724828902
+        },
+        {
+          "id": "support/nt1000_md4_h1/xgboost/panel",
+          "seconds": 0.759097508
+        },
+        {
+          "id": "support/nt1000_md4_h2/lightgbm/panel",
+          "seconds": 1.379917394
+        },
+        {
+          "id": "support/nt1000_md4_h2/xgboost/panel",
+          "seconds": 1.641513715
+        },
+        {
+          "id": "support/nt1000_md4_h4/lightgbm/panel",
+          "seconds": 2.238650476
+        },
+        {
+          "id": "support/nt1000_md4_h4/xgboost/panel",
+          "seconds": 2.571553473
+        },
+        {
+          "id": "support/nt1000_md4_h8/lightgbm/panel",
+          "seconds": 3.736935673
+        },
+        {
+          "id": "support/nt1000_md4_h8/xgboost/panel",
+          "seconds": 3.783057201
+        },
+        {
+          "id": "support/nt1000_md4_h16/lightgbm/panel",
+          "seconds": 6.250741043
+        },
+        {
+          "id": "support/nt1000_md4_h16/xgboost/panel",
+          "seconds": 5.765892206
+        },
+        {
+          "id": "support/nt1000_md4_h32/lightgbm/panel",
+          "seconds": 11.016266707
+        },
+        {
+          "id": "support/nt1000_md4_h32/xgboost/panel",
+          "seconds": 9.692414651
+        },
+        {
+          "id": "support/nt1000_md4_h64/lightgbm/panel",
+          "seconds": 11.532189741
+        },
+        {
+          "id": "support/nt1000_md4_h64/xgboost/panel",
+          "seconds": 10.130108259
+        },
+        {
+          "id": "support/nt1000_md4_h128/lightgbm/panel",
+          "seconds": 10.794235879
+        },
+        {
+          "id": "support/nt1000_md4_h128/xgboost/panel",
+          "seconds": 9.765080698
+        },
+        {
+          "id": "support/nt1000_md8_h1/lightgbm/panel",
+          "seconds": 2.084078517
+        },
+        {
+          "id": "support/nt1000_md8_h1/xgboost/panel",
+          "seconds": 2.680793702
+        },
+        {
+          "id": "support/nt1000_md8_h2/lightgbm/panel",
+          "seconds": 4.553553449
+        },
+        {
+          "id": "support/nt1000_md8_h2/xgboost/panel",
+          "seconds": 7.887606948
+        },
+        {
+          "id": "support/nt1000_md8_h4/lightgbm/panel",
+          "seconds": 8.524622164
+        },
+        {
+          "id": "support/nt1000_md8_h4/xgboost/panel",
+          "seconds": 11.971534081
+        },
+        {
+          "id": "support/nt1000_md8_h8/lightgbm/panel",
+          "seconds": 15.77071288
+        },
+        {
+          "id": "support/nt1000_md8_h8/xgboost/panel",
+          "seconds": 16.845664055
+        },
+        {
+          "id": "support/nt1000_md8_h16/lightgbm/panel",
+          "seconds": 26.584210714
+        },
+        {
+          "id": "support/nt1000_md8_h16/xgboost/panel",
+          "seconds": 24.093766315
+        },
+        {
+          "id": "support/nt1000_md8_h32/lightgbm/panel",
+          "seconds": 46.349448159
+        },
+        {
+          "id": "support/nt1000_md8_h32/xgboost/panel",
+          "seconds": 32.313298848
+        },
+        {
+          "id": "support/nt1000_md8_h64/lightgbm/panel",
+          "seconds": 46.228618604
+        },
+        {
+          "id": "support/nt1000_md8_h64/xgboost/panel",
+          "seconds": 29.58731922
+        },
+        {
+          "id": "support/nt1000_md8_h128/lightgbm/panel",
+          "seconds": 39.844105511
+        },
+        {
+          "id": "support/nt1000_md8_h128/xgboost/panel",
+          "seconds": 25.310441706
+        },
+        {
+          "id": "support/nt1000_md16_h1/lightgbm/panel",
+          "seconds": 6.318364986
+        },
+        {
+          "id": "support/nt1000_md16_h1/xgboost/panel",
+          "seconds": 5.786895898
+        },
+        {
+          "id": "support/nt1000_md16_h2/lightgbm/panel",
+          "seconds": 14.254740151
+        },
+        {
+          "id": "support/nt1000_md16_h2/xgboost/panel",
+          "seconds": 19.890958519
+        },
+        {
+          "id": "support/nt1000_md16_h4/lightgbm/panel",
+          "seconds": 27.968001003
+        },
+        {
+          "id": "support/nt1000_md16_h4/xgboost/panel",
+          "seconds": 70.945023487
+        },
+        {
+          "id": "support/nt1000_md16_h8/lightgbm/panel",
+          "seconds": 56.581504833
+        },
+        {
+          "id": "support/nt1000_md16_h8/xgboost/panel",
+          "seconds": 57.614490809
+        },
+        {
+          "id": "support/nt1000_md16_h16/lightgbm/panel",
+          "seconds": 179.002772566
+        },
+        {
+          "id": "support/nt1000_md16_h16/xgboost/panel",
+          "seconds": 101.909004256
+        },
+        {
+          "id": "support/nt1000_md16_h32/lightgbm/panel",
+          "seconds": 225.110068879
+        },
+        {
+          "id": "support/nt1000_md16_h32/xgboost/panel",
+          "seconds": 175.062132242
+        },
+        {
+          "id": "support/nt1000_md16_h64/lightgbm/panel",
+          "seconds": 239.223561459
+        },
+        {
+          "id": "support/nt1000_md16_h64/xgboost/panel",
+          "seconds": 147.019367968
+        },
+        {
+          "id": "support/nt1000_md16_h128/lightgbm/panel",
+          "seconds": 220.39913764
+        },
+        {
+          "id": "support/nt1000_md16_h128/xgboost/panel",
+          "seconds": 122.365471048
+        },
+        {
+          "id": "support/nt2000_md2_h1/lightgbm/panel",
+          "seconds": 0.635511753
+        },
+        {
+          "id": "support/nt2000_md2_h1/xgboost/panel",
+          "seconds": 0.872974669
+        },
+        {
+          "id": "support/nt2000_md2_h2/lightgbm/panel",
+          "seconds": 1.211696407
+        },
+        {
+          "id": "support/nt2000_md2_h2/xgboost/panel",
+          "seconds": 1.67951262
+        },
+        {
+          "id": "support/nt2000_md2_h4/lightgbm/panel",
+          "seconds": 2.131137167
+        },
+        {
+          "id": "support/nt2000_md2_h4/xgboost/panel",
+          "seconds": 2.395695536
+        },
+        {
+          "id": "support/nt2000_md2_h8/lightgbm/panel",
+          "seconds": 3.709102276
+        },
+        {
+          "id": "support/nt2000_md2_h8/xgboost/panel",
+          "seconds": 3.671401855
+        },
+        {
+          "id": "support/nt2000_md2_h16/lightgbm/panel",
+          "seconds": 6.566868947
+        },
+        {
+          "id": "support/nt2000_md2_h16/xgboost/panel",
+          "seconds": 6.046240535
+        },
+        {
+          "id": "support/nt2000_md2_h32/lightgbm/panel",
+          "seconds": 11.964404118
+        },
+        {
+          "id": "support/nt2000_md2_h32/xgboost/panel",
+          "seconds": 10.917740003
+        },
+        {
+          "id": "support/nt2000_md2_h64/lightgbm/panel",
+          "seconds": 12.669044385
+        },
+        {
+          "id": "support/nt2000_md2_h64/xgboost/panel",
+          "seconds": 11.945006066
+        },
+        {
+          "id": "support/nt2000_md2_h128/lightgbm/panel",
+          "seconds": 11.841418949
+        },
+        {
+          "id": "support/nt2000_md2_h128/xgboost/panel",
+          "seconds": 11.651760869
+        },
+        {
+          "id": "support/nt2000_md4_h1/lightgbm/panel",
+          "seconds": 1.625092608
+        },
+        {
+          "id": "support/nt2000_md4_h1/xgboost/panel",
+          "seconds": 1.783169187
+        },
+        {
+          "id": "support/nt2000_md4_h2/lightgbm/panel",
+          "seconds": 3.176839241
+        },
+        {
+          "id": "support/nt2000_md4_h2/xgboost/panel",
+          "seconds": 3.985082019
+        },
+        {
+          "id": "support/nt2000_md4_h4/lightgbm/panel",
+          "seconds": 5.362489889
+        },
+        {
+          "id": "support/nt2000_md4_h4/xgboost/panel",
+          "seconds": 6.20720033
+        },
+        {
+          "id": "support/nt2000_md4_h8/lightgbm/panel",
+          "seconds": 9.380822309
+        },
+        {
+          "id": "support/nt2000_md4_h8/xgboost/panel",
+          "seconds": 8.724999009
+        },
+        {
+          "id": "support/nt2000_md4_h16/lightgbm/panel",
+          "seconds": 16.30311292
+        },
+        {
+          "id": "support/nt2000_md4_h16/xgboost/panel",
+          "seconds": 13.058429262
+        },
+        {
+          "id": "support/nt2000_md4_h32/lightgbm/panel",
+          "seconds": 29.263120809
+        },
+        {
+          "id": "support/nt2000_md4_h32/xgboost/panel",
+          "seconds": 21.663379081
+        },
+        {
+          "id": "support/nt2000_md4_h64/lightgbm/panel",
+          "seconds": 30.784078538
+        },
+        {
+          "id": "support/nt2000_md4_h64/xgboost/panel",
+          "seconds": 22.414105591
+        },
+        {
+          "id": "support/nt2000_md4_h128/lightgbm/panel",
+          "seconds": 29.031733349
+        },
+        {
+          "id": "support/nt2000_md4_h128/xgboost/panel",
+          "seconds": 21.453273314
+        },
+        {
+          "id": "support/nt2000_md8_h1/lightgbm/panel",
+          "seconds": 6.555350579
+        },
+        {
+          "id": "support/nt2000_md8_h1/xgboost/panel",
+          "seconds": 6.294988208
+        },
+        {
+          "id": "support/nt2000_md8_h2/lightgbm/panel",
+          "seconds": 13.205105467
+        },
+        {
+          "id": "support/nt2000_md8_h2/xgboost/panel",
+          "seconds": 17.770103404
+        },
+        {
+          "id": "support/nt2000_md8_h4/lightgbm/panel",
+          "seconds": 23.843292676
+        },
+        {
+          "id": "support/nt2000_md8_h4/xgboost/panel",
+          "seconds": 28.809449074
+        },
+        {
+          "id": "support/nt2000_md8_h8/lightgbm/panel",
+          "seconds": 44.618808347
+        },
+        {
+          "id": "support/nt2000_md8_h8/xgboost/panel",
+          "seconds": 48.80115129
+        },
+        {
+          "id": "support/nt2000_md8_h16/lightgbm/panel",
+          "seconds": 83.130163862
+        },
+        {
+          "id": "support/nt2000_md8_h16/xgboost/panel",
+          "seconds": 84.238015942
+        },
+        {
+          "id": "support/nt2000_md8_h32/lightgbm/panel",
+          "seconds": 163.511064108
+        },
+        {
+          "id": "support/nt2000_md8_h32/xgboost/panel",
+          "seconds": 158.19803936
+        },
+        {
+          "id": "support/nt2000_md8_h64/lightgbm/panel",
+          "seconds": 202.693920684
+        },
+        {
+          "id": "support/nt2000_md8_h64/xgboost/panel",
+          "seconds": 117.760958035
+        },
+        {
+          "id": "support/nt2000_md8_h128/lightgbm/panel",
+          "seconds": 153.954271
+        },
+        {
+          "id": "support/nt2000_md8_h128/xgboost/panel",
+          "seconds": 101.454402231
+        },
+        {
+          "id": "support/nt2000_md16_h1/lightgbm/panel",
+          "seconds": 12.249332267
+        },
+        {
+          "id": "support/nt2000_md16_h1/xgboost/panel",
+          "seconds": 9.946171441
+        },
+        {
+          "id": "support/nt2000_md16_h2/lightgbm/panel",
+          "seconds": 28.325260075
+        },
+        {
+          "id": "support/nt2000_md16_h2/xgboost/panel",
+          "seconds": 32.218421505
+        },
+        {
+          "id": "support/nt2000_md16_h4/lightgbm/panel",
+          "seconds": 56.676959582
+        },
+        {
+          "id": "support/nt2000_md16_h4/xgboost/panel",
+          "seconds": 58.594787896
+        },
+        {
+          "id": "support/nt2000_md16_h8/lightgbm/panel",
+          "seconds": 110.408807254
+        },
+        {
+          "id": "support/nt2000_md16_h8/xgboost/panel",
+          "seconds": 103.675440921
+        },
+        {
+          "id": "support/nt2000_md16_h16/lightgbm/panel",
+          "seconds": 219.494713791
+        },
+        {
+          "id": "support/nt2000_md16_h16/xgboost/panel",
+          "seconds": 211.167734426
+        },
+        {
+          "id": "support/nt2000_md16_h32/lightgbm/panel",
+          "seconds": 434.27852919
+        },
+        {
+          "id": "support/nt2000_md16_h32/xgboost/panel",
+          "seconds": 354.784565649
+        },
+        {
+          "id": "support/nt2000_md16_h64/lightgbm/panel",
+          "seconds": 467.224903632
+        },
+        {
+          "id": "support/nt2000_md16_h64/xgboost/panel",
+          "seconds": 369.774083393
+        },
+        {
+          "id": "support/nt2000_md16_h128/lightgbm/panel",
+          "seconds": 436.281085405
+        },
+        {
+          "id": "support/nt2000_md16_h128/xgboost/panel",
+          "seconds": 353.821422723
+        },
+        {
+          "id": "flchain/nt50_md2_h1/lightgbm/panel",
+          "seconds": 0.046663112
+        },
+        {
+          "id": "flchain/nt50_md2_h1/xgboost/panel",
+          "seconds": 0.113863551
+        },
+        {
+          "id": "flchain/nt50_md2_h2/lightgbm/panel",
+          "seconds": 0.064993459
+        },
+        {
+          "id": "flchain/nt50_md2_h2/xgboost/panel",
+          "seconds": 0.0961479
+        },
+        {
+          "id": "flchain/nt50_md2_h4/lightgbm/panel",
+          "seconds": 0.055381311
+        },
+        {
+          "id": "flchain/nt50_md2_h4/xgboost/panel",
+          "seconds": 0.103447369
+        },
+        {
+          "id": "flchain/nt50_md2_h8/lightgbm/panel",
+          "seconds": 0.163866532
+        },
+        {
+          "id": "flchain/nt50_md2_h8/xgboost/panel",
+          "seconds": 0.150227819
+        },
+        {
+          "id": "flchain/nt50_md2_h16/lightgbm/panel",
+          "seconds": 0.124595641
+        },
+        {
+          "id": "flchain/nt50_md2_h16/xgboost/panel",
+          "seconds": 0.241276821
+        },
+        {
+          "id": "flchain/nt50_md2_h32/lightgbm/panel",
+          "seconds": 0.214088432
+        },
+        {
+          "id": "flchain/nt50_md2_h32/xgboost/panel",
+          "seconds": 0.430066628
+        },
+        {
+          "id": "flchain/nt50_md2_h64/lightgbm/panel",
+          "seconds": 0.306367625
+        },
+        {
+          "id": "flchain/nt50_md2_h64/xgboost/panel",
+          "seconds": 0.633029087
+        },
+        {
+          "id": "flchain/nt50_md2_h128/lightgbm/panel",
+          "seconds": 0.298224757
+        },
+        {
+          "id": "flchain/nt50_md2_h128/xgboost/panel",
+          "seconds": 0.618537952
+        },
+        {
+          "id": "flchain/nt50_md4_h1/lightgbm/panel",
+          "seconds": 0.090472618
+        },
+        {
+          "id": "flchain/nt50_md4_h1/xgboost/panel",
+          "seconds": 0.157303604
+        },
+        {
+          "id": "flchain/nt50_md4_h2/lightgbm/panel",
+          "seconds": 0.130804667
+        },
+        {
+          "id": "flchain/nt50_md4_h2/xgboost/panel",
+          "seconds": 0.267623822
+        },
+        {
+          "id": "flchain/nt50_md4_h4/lightgbm/panel",
+          "seconds": 0.181241904
+        },
+        {
+          "id": "flchain/nt50_md4_h4/xgboost/panel",
+          "seconds": 0.331239565
+        },
+        {
+          "id": "flchain/nt50_md4_h8/lightgbm/panel",
+          "seconds": 0.169292696
+        },
+        {
+          "id": "flchain/nt50_md4_h8/xgboost/panel",
+          "seconds": 0.419408844
+        },
+        {
+          "id": "flchain/nt50_md4_h16/lightgbm/panel",
+          "seconds": 0.195199356
+        },
+        {
+          "id": "flchain/nt50_md4_h16/xgboost/panel",
+          "seconds": 0.529978142
+        },
+        {
+          "id": "flchain/nt50_md4_h32/lightgbm/panel",
+          "seconds": 0.341917145
+        },
+        {
+          "id": "flchain/nt50_md4_h32/xgboost/panel",
+          "seconds": 0.998935326
+        },
+        {
+          "id": "flchain/nt50_md4_h64/lightgbm/panel",
+          "seconds": 0.489734282
+        },
+        {
+          "id": "flchain/nt50_md4_h64/xgboost/panel",
+          "seconds": 0.973012391
+        },
+        {
+          "id": "flchain/nt50_md4_h128/lightgbm/panel",
+          "seconds": 0.472430827
+        },
+        {
+          "id": "flchain/nt50_md4_h128/xgboost/panel",
+          "seconds": 0.789536651
+        },
+        {
+          "id": "flchain/nt50_md8_h1/lightgbm/panel",
+          "seconds": 0.167517178
+        },
+        {
+          "id": "flchain/nt50_md8_h1/xgboost/panel",
+          "seconds": 0.247501759
+        },
+        {
+          "id": "flchain/nt50_md8_h2/lightgbm/panel",
+          "seconds": 0.267654173
+        },
+        {
+          "id": "flchain/nt50_md8_h2/xgboost/panel",
+          "seconds": 0.416407362
+        },
+        {
+          "id": "flchain/nt50_md8_h4/lightgbm/panel",
+          "seconds": 0.279621759
+        },
+        {
+          "id": "flchain/nt50_md8_h4/xgboost/panel",
+          "seconds": 0.417777929
+        },
+        {
+          "id": "flchain/nt50_md8_h8/lightgbm/panel",
+          "seconds": 0.383515844
+        },
+        {
+          "id": "flchain/nt50_md8_h8/xgboost/panel",
+          "seconds": 0.529262428
+        },
+        {
+          "id": "flchain/nt50_md8_h16/lightgbm/panel",
+          "seconds": 0.428784333
+        },
+        {
+          "id": "flchain/nt50_md8_h16/xgboost/panel",
+          "seconds": 0.728572001
+        },
+        {
+          "id": "flchain/nt50_md8_h32/lightgbm/panel",
+          "seconds": 0.731703497
+        },
+        {
+          "id": "flchain/nt50_md8_h32/xgboost/panel",
+          "seconds": 1.082892368
+        },
+        {
+          "id": "flchain/nt50_md8_h64/lightgbm/panel",
+          "seconds": 1.036709422
+        },
+        {
+          "id": "flchain/nt50_md8_h64/xgboost/panel",
+          "seconds": 1.406306699
+        },
+        {
+          "id": "flchain/nt50_md8_h128/lightgbm/panel",
+          "seconds": 0.940426409
+        },
+        {
+          "id": "flchain/nt50_md8_h128/xgboost/panel",
+          "seconds": 1.454543518
+        },
+        {
+          "id": "flchain/nt50_md16_h1/lightgbm/panel",
+          "seconds": 0.255612758
+        },
+        {
+          "id": "flchain/nt50_md16_h1/xgboost/panel",
+          "seconds": 0.317755595
+        },
+        {
+          "id": "flchain/nt50_md16_h2/lightgbm/panel",
+          "seconds": 0.211718175
+        },
+        {
+          "id": "flchain/nt50_md16_h2/xgboost/panel",
+          "seconds": 0.672917633
+        },
+        {
+          "id": "flchain/nt50_md16_h4/lightgbm/panel",
+          "seconds": 0.396276002
+        },
+        {
+          "id": "flchain/nt50_md16_h4/xgboost/panel",
+          "seconds": 0.947852883
+        },
+        {
+          "id": "flchain/nt50_md16_h8/lightgbm/panel",
+          "seconds": 0.724952629
+        },
+        {
+          "id": "flchain/nt50_md16_h8/xgboost/panel",
+          "seconds": 1.328846039
+        },
+        {
+          "id": "flchain/nt50_md16_h16/lightgbm/panel",
+          "seconds": 1.283068316
+        },
+        {
+          "id": "flchain/nt50_md16_h16/xgboost/panel",
+          "seconds": 1.914933695
+        },
+        {
+          "id": "flchain/nt50_md16_h32/lightgbm/panel",
+          "seconds": 2.277986213
+        },
+        {
+          "id": "flchain/nt50_md16_h32/xgboost/panel",
+          "seconds": 2.990206375
+        },
+        {
+          "id": "flchain/nt50_md16_h64/lightgbm/panel",
+          "seconds": 3.145647741
+        },
+        {
+          "id": "flchain/nt50_md16_h64/xgboost/panel",
+          "seconds": 3.456397356
+        },
+        {
+          "id": "flchain/nt50_md16_h128/lightgbm/panel",
+          "seconds": 2.971510147
+        },
+        {
+          "id": "flchain/nt50_md16_h128/xgboost/panel",
+          "seconds": 2.6611895
+        },
+        {
+          "id": "flchain/nt500_md2_h1/lightgbm/panel",
+          "seconds": 0.26137538
+        },
+        {
+          "id": "flchain/nt500_md2_h1/xgboost/panel",
+          "seconds": 0.17298269
+        },
+        {
+          "id": "flchain/nt500_md2_h2/lightgbm/panel",
+          "seconds": 0.187031373
+        },
+        {
+          "id": "flchain/nt500_md2_h2/xgboost/panel",
+          "seconds": 0.320536839
+        },
+        {
+          "id": "flchain/nt500_md2_h4/lightgbm/panel",
+          "seconds": 0.309153745
+        },
+        {
+          "id": "flchain/nt500_md2_h4/xgboost/panel",
+          "seconds": 0.441839514
+        },
+        {
+          "id": "flchain/nt500_md2_h8/lightgbm/panel",
+          "seconds": 0.535921476
+        },
+        {
+          "id": "flchain/nt500_md2_h8/xgboost/panel",
+          "seconds": 0.663317233
+        },
+        {
+          "id": "flchain/nt500_md2_h16/lightgbm/panel",
+          "seconds": 0.953970678
+        },
+        {
+          "id": "flchain/nt500_md2_h16/xgboost/panel",
+          "seconds": 1.106677804
+        },
+        {
+          "id": "flchain/nt500_md2_h32/lightgbm/panel",
+          "seconds": 1.742359385
+        },
+        {
+          "id": "flchain/nt500_md2_h32/xgboost/panel",
+          "seconds": 2.009699094
+        },
+        {
+          "id": "flchain/nt500_md2_h64/lightgbm/panel",
+          "seconds": 2.582510354
+        },
+        {
+          "id": "flchain/nt500_md2_h64/xgboost/panel",
+          "seconds": 2.991308413
+        },
+        {
+          "id": "flchain/nt500_md2_h128/lightgbm/panel",
+          "seconds": 2.479679439
+        },
+        {
+          "id": "flchain/nt500_md2_h128/xgboost/panel",
+          "seconds": 2.9281872399999997
+        },
+        {
+          "id": "flchain/nt500_md4_h1/lightgbm/panel",
+          "seconds": 0.32093325
+        },
+        {
+          "id": "flchain/nt500_md4_h1/xgboost/panel",
+          "seconds": 0.323725169
+        },
+        {
+          "id": "flchain/nt500_md4_h2/lightgbm/panel",
+          "seconds": 0.406710039
+        },
+        {
+          "id": "flchain/nt500_md4_h2/xgboost/panel",
+          "seconds": 0.568238724
+        },
+        {
+          "id": "flchain/nt500_md4_h4/lightgbm/panel",
+          "seconds": 0.678384605
+        },
+        {
+          "id": "flchain/nt500_md4_h4/xgboost/panel",
+          "seconds": 0.885229842
+        },
+        {
+          "id": "flchain/nt500_md4_h8/lightgbm/panel",
+          "seconds": 1.210949509
+        },
+        {
+          "id": "flchain/nt500_md4_h8/xgboost/panel",
+          "seconds": 1.309350842
+        },
+        {
+          "id": "flchain/nt500_md4_h16/lightgbm/panel",
+          "seconds": 2.029217345
+        },
+        {
+          "id": "flchain/nt500_md4_h16/xgboost/panel",
+          "seconds": 2.049985832
+        },
+        {
+          "id": "flchain/nt500_md4_h32/lightgbm/panel",
+          "seconds": 3.611612769
+        },
+        {
+          "id": "flchain/nt500_md4_h32/xgboost/panel",
+          "seconds": 3.540083397
+        },
+        {
+          "id": "flchain/nt500_md4_h64/lightgbm/panel",
+          "seconds": 5.221774587
+        },
+        {
+          "id": "flchain/nt500_md4_h64/xgboost/panel",
+          "seconds": 5.014407704
+        },
+        {
+          "id": "flchain/nt500_md4_h128/lightgbm/panel",
+          "seconds": 4.884514351
+        },
+        {
+          "id": "flchain/nt500_md4_h128/xgboost/panel",
+          "seconds": 4.85443445
+        },
+        {
+          "id": "flchain/nt500_md8_h1/lightgbm/panel",
+          "seconds": 0.488159363
+        },
+        {
+          "id": "flchain/nt500_md8_h1/xgboost/panel",
+          "seconds": 0.65757936
+        },
+        {
+          "id": "flchain/nt500_md8_h2/lightgbm/panel",
+          "seconds": 0.901932987
+        },
+        {
+          "id": "flchain/nt500_md8_h2/xgboost/panel",
+          "seconds": 1.840286852
+        },
+        {
+          "id": "flchain/nt500_md8_h4/lightgbm/panel",
+          "seconds": 1.6633794119999998
+        },
+        {
+          "id": "flchain/nt500_md8_h4/xgboost/panel",
+          "seconds": 2.686748378
+        },
+        {
+          "id": "flchain/nt500_md8_h8/lightgbm/panel",
+          "seconds": 3.095377289
+        },
+        {
+          "id": "flchain/nt500_md8_h8/xgboost/panel",
+          "seconds": 4.163104035
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/panel",
+          "seconds": 5.359056628
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/panel",
+          "seconds": 6.706349672
+        },
+        {
+          "id": "flchain/nt500_md8_h32/lightgbm/panel",
+          "seconds": 9.821056032
+        },
+        {
+          "id": "flchain/nt500_md8_h32/xgboost/panel",
+          "seconds": 9.365063809
+        },
+        {
+          "id": "flchain/nt500_md8_h64/lightgbm/panel",
+          "seconds": 12.683815981
+        },
+        {
+          "id": "flchain/nt500_md8_h64/xgboost/panel",
+          "seconds": 11.802303127
+        },
+        {
+          "id": "flchain/nt500_md8_h128/lightgbm/panel",
+          "seconds": 11.421107436
+        },
+        {
+          "id": "flchain/nt500_md8_h128/xgboost/panel",
+          "seconds": 10.438978944
+        },
+        {
+          "id": "flchain/nt500_md16_h1/lightgbm/panel",
+          "seconds": 1.124159531
+        },
+        {
+          "id": "flchain/nt500_md16_h1/xgboost/panel",
+          "seconds": 1.668346083
+        },
+        {
+          "id": "flchain/nt500_md16_h2/lightgbm/panel",
+          "seconds": 2.536473051
+        },
+        {
+          "id": "flchain/nt500_md16_h2/xgboost/panel",
+          "seconds": 5.917527143
+        },
+        {
+          "id": "flchain/nt500_md16_h4/lightgbm/panel",
+          "seconds": 5.802877018
+        },
+        {
+          "id": "flchain/nt500_md16_h4/xgboost/panel",
+          "seconds": 8.281686746
+        },
+        {
+          "id": "flchain/nt500_md16_h8/lightgbm/panel",
+          "seconds": 11.436783662
+        },
+        {
+          "id": "flchain/nt500_md16_h8/xgboost/panel",
+          "seconds": 13.097436179
+        },
+        {
+          "id": "flchain/nt500_md16_h16/lightgbm/panel",
+          "seconds": 21.728322713
+        },
+        {
+          "id": "flchain/nt500_md16_h16/xgboost/panel",
+          "seconds": 19.525536629
+        },
+        {
+          "id": "flchain/nt500_md16_h32/lightgbm/panel",
+          "seconds": 53.996601952
+        },
+        {
+          "id": "flchain/nt500_md16_h32/xgboost/panel",
+          "seconds": 28.772788082
+        },
+        {
+          "id": "flchain/nt500_md16_h64/lightgbm/panel",
+          "seconds": 143.800615825
+        },
+        {
+          "id": "flchain/nt500_md16_h64/xgboost/panel",
+          "seconds": 32.432928094
+        },
+        {
+          "id": "flchain/nt500_md16_h128/lightgbm/panel",
+          "seconds": 110.152194808
+        },
+        {
+          "id": "flchain/nt500_md16_h128/xgboost/panel",
+          "seconds": 27.303259141
+        },
+        {
+          "id": "flchain/nt1000_md2_h1/lightgbm/panel",
+          "seconds": 0.297537479
+        },
+        {
+          "id": "flchain/nt1000_md2_h1/xgboost/panel",
+          "seconds": 0.30216812
+        },
+        {
+          "id": "flchain/nt1000_md2_h2/lightgbm/panel",
+          "seconds": 0.36937178
+        },
+        {
+          "id": "flchain/nt1000_md2_h2/xgboost/panel",
+          "seconds": 0.578383129
+        },
+        {
+          "id": "flchain/nt1000_md2_h4/lightgbm/panel",
+          "seconds": 0.637817228
+        },
+        {
+          "id": "flchain/nt1000_md2_h4/xgboost/panel",
+          "seconds": 0.819129124
+        },
+        {
+          "id": "flchain/nt1000_md2_h8/lightgbm/panel",
+          "seconds": 1.097071936
+        },
+        {
+          "id": "flchain/nt1000_md2_h8/xgboost/panel",
+          "seconds": 1.250098528
+        },
+        {
+          "id": "flchain/nt1000_md2_h16/lightgbm/panel",
+          "seconds": 1.962251883
+        },
+        {
+          "id": "flchain/nt1000_md2_h16/xgboost/panel",
+          "seconds": 2.066621962
+        },
+        {
+          "id": "flchain/nt1000_md2_h32/lightgbm/panel",
+          "seconds": 3.603236423
+        },
+        {
+          "id": "flchain/nt1000_md2_h32/xgboost/panel",
+          "seconds": 3.767120011
+        },
+        {
+          "id": "flchain/nt1000_md2_h64/lightgbm/panel",
+          "seconds": 5.4198559
+        },
+        {
+          "id": "flchain/nt1000_md2_h64/xgboost/panel",
+          "seconds": 5.571785094
+        },
+        {
+          "id": "flchain/nt1000_md2_h128/lightgbm/panel",
+          "seconds": 5.161144264
+        },
+        {
+          "id": "flchain/nt1000_md2_h128/xgboost/panel",
+          "seconds": 5.514837604
+        },
+        {
+          "id": "flchain/nt1000_md4_h1/lightgbm/panel",
+          "seconds": 0.458910499
+        },
+        {
+          "id": "flchain/nt1000_md4_h1/xgboost/panel",
+          "seconds": 0.552541161
+        },
+        {
+          "id": "flchain/nt1000_md4_h2/lightgbm/panel",
+          "seconds": 0.861225305
+        },
+        {
+          "id": "flchain/nt1000_md4_h2/xgboost/panel",
+          "seconds": 1.21622848
+        },
+        {
+          "id": "flchain/nt1000_md4_h4/lightgbm/panel",
+          "seconds": 1.412179668
+        },
+        {
+          "id": "flchain/nt1000_md4_h4/xgboost/panel",
+          "seconds": 1.822993826
+        },
+        {
+          "id": "flchain/nt1000_md4_h8/lightgbm/panel",
+          "seconds": 2.6214974250000003
+        },
+        {
+          "id": "flchain/nt1000_md4_h8/xgboost/panel",
+          "seconds": 2.806038623
+        },
+        {
+          "id": "flchain/nt1000_md4_h16/lightgbm/panel",
+          "seconds": 4.512033936
+        },
+        {
+          "id": "flchain/nt1000_md4_h16/xgboost/panel",
+          "seconds": 4.379906599
+        },
+        {
+          "id": "flchain/nt1000_md4_h32/lightgbm/panel",
+          "seconds": 7.777552775
+        },
+        {
+          "id": "flchain/nt1000_md4_h32/xgboost/panel",
+          "seconds": 7.134370154
+        },
+        {
+          "id": "flchain/nt1000_md4_h64/lightgbm/panel",
+          "seconds": 11.003275225
+        },
+        {
+          "id": "flchain/nt1000_md4_h64/xgboost/panel",
+          "seconds": 10.041325594
+        },
+        {
+          "id": "flchain/nt1000_md4_h128/lightgbm/panel",
+          "seconds": 10.233312396
+        },
+        {
+          "id": "flchain/nt1000_md4_h128/xgboost/panel",
+          "seconds": 9.659231417
+        },
+        {
+          "id": "flchain/nt1000_md8_h1/lightgbm/panel",
+          "seconds": 1.114200535
+        },
+        {
+          "id": "flchain/nt1000_md8_h1/xgboost/panel",
+          "seconds": 1.509833819
+        },
+        {
+          "id": "flchain/nt1000_md8_h2/lightgbm/panel",
+          "seconds": 2.207169247
+        },
+        {
+          "id": "flchain/nt1000_md8_h2/xgboost/panel",
+          "seconds": 4.366593091
+        },
+        {
+          "id": "flchain/nt1000_md8_h4/lightgbm/panel",
+          "seconds": 4.333905336
+        },
+        {
+          "id": "flchain/nt1000_md8_h4/xgboost/panel",
+          "seconds": 6.65856568
+        },
+        {
+          "id": "flchain/nt1000_md8_h8/lightgbm/panel",
+          "seconds": 8.179289956
+        },
+        {
+          "id": "flchain/nt1000_md8_h8/xgboost/panel",
+          "seconds": 10.510025844
+        },
+        {
+          "id": "flchain/nt1000_md8_h16/lightgbm/panel",
+          "seconds": 14.903049753
+        },
+        {
+          "id": "flchain/nt1000_md8_h16/xgboost/panel",
+          "seconds": 15.465777503
+        },
+        {
+          "id": "flchain/nt1000_md8_h32/lightgbm/panel",
+          "seconds": 27.141159848
+        },
+        {
+          "id": "flchain/nt1000_md8_h32/xgboost/panel",
+          "seconds": 22.807690861
+        },
+        {
+          "id": "flchain/nt1000_md8_h64/lightgbm/panel",
+          "seconds": 38.186043549
+        },
+        {
+          "id": "flchain/nt1000_md8_h64/xgboost/panel",
+          "seconds": 27.992242281
+        },
+        {
+          "id": "flchain/nt1000_md8_h128/lightgbm/panel",
+          "seconds": 31.328928404
+        },
+        {
+          "id": "flchain/nt1000_md8_h128/xgboost/panel",
+          "seconds": 23.795522287
+        },
+        {
+          "id": "flchain/nt1000_md16_h1/lightgbm/panel",
+          "seconds": 3.511219942
+        },
+        {
+          "id": "flchain/nt1000_md16_h1/xgboost/panel",
+          "seconds": 3.789978266
+        },
+        {
+          "id": "flchain/nt1000_md16_h2/lightgbm/panel",
+          "seconds": 7.840641014
+        },
+        {
+          "id": "flchain/nt1000_md16_h2/xgboost/panel",
+          "seconds": 10.759994932
+        },
+        {
+          "id": "flchain/nt1000_md16_h4/lightgbm/panel",
+          "seconds": 16.036171347
+        },
+        {
+          "id": "flchain/nt1000_md16_h4/xgboost/panel",
+          "seconds": 21.583760479
+        },
+        {
+          "id": "flchain/nt1000_md16_h8/lightgbm/panel",
+          "seconds": 32.333839706
+        },
+        {
+          "id": "flchain/nt1000_md16_h8/xgboost/panel",
+          "seconds": 32.457857918
+        },
+        {
+          "id": "flchain/nt1000_md16_h16/lightgbm/panel",
+          "seconds": 65.149555715
+        },
+        {
+          "id": "flchain/nt1000_md16_h16/xgboost/panel",
+          "seconds": 55.253057049
+        },
+        {
+          "id": "flchain/nt1000_md16_h32/lightgbm/panel",
+          "seconds": 121.026410768
+        },
+        {
+          "id": "flchain/nt1000_md16_h32/xgboost/panel",
+          "seconds": 85.27558097
+        },
+        {
+          "id": "flchain/nt1000_md16_h64/lightgbm/panel",
+          "seconds": 181.658264305
+        },
+        {
+          "id": "flchain/nt1000_md16_h64/xgboost/panel",
+          "seconds": 103.021722579
+        },
+        {
+          "id": "flchain/nt1000_md16_h128/lightgbm/panel",
+          "seconds": 204.045602273
+        },
+        {
+          "id": "flchain/nt1000_md16_h128/xgboost/panel",
+          "seconds": 81.497926724
+        },
+        {
+          "id": "flchain/nt2000_md2_h1/lightgbm/panel",
+          "seconds": 0.429868505
+        },
+        {
+          "id": "flchain/nt2000_md2_h1/xgboost/panel",
+          "seconds": 0.633581016
+        },
+        {
+          "id": "flchain/nt2000_md2_h2/lightgbm/panel",
+          "seconds": 0.792940881
+        },
+        {
+          "id": "flchain/nt2000_md2_h2/xgboost/panel",
+          "seconds": 1.241923085
+        },
+        {
+          "id": "flchain/nt2000_md2_h4/lightgbm/panel",
+          "seconds": 1.387639881
+        },
+        {
+          "id": "flchain/nt2000_md2_h4/xgboost/panel",
+          "seconds": 1.777219584
+        },
+        {
+          "id": "flchain/nt2000_md2_h8/lightgbm/panel",
+          "seconds": 2.428962357
+        },
+        {
+          "id": "flchain/nt2000_md2_h8/xgboost/panel",
+          "seconds": 2.721359915
+        },
+        {
+          "id": "flchain/nt2000_md2_h16/lightgbm/panel",
+          "seconds": 4.299096181
+        },
+        {
+          "id": "flchain/nt2000_md2_h16/xgboost/panel",
+          "seconds": 4.371116608
+        },
+        {
+          "id": "flchain/nt2000_md2_h32/lightgbm/panel",
+          "seconds": 7.960775395
+        },
+        {
+          "id": "flchain/nt2000_md2_h32/xgboost/panel",
+          "seconds": 7.781611631
+        },
+        {
+          "id": "flchain/nt2000_md2_h64/lightgbm/panel",
+          "seconds": 11.911344623
+        },
+        {
+          "id": "flchain/nt2000_md2_h64/xgboost/panel",
+          "seconds": 11.44485122
+        },
+        {
+          "id": "flchain/nt2000_md2_h128/lightgbm/panel",
+          "seconds": 11.420240427
+        },
+        {
+          "id": "flchain/nt2000_md2_h128/xgboost/panel",
+          "seconds": 11.14739937
+        },
+        {
+          "id": "flchain/nt2000_md4_h1/lightgbm/panel",
+          "seconds": 1.054163802
+        },
+        {
+          "id": "flchain/nt2000_md4_h1/xgboost/panel",
+          "seconds": 1.344327323
+        },
+        {
+          "id": "flchain/nt2000_md4_h2/lightgbm/panel",
+          "seconds": 1.954093692
+        },
+        {
+          "id": "flchain/nt2000_md4_h2/xgboost/panel",
+          "seconds": 2.836619914
+        },
+        {
+          "id": "flchain/nt2000_md4_h4/lightgbm/panel",
+          "seconds": 3.26029083
+        },
+        {
+          "id": "flchain/nt2000_md4_h4/xgboost/panel",
+          "seconds": 4.673310581
+        },
+        {
+          "id": "flchain/nt2000_md4_h8/lightgbm/panel",
+          "seconds": 6.382353729
+        },
+        {
+          "id": "flchain/nt2000_md4_h8/xgboost/panel",
+          "seconds": 6.395430685
+        },
+        {
+          "id": "flchain/nt2000_md4_h16/lightgbm/panel",
+          "seconds": 11.489877149
+        },
+        {
+          "id": "flchain/nt2000_md4_h16/xgboost/panel",
+          "seconds": 9.898355702
+        },
+        {
+          "id": "flchain/nt2000_md4_h32/lightgbm/panel",
+          "seconds": 20.755500729
+        },
+        {
+          "id": "flchain/nt2000_md4_h32/xgboost/panel",
+          "seconds": 16.651958148
+        },
+        {
+          "id": "flchain/nt2000_md4_h64/lightgbm/panel",
+          "seconds": 29.585545893
+        },
+        {
+          "id": "flchain/nt2000_md4_h64/xgboost/panel",
+          "seconds": 23.218680108
+        },
+        {
+          "id": "flchain/nt2000_md4_h128/lightgbm/panel",
+          "seconds": 27.849153332
+        },
+        {
+          "id": "flchain/nt2000_md4_h128/xgboost/panel",
+          "seconds": 21.189751649
+        },
+        {
+          "id": "flchain/nt2000_md8_h1/lightgbm/panel",
+          "seconds": 3.911643504
+        },
+        {
+          "id": "flchain/nt2000_md8_h1/xgboost/panel",
+          "seconds": 4.050080537
+        },
+        {
+          "id": "flchain/nt2000_md8_h2/lightgbm/panel",
+          "seconds": 7.689865722
+        },
+        {
+          "id": "flchain/nt2000_md8_h2/xgboost/panel",
+          "seconds": 10.87376964
+        },
+        {
+          "id": "flchain/nt2000_md8_h4/lightgbm/panel",
+          "seconds": 14.627661639
+        },
+        {
+          "id": "flchain/nt2000_md8_h4/xgboost/panel",
+          "seconds": 18.405399556
+        },
+        {
+          "id": "flchain/nt2000_md8_h8/lightgbm/panel",
+          "seconds": 27.695241446
+        },
+        {
+          "id": "flchain/nt2000_md8_h8/xgboost/panel",
+          "seconds": 32.359583959
+        },
+        {
+          "id": "flchain/nt2000_md8_h16/lightgbm/panel",
+          "seconds": 51.907527694
+        },
+        {
+          "id": "flchain/nt2000_md8_h16/xgboost/panel",
+          "seconds": 53.068482536
+        },
+        {
+          "id": "flchain/nt2000_md8_h32/lightgbm/panel",
+          "seconds": 99.393611625
+        },
+        {
+          "id": "flchain/nt2000_md8_h32/xgboost/panel",
+          "seconds": 85.456652255
+        },
+        {
+          "id": "flchain/nt2000_md8_h64/lightgbm/panel",
+          "seconds": 151.052040594
+        },
+        {
+          "id": "flchain/nt2000_md8_h64/xgboost/panel",
+          "seconds": 111.037522999
+        },
+        {
+          "id": "flchain/nt2000_md8_h128/lightgbm/panel",
+          "seconds": 143.759196932
+        },
+        {
+          "id": "flchain/nt2000_md8_h128/xgboost/panel",
+          "seconds": 95.873806704
+        },
+        {
+          "id": "flchain/nt2000_md16_h1/lightgbm/panel",
+          "seconds": 12.913069693
+        },
+        {
+          "id": "flchain/nt2000_md16_h1/xgboost/panel",
+          "seconds": 7.928283141
+        },
+        {
+          "id": "flchain/nt2000_md16_h2/lightgbm/panel",
+          "seconds": 42.45013095
+        },
+        {
+          "id": "flchain/nt2000_md16_h2/xgboost/panel",
+          "seconds": 40.990748002
+        },
+        {
+          "id": "flchain/nt2000_md16_h4/lightgbm/panel",
+          "seconds": 59.995096902
+        },
+        {
+          "id": "flchain/nt2000_md16_h4/xgboost/panel",
+          "seconds": 40.032767129
+        },
+        {
+          "id": "flchain/nt2000_md16_h8/lightgbm/panel",
+          "seconds": 145.635866659
+        },
+        {
+          "id": "flchain/nt2000_md16_h8/xgboost/panel",
+          "seconds": 154.654447901
+        },
+        {
+          "id": "flchain/nt2000_md16_h16/lightgbm/panel",
+          "seconds": 142.344448729
+        },
+        {
+          "id": "flchain/nt2000_md16_h16/xgboost/panel",
+          "seconds": 110.755258743
+        },
+        {
+          "id": "flchain/nt2000_md16_h32/lightgbm/panel",
+          "seconds": 224.893076642
+        },
+        {
+          "id": "flchain/nt2000_md16_h32/xgboost/panel",
+          "seconds": 201.364030635
+        },
+        {
+          "id": "flchain/nt2000_md16_h64/lightgbm/panel",
+          "seconds": 337.935003574
+        },
+        {
+          "id": "flchain/nt2000_md16_h64/xgboost/panel",
+          "seconds": 282.315146089
+        },
+        {
+          "id": "flchain/nt2000_md16_h128/lightgbm/panel",
+          "seconds": 333.119946044
+        },
+        {
+          "id": "flchain/nt2000_md16_h128/xgboost/panel",
+          "seconds": 278.646139049
+        },
+        {
+          "id": "flchain/nt500_md8_h256/lightgbm/panel",
+          "seconds": 11.046384308
+        },
+        {
+          "id": "flchain/nt500_md8_h256/xgboost/panel",
+          "seconds": 9.624570846
+        },
+        {
+          "id": "flchain/nt500_md8_h512/lightgbm/panel",
+          "seconds": 16.598814161
+        },
+        {
+          "id": "flchain/nt500_md8_h512/xgboost/panel",
+          "seconds": 14.154628043
+        },
+        {
+          "id": "flchain/nt500_md8_h1024/lightgbm/panel",
+          "seconds": 32.125174861
+        },
+        {
+          "id": "flchain/nt500_md8_h1024/xgboost/panel",
+          "seconds": 26.803362398
+        },
+        {
+          "id": "flchain/nt500_md16_h256/lightgbm/panel",
+          "seconds": 55.964527301
+        },
+        {
+          "id": "flchain/nt500_md16_h256/xgboost/panel",
+          "seconds": 23.335257924
+        },
+        {
+          "id": "flchain/nt500_md16_h512/lightgbm/panel",
+          "seconds": 139.113045088
+        },
+        {
+          "id": "flchain/nt500_md16_h512/xgboost/panel",
+          "seconds": 32.767707564
+        },
+        {
+          "id": "flchain/nt500_md16_h1024/lightgbm/panel",
+          "seconds": 227.509032608
+        },
+        {
+          "id": "flchain/nt500_md16_h1024/xgboost/panel",
+          "seconds": 58.808518238
+        },
+        {
+          "id": "flchain/nt2000_md8_h256/lightgbm/panel",
+          "seconds": 179.454525656
+        },
+        {
+          "id": "flchain/nt2000_md8_h256/xgboost/panel",
+          "seconds": 84.212857048
+        },
+        {
+          "id": "flchain/nt2000_md8_h512/lightgbm/panel",
+          "seconds": 187.215279214
+        },
+        {
+          "id": "flchain/nt2000_md8_h512/xgboost/panel",
+          "seconds": 111.457235923
+        },
+        {
+          "id": "flchain/nt2000_md8_h1024/lightgbm/panel",
+          "seconds": 353.794576429
+        },
+        {
+          "id": "flchain/nt2000_md8_h1024/xgboost/panel",
+          "seconds": 203.702849605
+        },
+        {
+          "id": "flchain/nt2000_md16_h256/lightgbm/panel",
+          "seconds": 332.413502702
+        },
+        {
+          "id": "flchain/nt2000_md16_h256/xgboost/panel",
+          "seconds": 257.040297814
+        },
+        {
+          "id": "flchain/nt2000_md16_h512/lightgbm/panel",
+          "seconds": 490.86208788
+        },
+        {
+          "id": "flchain/nt2000_md16_h512/xgboost/panel",
+          "seconds": 379.512285935
+        },
+        {
+          "id": "flchain/nt2000_md16_h1024/lightgbm/panel",
+          "seconds": 1468.017525769
+        },
+        {
+          "id": "flchain/nt2000_md16_h1024/xgboost/panel",
+          "seconds": 753.479440992
+        },
+        {
+          "id": "expedia/nt50_md2/lightgbm/sessions",
+          "seconds": 0.654637628
+        },
+        {
+          "id": "expedia/nt50_md2/xgboost/sessions",
+          "seconds": 0.966269428
+        },
+        {
+          "id": "expedia/nt50_md4/lightgbm/sessions",
+          "seconds": 1.180156363
+        },
+        {
+          "id": "expedia/nt50_md4/xgboost/sessions",
+          "seconds": 1.391481448
+        },
+        {
+          "id": "expedia/nt50_md8/lightgbm/sessions",
+          "seconds": 4.108314341
+        },
+        {
+          "id": "expedia/nt50_md8/xgboost/sessions",
+          "seconds": 3.172414661
+        },
+        {
+          "id": "expedia/nt50_md16/lightgbm/sessions",
+          "seconds": 37.792617244
+        },
+        {
+          "id": "expedia/nt50_md16/xgboost/sessions",
+          "seconds": 36.227313768
+        },
+        {
+          "id": "expedia/nt500_md2/lightgbm/sessions",
+          "seconds": 4.876187295
+        },
+        {
+          "id": "expedia/nt500_md2/xgboost/sessions",
+          "seconds": 4.127110033
+        },
+        {
+          "id": "expedia/nt500_md4/lightgbm/sessions",
+          "seconds": 10.580855385
+        },
+        {
+          "id": "expedia/nt500_md4/xgboost/sessions",
+          "seconds": 7.582175377
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/sessions",
+          "seconds": 29.657788094
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/sessions",
+          "seconds": 24.707984169
+        },
+        {
+          "id": "expedia/nt500_md16/lightgbm/sessions",
+          "seconds": 207.152351242
+        },
+        {
+          "id": "expedia/nt500_md16/xgboost/sessions",
+          "seconds": 230.637827667
+        },
+        {
+          "id": "expedia/nt1000_md2/lightgbm/sessions",
+          "seconds": 9.650236065
+        },
+        {
+          "id": "expedia/nt1000_md2/xgboost/sessions",
+          "seconds": 7.366331784
+        },
+        {
+          "id": "expedia/nt1000_md4/lightgbm/sessions",
+          "seconds": 20.88437195
+        },
+        {
+          "id": "expedia/nt1000_md4/xgboost/sessions",
+          "seconds": 14.840467877
+        },
+        {
+          "id": "expedia/nt1000_md8/lightgbm/sessions",
+          "seconds": 80.825973662
+        },
+        {
+          "id": "expedia/nt1000_md8/xgboost/sessions",
+          "seconds": 67.661057252
+        },
+        {
+          "id": "expedia/nt1000_md16/lightgbm/sessions",
+          "seconds": 362.878306807
+        },
+        {
+          "id": "expedia/nt1000_md16/xgboost/sessions",
+          "seconds": 453.081186409
+        },
+        {
+          "id": "expedia/nt2000_md2/lightgbm/sessions",
+          "seconds": 19.431048323
+        },
+        {
+          "id": "expedia/nt2000_md2/xgboost/sessions",
+          "seconds": 14.603423316
+        },
+        {
+          "id": "expedia/nt2000_md4/lightgbm/sessions",
+          "seconds": 45.14010043
+        },
+        {
+          "id": "expedia/nt2000_md4/xgboost/sessions",
+          "seconds": 33.147311338
+        },
+        {
+          "id": "expedia/nt2000_md8/lightgbm/sessions",
+          "seconds": 205.650986241
+        },
+        {
+          "id": "expedia/nt2000_md8/xgboost/sessions",
+          "seconds": 196.524444534
+        },
+        {
+          "id": "expedia/nt2000_md16/lightgbm/sessions",
+          "seconds": 953.83868818
+        },
+        {
+          "id": "expedia/nt2000_md16/xgboost/sessions",
+          "seconds": 925.117494548
+        },
+        {
+          "id": "expedia/nt50_md2/lightgbm/cohort32-n4",
+          "seconds": 0.325205143
+        },
+        {
+          "id": "expedia/nt50_md2/lightgbm/cohort32-n8",
+          "seconds": 0.300672607
+        },
+        {
+          "id": "expedia/nt50_md2/lightgbm/cohort32-n16",
+          "seconds": 0.511087755
+        },
+        {
+          "id": "expedia/nt50_md2/lightgbm/cohort32-n32",
+          "seconds": 0.560169479
+        },
+        {
+          "id": "expedia/nt50_md2/xgboost/cohort32-n4",
+          "seconds": 0.392939051
+        },
+        {
+          "id": "expedia/nt50_md2/xgboost/cohort32-n8",
+          "seconds": 0.466002205
+        },
+        {
+          "id": "expedia/nt50_md2/xgboost/cohort32-n16",
+          "seconds": 0.778272308
+        },
+        {
+          "id": "expedia/nt50_md2/xgboost/cohort32-n32",
+          "seconds": 0.852006841
+        },
+        {
+          "id": "expedia/nt50_md4/lightgbm/cohort32-n4",
+          "seconds": 0.371057742
+        },
+        {
+          "id": "expedia/nt50_md4/lightgbm/cohort32-n8",
+          "seconds": 0.52105085
+        },
+        {
+          "id": "expedia/nt50_md4/lightgbm/cohort32-n16",
+          "seconds": 0.915973794
+        },
+        {
+          "id": "expedia/nt50_md4/lightgbm/cohort32-n32",
+          "seconds": 1.014506233
+        },
+        {
+          "id": "expedia/nt50_md4/xgboost/cohort32-n4",
+          "seconds": 0.45322405
+        },
+        {
+          "id": "expedia/nt50_md4/xgboost/cohort32-n8",
+          "seconds": 0.685457459
+        },
+        {
+          "id": "expedia/nt50_md4/xgboost/cohort32-n16",
+          "seconds": 1.116629146
+        },
+        {
+          "id": "expedia/nt50_md4/xgboost/cohort32-n32",
+          "seconds": 1.20317202
+        },
+        {
+          "id": "expedia/nt50_md8/lightgbm/cohort32-n4",
+          "seconds": 0.872590334
+        },
+        {
+          "id": "expedia/nt50_md8/lightgbm/cohort32-n8",
+          "seconds": 1.293169275
+        },
+        {
+          "id": "expedia/nt50_md8/lightgbm/cohort32-n16",
+          "seconds": 2.326742149
+        },
+        {
+          "id": "expedia/nt50_md8/lightgbm/cohort32-n32",
+          "seconds": 2.575715145
+        },
+        {
+          "id": "expedia/nt50_md8/xgboost/cohort32-n4",
+          "seconds": 1.074065353
+        },
+        {
+          "id": "expedia/nt50_md8/xgboost/cohort32-n8",
+          "seconds": 1.761852603
+        },
+        {
+          "id": "expedia/nt50_md8/xgboost/cohort32-n16",
+          "seconds": 2.709499481
+        },
+        {
+          "id": "expedia/nt50_md8/xgboost/cohort32-n32",
+          "seconds": 2.638069312
+        },
+        {
+          "id": "expedia/nt50_md16/lightgbm/cohort32-n4",
+          "seconds": 5.373579975
+        },
+        {
+          "id": "expedia/nt50_md16/lightgbm/cohort32-n8",
+          "seconds": 6.994251808
+        },
+        {
+          "id": "expedia/nt50_md16/lightgbm/cohort32-n16",
+          "seconds": 12.67019962
+        },
+        {
+          "id": "expedia/nt50_md16/lightgbm/cohort32-n32",
+          "seconds": 14.100988527
+        },
+        {
+          "id": "expedia/nt50_md16/xgboost/cohort32-n4",
+          "seconds": 17.643471757
+        },
+        {
+          "id": "expedia/nt50_md16/xgboost/cohort32-n8",
+          "seconds": 16.128532756
+        },
+        {
+          "id": "expedia/nt50_md16/xgboost/cohort32-n16",
+          "seconds": 20.993527115
+        },
+        {
+          "id": "expedia/nt50_md16/xgboost/cohort32-n32",
+          "seconds": 20.52568942
+        },
+        {
+          "id": "expedia/nt500_md2/lightgbm/cohort32-n4",
+          "seconds": 1.171357683
+        },
+        {
+          "id": "expedia/nt500_md2/lightgbm/cohort32-n8",
+          "seconds": 2.177770882
+        },
+        {
+          "id": "expedia/nt500_md2/lightgbm/cohort32-n16",
+          "seconds": 4.043977982
+        },
+        {
+          "id": "expedia/nt500_md2/lightgbm/cohort32-n32",
+          "seconds": 4.567533701
+        },
+        {
+          "id": "expedia/nt500_md2/xgboost/cohort32-n4",
+          "seconds": 1.29175478
+        },
+        {
+          "id": "expedia/nt500_md2/xgboost/cohort32-n8",
+          "seconds": 2.059919793
+        },
+        {
+          "id": "expedia/nt500_md2/xgboost/cohort32-n16",
+          "seconds": 3.454218378
+        },
+        {
+          "id": "expedia/nt500_md2/xgboost/cohort32-n32",
+          "seconds": 3.768204877
+        },
+        {
+          "id": "expedia/nt500_md4/lightgbm/cohort32-n4",
+          "seconds": 2.639658363
+        },
+        {
+          "id": "expedia/nt500_md4/lightgbm/cohort32-n8",
+          "seconds": 4.782974684
+        },
+        {
+          "id": "expedia/nt500_md4/lightgbm/cohort32-n16",
+          "seconds": 8.774115535
+        },
+        {
+          "id": "expedia/nt500_md4/lightgbm/cohort32-n32",
+          "seconds": 9.782487204
+        },
+        {
+          "id": "expedia/nt500_md4/xgboost/cohort32-n4",
+          "seconds": 2.618979439
+        },
+        {
+          "id": "expedia/nt500_md4/xgboost/cohort32-n8",
+          "seconds": 4.055365191
+        },
+        {
+          "id": "expedia/nt500_md4/xgboost/cohort32-n16",
+          "seconds": 6.493375309
+        },
+        {
+          "id": "expedia/nt500_md4/xgboost/cohort32-n32",
+          "seconds": 6.762894638
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/cohort32-n4",
+          "seconds": 7.49426996
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/cohort32-n8",
+          "seconds": 13.632561202
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/cohort32-n16",
+          "seconds": 24.926394946
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/cohort32-n32",
+          "seconds": 27.540730201
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/cohort32-n4",
+          "seconds": 8.607544347
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/cohort32-n8",
+          "seconds": 13.535996649
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/cohort32-n16",
+          "seconds": 22.420485679
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/cohort32-n32",
+          "seconds": 21.463058894
+        },
+        {
+          "id": "expedia/nt500_md16/lightgbm/cohort32-n4",
+          "seconds": 62.629973443
+        },
+        {
+          "id": "expedia/nt500_md16/lightgbm/cohort32-n8",
+          "seconds": 157.129156531
+        },
+        {
+          "id": "expedia/nt500_md16/lightgbm/cohort32-n16",
+          "seconds": 196.299621258
+        },
+        {
+          "id": "expedia/nt500_md16/lightgbm/cohort32-n32",
+          "seconds": 174.158655372
+        },
+        {
+          "id": "expedia/nt500_md16/xgboost/cohort32-n4",
+          "seconds": 82.58965449
+        },
+        {
+          "id": "expedia/nt500_md16/xgboost/cohort32-n8",
+          "seconds": 113.437383308
+        },
+        {
+          "id": "expedia/nt500_md16/xgboost/cohort32-n16",
+          "seconds": 213.00074437
+        },
+        {
+          "id": "expedia/nt500_md16/xgboost/cohort32-n32",
+          "seconds": 209.689904548
+        },
+        {
+          "id": "expedia/nt1000_md2/lightgbm/cohort32-n4",
+          "seconds": 2.293177478
+        },
+        {
+          "id": "expedia/nt1000_md2/lightgbm/cohort32-n8",
+          "seconds": 4.27686197
+        },
+        {
+          "id": "expedia/nt1000_md2/lightgbm/cohort32-n16",
+          "seconds": 8.037717178
+        },
+        {
+          "id": "expedia/nt1000_md2/lightgbm/cohort32-n32",
+          "seconds": 9.115639764
+        },
+        {
+          "id": "expedia/nt1000_md2/xgboost/cohort32-n4",
+          "seconds": 2.357409747
+        },
+        {
+          "id": "expedia/nt1000_md2/xgboost/cohort32-n8",
+          "seconds": 3.736500261
+        },
+        {
+          "id": "expedia/nt1000_md2/xgboost/cohort32-n16",
+          "seconds": 6.284069211
+        },
+        {
+          "id": "expedia/nt1000_md2/xgboost/cohort32-n32",
+          "seconds": 6.860114106
+        },
+        {
+          "id": "expedia/nt1000_md4/lightgbm/cohort32-n4",
+          "seconds": 5.203698827
+        },
+        {
+          "id": "expedia/nt1000_md4/lightgbm/cohort32-n8",
+          "seconds": 9.481806604
+        },
+        {
+          "id": "expedia/nt1000_md4/lightgbm/cohort32-n16",
+          "seconds": 17.557766693
+        },
+        {
+          "id": "expedia/nt1000_md4/lightgbm/cohort32-n32",
+          "seconds": 19.577783401
+        },
+        {
+          "id": "expedia/nt1000_md4/xgboost/cohort32-n4",
+          "seconds": 5.14275562
+        },
+        {
+          "id": "expedia/nt1000_md4/xgboost/cohort32-n8",
+          "seconds": 8.104595501
+        },
+        {
+          "id": "expedia/nt1000_md4/xgboost/cohort32-n16",
+          "seconds": 12.995532677
+        },
+        {
+          "id": "expedia/nt1000_md4/xgboost/cohort32-n32",
+          "seconds": 13.449214925
+        },
+        {
+          "id": "expedia/nt1000_md8/lightgbm/cohort32-n4",
+          "seconds": 28.747908908
+        },
+        {
+          "id": "expedia/nt1000_md8/lightgbm/cohort32-n8",
+          "seconds": 59.828016342
+        },
+        {
+          "id": "expedia/nt1000_md8/lightgbm/cohort32-n16",
+          "seconds": 110.051892115
+        },
+        {
+          "id": "expedia/nt1000_md8/lightgbm/cohort32-n32",
+          "seconds": 136.558934139
+        },
+        {
+          "id": "expedia/nt1000_md8/xgboost/cohort32-n4",
+          "seconds": 35.435862971
+        },
+        {
+          "id": "expedia/nt1000_md8/xgboost/cohort32-n8",
+          "seconds": 60.503691091
+        },
+        {
+          "id": "expedia/nt1000_md8/xgboost/cohort32-n16",
+          "seconds": 134.409085149
+        },
+        {
+          "id": "expedia/nt1000_md8/xgboost/cohort32-n32",
+          "seconds": 61.472975587
+        },
+        {
+          "id": "expedia/nt1000_md16/lightgbm/cohort32-n4",
+          "seconds": 174.606707412
+        },
+        {
+          "id": "expedia/nt1000_md16/lightgbm/cohort32-n8",
+          "seconds": 212.902423966
+        },
+        {
+          "id": "expedia/nt1000_md16/lightgbm/cohort32-n16",
+          "seconds": 317.836269457
+        },
+        {
+          "id": "expedia/nt1000_md16/lightgbm/cohort32-n32",
+          "seconds": 349.595710047
+        },
+        {
+          "id": "expedia/nt1000_md16/xgboost/cohort32-n4",
+          "seconds": 200.73260953
+        },
+        {
+          "id": "expedia/nt1000_md16/xgboost/cohort32-n8",
+          "seconds": 255.184124368
+        },
+        {
+          "id": "expedia/nt1000_md16/xgboost/cohort32-n16",
+          "seconds": 391.008002674
+        },
+        {
+          "id": "expedia/nt1000_md16/xgboost/cohort32-n32",
+          "seconds": 408.508488294
+        },
+        {
+          "id": "expedia/nt2000_md2/lightgbm/cohort32-n4",
+          "seconds": 4.55357209
+        },
+        {
+          "id": "expedia/nt2000_md2/lightgbm/cohort32-n8",
+          "seconds": 8.522823958
+        },
+        {
+          "id": "expedia/nt2000_md2/lightgbm/cohort32-n16",
+          "seconds": 16.078184353
+        },
+        {
+          "id": "expedia/nt2000_md2/lightgbm/cohort32-n32",
+          "seconds": 18.492643539
+        },
+        {
+          "id": "expedia/nt2000_md2/xgboost/cohort32-n4",
+          "seconds": 4.7008954549999995
+        },
+        {
+          "id": "expedia/nt2000_md2/xgboost/cohort32-n8",
+          "seconds": 7.446541515
+        },
+        {
+          "id": "expedia/nt2000_md2/xgboost/cohort32-n16",
+          "seconds": 12.469681436
+        },
+        {
+          "id": "expedia/nt2000_md2/xgboost/cohort32-n32",
+          "seconds": 13.595966879
+        },
+        {
+          "id": "expedia/nt2000_md4/lightgbm/cohort32-n4",
+          "seconds": 10.986026273
+        },
+        {
+          "id": "expedia/nt2000_md4/lightgbm/cohort32-n8",
+          "seconds": 20.174886109
+        },
+        {
+          "id": "expedia/nt2000_md4/lightgbm/cohort32-n16",
+          "seconds": 37.764316169
+        },
+        {
+          "id": "expedia/nt2000_md4/lightgbm/cohort32-n32",
+          "seconds": 42.590174503
+        },
+        {
+          "id": "expedia/nt2000_md4/xgboost/cohort32-n4",
+          "seconds": 11.373468201
+        },
+        {
+          "id": "expedia/nt2000_md4/xgboost/cohort32-n8",
+          "seconds": 17.599403873
+        },
+        {
+          "id": "expedia/nt2000_md4/xgboost/cohort32-n16",
+          "seconds": 28.510132208
+        },
+        {
+          "id": "expedia/nt2000_md4/xgboost/cohort32-n32",
+          "seconds": 29.834540305
+        },
+        {
+          "id": "expedia/nt2000_md8/lightgbm/cohort32-n4",
+          "seconds": 48.749289492
+        },
+        {
+          "id": "expedia/nt2000_md8/lightgbm/cohort32-n8",
+          "seconds": 89.171491364
+        },
+        {
+          "id": "expedia/nt2000_md8/lightgbm/cohort32-n16",
+          "seconds": 200.526951301
+        },
+        {
+          "id": "expedia/nt2000_md8/lightgbm/cohort32-n32",
+          "seconds": 192.88440634
+        },
+        {
+          "id": "expedia/nt2000_md8/xgboost/cohort32-n4",
+          "seconds": 96.883215205
+        },
+        {
+          "id": "expedia/nt2000_md8/xgboost/cohort32-n8",
+          "seconds": 111.406100499
+        },
+        {
+          "id": "expedia/nt2000_md8/xgboost/cohort32-n16",
+          "seconds": 198.091053562
+        },
+        {
+          "id": "expedia/nt2000_md8/xgboost/cohort32-n32",
+          "seconds": 204.90045273
+        },
+        {
+          "id": "expedia/nt2000_md16/lightgbm/cohort32-n4",
+          "seconds": 312.003315199
+        },
+        {
+          "id": "expedia/nt2000_md16/lightgbm/cohort32-n8",
+          "seconds": 566.198190919
+        },
+        {
+          "id": "expedia/nt2000_md16/lightgbm/cohort32-n16",
+          "seconds": 1009.958641404
+        },
+        {
+          "id": "expedia/nt2000_md16/lightgbm/cohort32-n32",
+          "seconds": 827.296210951
+        },
+        {
+          "id": "expedia/nt2000_md16/xgboost/cohort32-n4",
+          "seconds": 290.672051388
+        },
+        {
+          "id": "expedia/nt2000_md16/xgboost/cohort32-n8",
+          "seconds": 426.794835552
+        },
+        {
+          "id": "expedia/nt2000_md16/xgboost/cohort32-n16",
+          "seconds": 715.839374318
+        },
+        {
+          "id": "expedia/nt2000_md16/xgboost/cohort32-n32",
+          "seconds": 818.232699234
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k1-G4",
+          "seconds": 0.101775504
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k1-G16",
+          "seconds": 0.252903452
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k1-G128",
+          "seconds": 0.43735955
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k4-G4",
+          "seconds": 0.112656741
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k4-G16",
+          "seconds": 0.284831402
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k4-G128",
+          "seconds": 0.527319179
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k8-G4",
+          "seconds": 0.112614283
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k8-G16",
+          "seconds": 0.295595128
+        },
+        {
+          "id": "credit/nt50_md2/lightgbm/whatif-v2-k8-G128",
+          "seconds": 0.572219464
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k1-G4",
+          "seconds": 0.272622069
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k1-G16",
+          "seconds": 0.397932
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k1-G128",
+          "seconds": 0.704861721
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k4-G4",
+          "seconds": 0.173223123
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k4-G16",
+          "seconds": 0.430210126
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k4-G128",
+          "seconds": 0.796753117
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k8-G4",
+          "seconds": 0.179246791
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k8-G16",
+          "seconds": 0.452629186
+        },
+        {
+          "id": "credit/nt50_md2/xgboost/whatif-v2-k8-G128",
+          "seconds": 0.872391799
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k1-G4",
+          "seconds": 0.23048433
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k1-G16",
+          "seconds": 0.390437139
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k1-G128",
+          "seconds": 0.672394376
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k4-G4",
+          "seconds": 0.242064659
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k4-G16",
+          "seconds": 0.495480302
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k4-G128",
+          "seconds": 0.892650233
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k8-G4",
+          "seconds": 0.188897972
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k8-G16",
+          "seconds": 0.545271641
+        },
+        {
+          "id": "credit/nt50_md4/lightgbm/whatif-v2-k8-G128",
+          "seconds": 1.038306407
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k1-G4",
+          "seconds": 0.471318257
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k1-G16",
+          "seconds": 0.599756994
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k1-G128",
+          "seconds": 0.912829065
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k4-G4",
+          "seconds": 0.254566363
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k4-G16",
+          "seconds": 0.604588085
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k4-G128",
+          "seconds": 1.080251226
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k8-G4",
+          "seconds": 0.270539479
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k8-G16",
+          "seconds": 0.655119926
+        },
+        {
+          "id": "credit/nt50_md4/xgboost/whatif-v2-k8-G128",
+          "seconds": 1.215901899
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k1-G4",
+          "seconds": 0.249768201
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k1-G16",
+          "seconds": 0.621540132
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k1-G128",
+          "seconds": 1.007490388
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k4-G4",
+          "seconds": 0.324319943
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k4-G16",
+          "seconds": 0.893961215
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k4-G128",
+          "seconds": 1.453486397
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k8-G4",
+          "seconds": 0.363084159
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k8-G16",
+          "seconds": 1.071969526
+        },
+        {
+          "id": "credit/nt50_md8/lightgbm/whatif-v2-k8-G128",
+          "seconds": 1.856765692
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k1-G4",
+          "seconds": 0.459667138
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k1-G16",
+          "seconds": 0.957343618
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k1-G128",
+          "seconds": 1.254019359
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k4-G4",
+          "seconds": 0.517994209
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k4-G16",
+          "seconds": 1.309685168
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k4-G128",
+          "seconds": 1.53748408
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k8-G4",
+          "seconds": 0.547087806
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k8-G16",
+          "seconds": 1.227637919
+        },
+        {
+          "id": "credit/nt50_md8/xgboost/whatif-v2-k8-G128",
+          "seconds": 1.766363814
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k1-G4",
+          "seconds": 0.567900896
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k1-G16",
+          "seconds": 1.296592711
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k1-G128",
+          "seconds": 1.782451092
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k4-G4",
+          "seconds": 0.715813226
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k4-G16",
+          "seconds": 1.952980034
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k4-G128",
+          "seconds": 2.74327061
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k8-G4",
+          "seconds": 0.784386098
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k8-G16",
+          "seconds": 2.384139575
+        },
+        {
+          "id": "credit/nt50_md16/lightgbm/whatif-v2-k8-G128",
+          "seconds": 3.913448914
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k1-G4",
+          "seconds": 2.019471842
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k1-G16",
+          "seconds": 3.261100592
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k1-G128",
+          "seconds": 3.198126728
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k4-G4",
+          "seconds": 3.069548306
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k4-G16",
+          "seconds": 3.920528246
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k4-G128",
+          "seconds": 4.074317547
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k8-G4",
+          "seconds": 2.253792146
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k8-G16",
+          "seconds": 4.331753666
+        },
+        {
+          "id": "credit/nt50_md16/xgboost/whatif-v2-k8-G128",
+          "seconds": 4.96293824
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k1-G4",
+          "seconds": 0.596696552
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k1-G16",
+          "seconds": 1.838280167
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k1-G128",
+          "seconds": 3.21822476
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k4-G4",
+          "seconds": 0.666384499
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k4-G16",
+          "seconds": 2.182768118
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k4-G128",
+          "seconds": 3.825517985
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k8-G4",
+          "seconds": 0.690738277
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k8-G16",
+          "seconds": 2.349578572
+        },
+        {
+          "id": "credit/nt500_md2/lightgbm/whatif-v2-k8-G128",
+          "seconds": 4.316341332
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k1-G4",
+          "seconds": 0.686919491
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k1-G16",
+          "seconds": 1.775888735
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k1-G128",
+          "seconds": 3.234544272
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k4-G4",
+          "seconds": 0.731045351
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k4-G16",
+          "seconds": 1.930385119
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k4-G128",
+          "seconds": 3.5590298970000003
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k8-G4",
+          "seconds": 0.757745542
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k8-G16",
+          "seconds": 2.025430699
+        },
+        {
+          "id": "credit/nt500_md2/xgboost/whatif-v2-k8-G128",
+          "seconds": 3.812104671
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k1-G4",
+          "seconds": 1.173012673
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k1-G16",
+          "seconds": 3.540103058
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k1-G128",
+          "seconds": 6.258075077
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k4-G4",
+          "seconds": 1.390305815
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k4-G16",
+          "seconds": 4.50886407
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k4-G128",
+          "seconds": 7.971207713
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k8-G4",
+          "seconds": 1.481421636
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k8-G16",
+          "seconds": 4.952740508
+        },
+        {
+          "id": "credit/nt500_md4/lightgbm/whatif-v2-k8-G128",
+          "seconds": 9.173406679
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k1-G4",
+          "seconds": 1.31031496
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k1-G16",
+          "seconds": 3.096289394
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k1-G128",
+          "seconds": 5.23603992
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k4-G4",
+          "seconds": 1.461254144
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k4-G16",
+          "seconds": 3.552587565
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k4-G128",
+          "seconds": 6.061946161
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k8-G4",
+          "seconds": 1.5636928129999998
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k8-G16",
+          "seconds": 3.852070011
+        },
+        {
+          "id": "credit/nt500_md4/xgboost/whatif-v2-k8-G128",
+          "seconds": 6.7310243320000005
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k1-G4",
+          "seconds": 2.369719208
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k1-G16",
+          "seconds": 6.643211415
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k1-G128",
+          "seconds": 10.557884973
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k4-G4",
+          "seconds": 2.996780454
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k4-G16",
+          "seconds": 9.222847471
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k4-G128",
+          "seconds": 14.998855092
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k8-G4",
+          "seconds": 3.325793673
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k8-G16",
+          "seconds": 10.906022311
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k8-G128",
+          "seconds": 19.64026199
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k1-G4",
+          "seconds": 3.270873902
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k1-G16",
+          "seconds": 7.62411345
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k1-G128",
+          "seconds": 8.66040013
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k4-G4",
+          "seconds": 3.798002498
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k4-G16",
+          "seconds": 9.403122263
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k4-G128",
+          "seconds": 10.956813898
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k8-G4",
+          "seconds": 4.188899552
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k8-G16",
+          "seconds": 10.998674943
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k8-G128",
+          "seconds": 14.013412264
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k1-G4",
+          "seconds": 8.839084281
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k1-G16",
+          "seconds": 21.18843851
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k1-G128",
+          "seconds": 24.782996679
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k4-G4",
+          "seconds": 11.132101674
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k4-G16",
+          "seconds": 32.048573654
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k4-G128",
+          "seconds": 74.825424757
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k8-G4",
+          "seconds": 12.591418726
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k8-G16",
+          "seconds": 40.283784928
+        },
+        {
+          "id": "credit/nt500_md16/lightgbm/whatif-v2-k8-G128",
+          "seconds": 68.89058704
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k1-G4",
+          "seconds": 21.106288385
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k1-G16",
+          "seconds": 22.668102464
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k1-G128",
+          "seconds": 22.118863815
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k4-G4",
+          "seconds": 22.035752565
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k4-G16",
+          "seconds": 31.261927736
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k4-G128",
+          "seconds": 33.289351974
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k8-G4",
+          "seconds": 15.388454602
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k8-G16",
+          "seconds": 93.847715799
+        },
+        {
+          "id": "credit/nt500_md16/xgboost/whatif-v2-k8-G128",
+          "seconds": 112.332317623
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k1-G4",
+          "seconds": 1.195343408
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k1-G16",
+          "seconds": 3.739639999
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k1-G128",
+          "seconds": 6.631186721
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k4-G4",
+          "seconds": 1.30680261
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k4-G16",
+          "seconds": 4.435462556
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k4-G128",
+          "seconds": 7.806383414
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k8-G4",
+          "seconds": 1.385026824
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k8-G16",
+          "seconds": 4.819372152
+        },
+        {
+          "id": "credit/nt1000_md2/lightgbm/whatif-v2-k8-G128",
+          "seconds": 9.163606646
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k1-G4",
+          "seconds": 1.248644557
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k1-G16",
+          "seconds": 3.281993521
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k1-G128",
+          "seconds": 5.925598372
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k4-G4",
+          "seconds": 1.33162298
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k4-G16",
+          "seconds": 3.519814757
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k4-G128",
+          "seconds": 6.444168648
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k8-G4",
+          "seconds": 1.38835555
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k8-G16",
+          "seconds": 3.727540883
+        },
+        {
+          "id": "credit/nt1000_md2/xgboost/whatif-v2-k8-G128",
+          "seconds": 6.97019482
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k1-G4",
+          "seconds": 2.511641694
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k1-G16",
+          "seconds": 7.85902166
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k1-G128",
+          "seconds": 13.431216812
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k4-G4",
+          "seconds": 2.921426673
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k4-G16",
+          "seconds": 9.646874049
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k4-G128",
+          "seconds": 17.306587847
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k8-G4",
+          "seconds": 3.100538513
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k8-G16",
+          "seconds": 10.698718993
+        },
+        {
+          "id": "credit/nt1000_md4/lightgbm/whatif-v2-k8-G128",
+          "seconds": 20.15318518
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k1-G4",
+          "seconds": 2.615590431
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k1-G16",
+          "seconds": 6.320930563
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k1-G128",
+          "seconds": 10.249569012
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k4-G4",
+          "seconds": 2.96814321
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k4-G16",
+          "seconds": 7.359430072
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k4-G128",
+          "seconds": 12.084566109
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k8-G4",
+          "seconds": 3.182716318
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k8-G16",
+          "seconds": 8.10102852
+        },
+        {
+          "id": "credit/nt1000_md4/xgboost/whatif-v2-k8-G128",
+          "seconds": 13.793645766
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k1-G4",
+          "seconds": 6.8990154839999995
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k1-G16",
+          "seconds": 19.085442842
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k1-G128",
+          "seconds": 26.334060667
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k4-G4",
+          "seconds": 8.291271005
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k4-G16",
+          "seconds": 25.469991753
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k4-G128",
+          "seconds": 41.735465773
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k8-G4",
+          "seconds": 9.498627423
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k8-G16",
+          "seconds": 31.603659389
+        },
+        {
+          "id": "credit/nt1000_md8/lightgbm/whatif-v2-k8-G128",
+          "seconds": 56.414412994
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k1-G4",
+          "seconds": 8.569833937
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k1-G16",
+          "seconds": 19.661600519
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k1-G128",
+          "seconds": 22.800481562
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k4-G4",
+          "seconds": 19.356211476
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k4-G16",
+          "seconds": 26.017514689
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k4-G128",
+          "seconds": 28.984325402
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k8-G4",
+          "seconds": 12.12576626
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k8-G16",
+          "seconds": 32.372014084
+        },
+        {
+          "id": "credit/nt1000_md8/xgboost/whatif-v2-k8-G128",
+          "seconds": 45.02959272
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k1-G4",
+          "seconds": 68.033137628
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k1-G16",
+          "seconds": 161.547220759
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k1-G128",
+          "seconds": 174.556495419
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k4-G4",
+          "seconds": 28.246289722
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k4-G16",
+          "seconds": 94.905528316
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k4-G128",
+          "seconds": 170.889446309
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k8-G4",
+          "seconds": 29.958018556
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k8-G16",
+          "seconds": 99.441748417
+        },
+        {
+          "id": "credit/nt1000_md16/lightgbm/whatif-v2-k8-G128",
+          "seconds": 193.913236413
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k1-G4",
+          "seconds": 57.972915649
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k1-G16",
+          "seconds": 68.058814405
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k1-G128",
+          "seconds": 69.176675607
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k4-G4",
+          "seconds": 30.810756803
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k4-G16",
+          "seconds": 166.044963468
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k4-G128",
+          "seconds": 177.081780586
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k8-G4",
+          "seconds": 69.237655742
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k8-G16",
+          "seconds": 163.041734044
+        },
+        {
+          "id": "credit/nt1000_md16/xgboost/whatif-v2-k8-G128",
+          "seconds": 196.991766847
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k1-G4",
+          "seconds": 2.49735304
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k1-G16",
+          "seconds": 8.217212523
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k1-G128",
+          "seconds": 14.060504547
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k4-G4",
+          "seconds": 2.701188004
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k4-G16",
+          "seconds": 9.461812703
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k4-G128",
+          "seconds": 17.320870745
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k8-G4",
+          "seconds": 2.792363698
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k8-G16",
+          "seconds": 10.057104393
+        },
+        {
+          "id": "credit/nt2000_md2/lightgbm/whatif-v2-k8-G128",
+          "seconds": 19.743301289
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k1-G4",
+          "seconds": 2.5149060519999997
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k1-G16",
+          "seconds": 6.56925531
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k1-G128",
+          "seconds": 11.763240182
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k4-G4",
+          "seconds": 2.713282335
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k4-G16",
+          "seconds": 7.172352899
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k4-G128",
+          "seconds": 12.903470831
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k8-G4",
+          "seconds": 2.834028299
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k8-G16",
+          "seconds": 7.647240354
+        },
+        {
+          "id": "credit/nt2000_md2/xgboost/whatif-v2-k8-G128",
+          "seconds": 14.03790626
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k1-G4",
+          "seconds": 5.892645675
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k1-G16",
+          "seconds": 19.343246416
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k1-G128",
+          "seconds": 32.753381028
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k4-G4",
+          "seconds": 6.610836151
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k4-G16",
+          "seconds": 22.510947524
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k4-G128",
+          "seconds": 41.218349389
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k8-G4",
+          "seconds": 6.982098839
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k8-G16",
+          "seconds": 24.343333374
+        },
+        {
+          "id": "credit/nt2000_md4/lightgbm/whatif-v2-k8-G128",
+          "seconds": 46.459507907
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k1-G4",
+          "seconds": 6.283139584
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k1-G16",
+          "seconds": 14.45260851
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k1-G128",
+          "seconds": 22.580250824
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k4-G4",
+          "seconds": 6.895976832
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k4-G16",
+          "seconds": 16.781410665
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k4-G128",
+          "seconds": 26.89964904
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k8-G4",
+          "seconds": 7.419646248
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k8-G16",
+          "seconds": 18.776826433
+        },
+        {
+          "id": "credit/nt2000_md4/xgboost/whatif-v2-k8-G128",
+          "seconds": 31.983480998
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k1-G4",
+          "seconds": 22.449468064
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k1-G16",
+          "seconds": 149.151272767
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k1-G128",
+          "seconds": 173.615368461
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k4-G4",
+          "seconds": 26.151318376
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k4-G16",
+          "seconds": 158.808013814
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k4-G128",
+          "seconds": 191.235782311
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k8-G4",
+          "seconds": 26.322794054
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k8-G16",
+          "seconds": 90.780476289
+        },
+        {
+          "id": "credit/nt2000_md8/lightgbm/whatif-v2-k8-G128",
+          "seconds": 173.610881679
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k1-G4",
+          "seconds": 24.727644216
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k1-G16",
+          "seconds": 71.274907336
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k1-G128",
+          "seconds": 83.567916974
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k4-G4",
+          "seconds": 27.02862142
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k4-G16",
+          "seconds": 82.988559859
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k4-G128",
+          "seconds": 126.311143661
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k8-G4",
+          "seconds": 28.294283357
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k8-G16",
+          "seconds": 87.26769334
+        },
+        {
+          "id": "credit/nt2000_md8/xgboost/whatif-v2-k8-G128",
+          "seconds": 147.628035482
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k1-G4",
+          "seconds": 143.39950586
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k1-G16",
+          "seconds": 179.807876241
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k1-G128",
+          "seconds": 327.33532578
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k4-G4",
+          "seconds": 58.05323772
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k4-G16",
+          "seconds": 194.659456019
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k4-G128",
+          "seconds": 482.662845719
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k8-G4",
+          "seconds": 104.012976031
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k8-G16",
+          "seconds": 255.56165131
+        },
+        {
+          "id": "credit/nt2000_md16/lightgbm/whatif-v2-k8-G128",
+          "seconds": 383.680415867
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k1-G4",
+          "seconds": 51.488972781
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k1-G16",
+          "seconds": 188.389776544
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k1-G128",
+          "seconds": 238.760697259
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k4-G4",
+          "seconds": 54.95881527
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k4-G16",
+          "seconds": 167.977496142
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k4-G128",
+          "seconds": 262.356477931
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k8-G4",
+          "seconds": 56.386155773
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k8-G16",
+          "seconds": 172.857143897
+        },
+        {
+          "id": "credit/nt2000_md16/xgboost/whatif-v2-k8-G128",
+          "seconds": 272.848733733
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k1-G64",
+          "seconds": 17.30519018
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k2-G4",
+          "seconds": 2.565587775
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k2-G16",
+          "seconds": 7.355591127
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k2-G64",
+          "seconds": 11.944113652
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k2-G128",
+          "seconds": 13.94751346
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k4-G64",
+          "seconds": 15.389469631
+        },
+        {
+          "id": "credit/nt500_md8/lightgbm/whatif-v2-k8-G64",
+          "seconds": 19.208703057
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k1-G64",
+          "seconds": 9.501848792
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k2-G4",
+          "seconds": 3.509940989
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k2-G16",
+          "seconds": 8.407873524
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k2-G64",
+          "seconds": 10.334056253
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k2-G128",
+          "seconds": 9.515552557
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k4-G64",
+          "seconds": 11.706751509
+        },
+        {
+          "id": "credit/nt500_md8/xgboost/whatif-v2-k8-G64",
+          "seconds": 14.543414682
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k1-G4",
+          "seconds": 2.792584071
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k1-G16",
+          "seconds": 7.53537411
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k1-G64",
+          "seconds": 12.824613498
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k1-G128",
+          "seconds": 11.752851805
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k2-G4",
+          "seconds": 3.177926339
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k2-G16",
+          "seconds": 9.510034542
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k2-G64",
+          "seconds": 17.171557753
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k2-G128",
+          "seconds": 15.860273098
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k4-G4",
+          "seconds": 3.398975165
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k4-G16",
+          "seconds": 10.857616617
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k4-G64",
+          "seconds": 21.065395442
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k4-G128",
+          "seconds": 20.312777734
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k8-G4",
+          "seconds": 3.519361976
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k8-G16",
+          "seconds": 11.966547096
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k8-G64",
+          "seconds": 24.876718819
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/whatif-v2-k8-G128",
+          "seconds": 24.755285694
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k1-G4",
+          "seconds": 3.718261969
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k1-G16",
+          "seconds": 8.671001409
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k1-G64",
+          "seconds": 11.596833958
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k1-G128",
+          "seconds": 10.504646333
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k2-G4",
+          "seconds": 4.052931705
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k2-G16",
+          "seconds": 9.773288622
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k2-G64",
+          "seconds": 13.267369091
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k2-G128",
+          "seconds": 12.195638851
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k4-G4",
+          "seconds": 4.312257227
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k4-G16",
+          "seconds": 10.869345748
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k4-G64",
+          "seconds": 15.49102359
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k4-G128",
+          "seconds": 14.558581211
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k8-G4",
+          "seconds": 4.566002244
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k8-G16",
+          "seconds": 12.191441238
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k8-G64",
+          "seconds": 19.026904145
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/whatif-v2-k8-G128",
+          "seconds": 18.619640355
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k1-G4",
+          "seconds": 1.928346095
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k1-G16",
+          "seconds": 5.400094126
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k1-G64",
+          "seconds": 12.918276755
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k1-G128",
+          "seconds": 12.065015547
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k2-G4",
+          "seconds": 2.078674495
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k2-G16",
+          "seconds": 6.301042272
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k2-G64",
+          "seconds": 16.024990587
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k2-G128",
+          "seconds": 15.144749444
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k4-G4",
+          "seconds": 2.277425955
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k4-G16",
+          "seconds": 7.741197538
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k4-G64",
+          "seconds": 21.763008296
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k4-G128",
+          "seconds": 21.136366148
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k8-G4",
+          "seconds": 2.325743936
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k8-G16",
+          "seconds": 8.278879256
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k8-G64",
+          "seconds": 23.942698687
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/whatif-v2-k8-G128",
+          "seconds": 23.87163335
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k1-G4",
+          "seconds": 2.771044426
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k1-G16",
+          "seconds": 6.626206091
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k1-G64",
+          "seconds": 12.150647255
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k1-G128",
+          "seconds": 11.066107805
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k2-G4",
+          "seconds": 2.920970311
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k2-G16",
+          "seconds": 7.245538162
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k2-G64",
+          "seconds": 13.720585246
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k2-G128",
+          "seconds": 12.690039978
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k4-G4",
+          "seconds": 3.178022737
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k4-G16",
+          "seconds": 8.505767655
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k4-G64",
+          "seconds": 17.711499475
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k4-G128",
+          "seconds": 17.070307446
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k8-G4",
+          "seconds": 3.325346369
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k8-G16",
+          "seconds": 9.372787263
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k8-G64",
+          "seconds": 20.867302593
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/whatif-v2-k8-G128",
+          "seconds": 21.002000238
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k1-G4",
+          "seconds": 3.569657022
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k1-G16",
+          "seconds": 9.269582529
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k1-G64",
+          "seconds": 13.440700915
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k1-G128",
+          "seconds": 12.239008246
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k2-G4",
+          "seconds": 4.151023391
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k2-G16",
+          "seconds": 12.268881798
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k2-G64",
+          "seconds": 18.575385365
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k2-G128",
+          "seconds": 17.069958385
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k4-G4",
+          "seconds": 4.610882137
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k4-G16",
+          "seconds": 14.973173705
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k4-G64",
+          "seconds": 25.762266103
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k4-G128",
+          "seconds": 24.649659519
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k8-G4",
+          "seconds": 4.786322417
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k8-G16",
+          "seconds": 16.211281273
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k8-G64",
+          "seconds": 29.484321288
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/whatif-v2-k8-G128",
+          "seconds": 28.796633899
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k1-G4",
+          "seconds": 4.319612098
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k1-G16",
+          "seconds": 9.385290604
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k1-G64",
+          "seconds": 11.396446006
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k1-G128",
+          "seconds": 10.088198105
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k2-G4",
+          "seconds": 4.8371235089999995
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k2-G16",
+          "seconds": 11.054050931
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k2-G64",
+          "seconds": 13.496969062
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k2-G128",
+          "seconds": 12.103720149
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k4-G4",
+          "seconds": 5.16076402
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k4-G16",
+          "seconds": 12.474726202
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k4-G64",
+          "seconds": 15.98839882
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k4-G128",
+          "seconds": 14.741385556
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k8-G4",
+          "seconds": 5.523051724
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k8-G16",
+          "seconds": 14.639230992
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k8-G64",
+          "seconds": 20.617504926
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/whatif-v2-k8-G128",
+          "seconds": 19.651635725
+        },
+        {
+          "id": "support/nt500_md4_h16_r1/lightgbm/panel",
+          "seconds": 3.042999664
+        },
+        {
+          "id": "support/nt500_md4_h16_r1/xgboost/panel",
+          "seconds": 2.787839447
+        },
+        {
+          "id": "support/nt500_md4_h16_r2/lightgbm/panel",
+          "seconds": 3.030990692
+        },
+        {
+          "id": "support/nt500_md4_h16_r2/xgboost/panel",
+          "seconds": 2.806831839
+        },
+        {
+          "id": "support/nt500_md4_h16_r3/lightgbm/panel",
+          "seconds": 2.958120117
+        },
+        {
+          "id": "support/nt500_md4_h16_r3/xgboost/panel",
+          "seconds": 2.771463554
+        },
+        {
+          "id": "support/nt500_md4_h16_r4/lightgbm/panel",
+          "seconds": 2.965702021
+        },
+        {
+          "id": "support/nt500_md4_h16_r4/xgboost/panel",
+          "seconds": 2.789034193
+        },
+        {
+          "id": "credit/nt500_md4_r1/lightgbm/whatif-v2-k4-G16",
+          "seconds": 4.473535969
+        },
+        {
+          "id": "credit/nt500_md4_r1/xgboost/whatif-v2-k4-G16",
+          "seconds": 3.493518367
+        },
+        {
+          "id": "credit/nt500_md4_r2/lightgbm/whatif-v2-k4-G16",
+          "seconds": 4.480308737
+        },
+        {
+          "id": "credit/nt500_md4_r2/xgboost/whatif-v2-k4-G16",
+          "seconds": 3.521653383
+        },
+        {
+          "id": "credit/nt500_md4_r3/lightgbm/whatif-v2-k4-G16",
+          "seconds": 4.630541373
+        },
+        {
+          "id": "credit/nt500_md4_r3/xgboost/whatif-v2-k4-G16",
+          "seconds": 3.502643986
+        },
+        {
+          "id": "credit/nt500_md4_r4/lightgbm/whatif-v2-k4-G16",
+          "seconds": 4.445736593
+        },
+        {
+          "id": "credit/nt500_md4_r4/xgboost/whatif-v2-k4-G16",
+          "seconds": 3.526151014
+        },
+        {
+          "id": "expedia/nt500_md8_r1/lightgbm/sessions",
+          "seconds": 28.301136534
+        },
+        {
+          "id": "expedia/nt500_md8_r1/xgboost/sessions",
+          "seconds": 24.256313361
+        },
+        {
+          "id": "expedia/nt500_md8_r2/lightgbm/sessions",
+          "seconds": 28.141618697
+        },
+        {
+          "id": "expedia/nt500_md8_r2/xgboost/sessions",
+          "seconds": 24.50649729
+        },
+        {
+          "id": "expedia/nt500_md8_r3/lightgbm/sessions",
+          "seconds": 28.774808746
+        },
+        {
+          "id": "expedia/nt500_md8_r3/xgboost/sessions",
+          "seconds": 25.160232034
+        },
+        {
+          "id": "expedia/nt500_md8_r4/lightgbm/sessions",
+          "seconds": 28.04325256
+        },
+        {
+          "id": "expedia/nt500_md8_r4/xgboost/sessions",
+          "seconds": 24.333630715
+        },
+        {
+          "id": "expedia-filled/nt50_md2/lightgbm/sessions",
+          "seconds": 0.646180341
+        },
+        {
+          "id": "expedia-filled/nt50_md2/xgboost/sessions",
+          "seconds": 0.992041691
+        },
+        {
+          "id": "expedia-filled/nt50_md4/lightgbm/sessions",
+          "seconds": 1.209043607
+        },
+        {
+          "id": "expedia-filled/nt50_md4/xgboost/sessions",
+          "seconds": 1.505477833
+        },
+        {
+          "id": "expedia-filled/nt500_md2/lightgbm/sessions",
+          "seconds": 4.837218108
+        },
+        {
+          "id": "expedia-filled/nt500_md2/xgboost/sessions",
+          "seconds": 4.375067986
+        },
+        {
+          "id": "expedia-filled/nt500_md4/lightgbm/sessions",
+          "seconds": 11.39234842
+        },
+        {
+          "id": "expedia-filled/nt500_md4/xgboost/sessions",
+          "seconds": 8.503709092
+        },
+        {
+          "id": "expedia-filled/nt1000_md2/lightgbm/sessions",
+          "seconds": 9.777231164
+        },
+        {
+          "id": "expedia-filled/nt1000_md2/xgboost/sessions",
+          "seconds": 7.882039661
+        },
+        {
+          "id": "expedia-filled/nt1000_md4/lightgbm/sessions",
+          "seconds": 22.399300358
+        },
+        {
+          "id": "expedia-filled/nt1000_md4/xgboost/sessions",
+          "seconds": 16.321094623
+        },
+        {
+          "id": "expedia-filled/nt2000_md2/lightgbm/sessions",
+          "seconds": 19.598964943
+        },
+        {
+          "id": "expedia-filled/nt2000_md2/xgboost/sessions",
+          "seconds": 15.52887767
+        },
+        {
+          "id": "expedia-filled/nt2000_md4/lightgbm/sessions",
+          "seconds": 45.786723717
+        },
+        {
+          "id": "expedia-filled/nt2000_md4/xgboost/sessions",
+          "seconds": 35.770738062
+        }
+      ],
+      "cells_failed": [],
+      "cells_skipped": [],
+      "finished": 1791626005,
+      "peak_rss_bytes": 60018688,
+      "started": 1791580531
+    }
+  ],
+  "manifest": {
+    "artifacts_dir": "/home/bench/treewalker/experiments/artifacts",
+    "cells": 1134,
+    "grids_sha256": "e43d3bf51e80fa6ca11a1933b59f7bbcb5d998387c736bcafd56a5217b33d5af",
+    "source": {
+      "commit": "913fd70e7c936b617445462f983d4ff04ffe970c",
+      "dirty": false,
+      "from": "experiments/SOURCE_COMMIT"
+    },
+    "suite": "factorial"
+  },
+  "natives": {
+    "lightgbm": {
+      "build": {
+        "cmake_args": [
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_C_FLAGS=-march=native",
+          "-DCMAKE_CXX_FLAGS=-march=native",
+          "-DUSE_OPENMP=ON"
+        ],
+        "compiler": {
+          "path": "/usr/bin/c++",
+          "version": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+        },
+        "identity": {
+          "cc": {
+            "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+            "target": "aarch64-linux-gnu",
+            "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+          },
+          "cmake": "cmake version 4.2.3",
+          "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-march=native",
+            "-DCMAKE_CXX_FLAGS=-march=native",
+            "-DUSE_OPENMP=ON"
+          ],
+          "commit": "8f7036f03627054d5a54a6f965b13f4b9ff2cb63",
+          "cxx": {
+            "path": "/usr/bin/aarch64-linux-gnu-g++-15",
+            "target": "aarch64-linux-gnu",
+            "version": "aarch64-linux-gnu-g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+          },
+          "host_cpu": "unknown",
+          "platform": "linux",
+          "tag": "v4.7.0",
+          "url": "https://github.com/lightgbm-org/LightGBM.git"
+        },
+        "key": "0cf7656d9d87d68edbee571f8fa763c00ae898e6edce9a430d0fffacef3f8474"
+      },
+      "commit": "8f7036f03627054d5a54a6f965b13f4b9ff2cb63",
+      "path": "/home/bench/treewalker/experiments/.cache/native/lightgbm-4.7.0-8f7036f03627/lib_lightgbm.so",
+      "sha256": "9b82c1dcef03fdcfbdf882d4d41a997567c45c4faff644176a04c8146e912944",
+      "version": "4.7.0"
+    },
+    "xgboost": {
+      "build": {
+        "cmake_args": [
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_C_FLAGS=-march=native",
+          "-DCMAKE_CXX_FLAGS=-march=native",
+          "-DUSE_OPENMP=ON"
+        ],
+        "compiler": {
+          "path": "/usr/bin/c++",
+          "version": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+        },
+        "identity": {
+          "cc": {
+            "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+            "target": "aarch64-linux-gnu",
+            "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+          },
+          "cmake": "cmake version 4.2.3",
+          "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-march=native",
+            "-DCMAKE_CXX_FLAGS=-march=native",
+            "-DUSE_OPENMP=ON"
+          ],
+          "commit": "6fe8c547bdd21c73e4555d85b087d9260595d30d",
+          "cxx": {
+            "path": "/usr/bin/aarch64-linux-gnu-g++-15",
+            "target": "aarch64-linux-gnu",
+            "version": "aarch64-linux-gnu-g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+          },
+          "host_cpu": "unknown",
+          "platform": "linux",
+          "tag": "v3.4.1",
+          "url": "https://github.com/dmlc/xgboost.git"
+        },
+        "key": "c1027309022ffda5273986a018c7eddbb393533d69aee7ece973ff71592ac4ca"
+      },
+      "commit": "6fe8c547bdd21c73e4555d85b087d9260595d30d",
+      "path": "/home/bench/treewalker/experiments/.cache/native/xgboost-3.4.1-6fe8c547bdd2/libxgboost.so",
+      "sha256": "3ac9dda26ac7d0e6999449710c396b02cc5c2f784bee94b456524c48620d54c5",
+      "version": "3.4.1"
+    }
+  },
+  "output_schema": 5,
+  "run": {
+    "batch_rows": 1024,
+    "fresh_process": true,
+    "hardware_counters": true,
+    "max_rounds": 10,
+    "max_rows_per_round": 65536,
+    "min_groups_per_round": 200,
+    "min_rounds": 3,
+    "mode_budget_secs": 120.0,
+    "precision_pct": 1.0,
+    "seed": 42,
+    "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+    "sentinel_drift_pct": 2.0,
+    "sentinel_every": 25,
+    "target_batches": 12,
+    "xgboost_process_arches": [
+      "x86_64"
+    ],
+    "xgboost_processes": 6
+  },
+  "sentinel": {
+    "cell": "support/nt500_md4_h16/lightgbm/panel",
+    "every": 25,
+    "interfaces": {
+      "lightgbm_native": {
+        "serving": "PredictForMatSingleRowFast loop"
+      },
+      "lleaves": {
+        "serving": "forest_root"
+      },
+      "tl2cgen": {
+        "serving": "predict loop"
+      },
+      "treewalker": {
+        "serving": "predict_group"
+      },
+      "treewalker_fullwalk": {
+        "serving": "predict_full_walk"
+      }
+    },
+    "records": [
+      {
+        "cells_done": 0,
+        "index": 0,
+        "role": "warm-up",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            778472925,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208754614,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286579863,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65281643,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239021792,
+            85152
+          ]
+        },
+        "unix_time": 1791580534
+      },
+      {
+        "cells_done": 0,
+        "index": 1,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780427073,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208561955,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287065598,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65754462,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238981868,
+            85152
+          ]
+        },
+        "unix_time": 1791580537
+      },
+      {
+        "cells_done": 25,
+        "index": 2,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            781042394,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208537449,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287186374,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65588918,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238950081,
+            85152
+          ]
+        },
+        "unix_time": 1791580548
+      },
+      {
+        "cells_done": 50,
+        "index": 3,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780533507,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208555541,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286978552,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65429916,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238775232,
+            85152
+          ]
+        },
+        "unix_time": 1791580572
+      },
+      {
+        "cells_done": 75,
+        "index": 4,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            779621026,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208818173,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287037602,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65535077,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238875326,
+            85152
+          ]
+        },
+        "unix_time": 1791580631
+      },
+      {
+        "cells_done": 100,
+        "index": 5,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            779571904,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208787016,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286710289,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65308780,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238661633,
+            85152
+          ]
+        },
+        "unix_time": 1791580702
+      },
+      {
+        "cells_done": 125,
+        "index": 6,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780070444,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208775592,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286762073,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65470601,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239127476,
+            85152
+          ]
+        },
+        "unix_time": 1791581220
+      },
+      {
+        "cells_done": 150,
+        "index": 7,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780855018,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208532194,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286936941,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65549030,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238959842,
+            85152
+          ]
+        },
+        "unix_time": 1791581450
+      },
+      {
+        "cells_done": 175,
+        "index": 8,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            779986052,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208687727,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286981026,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65572681,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238854559,
+            85152
+          ]
+        },
+        "unix_time": 1791581852
+      },
+      {
+        "cells_done": 200,
+        "index": 9,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780310892,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208501752,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286990939,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65493975,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239023436,
+            85152
+          ]
+        },
+        "unix_time": 1791583570
+      },
+      {
+        "cells_done": 225,
+        "index": 10,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780260086,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208767408,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286671819,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65614573,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238838934,
+            85152
+          ]
+        },
+        "unix_time": 1791583888
+      },
+      {
+        "cells_done": 250,
+        "index": 11,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            781971079,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208676835,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287437352,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65524627,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239109470,
+            85152
+          ]
+        },
+        "unix_time": 1791585986
+      },
+      {
+        "cells_done": 275,
+        "index": 12,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            781108807,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208727345,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287152381,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65623508,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238948058,
+            85152
+          ]
+        },
+        "unix_time": 1791588412
+      },
+      {
+        "cells_done": 300,
+        "index": 13,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            785392298,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208798891,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287042152,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65492981,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238987772,
+            85152
+          ]
+        },
+        "unix_time": 1791588428
+      },
+      {
+        "cells_done": 325,
+        "index": 14,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780997641,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208627996,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287019405,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65535894,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239101287,
+            85152
+          ]
+        },
+        "unix_time": 1791588464
+      },
+      {
+        "cells_done": 350,
+        "index": 15,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            781578755,
+            85152
+          ],
+          "lleaves/-/serving": [
+            209187302,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287845434,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65744559,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239277026,
+            85152
+          ]
+        },
+        "unix_time": 1791588513
+      },
+      {
+        "cells_done": 375,
+        "index": 16,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780760445,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208514272,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287032274,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65431737,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238965612,
+            85152
+          ]
+        },
+        "unix_time": 1791588657
+      },
+      {
+        "cells_done": 400,
+        "index": 17,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780138903,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208581064,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286563428,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65424676,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238935156,
+            85152
+          ]
+        },
+        "unix_time": 1791589152
+      },
+      {
+        "cells_done": 425,
+        "index": 18,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780442229,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208738390,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287162940,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65493433,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238750323,
+            85152
+          ]
+        },
+        "unix_time": 1791589286
+      },
+      {
+        "cells_done": 450,
+        "index": 19,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780686343,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208745621,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286912653,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65442124,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238941174,
+            85152
+          ]
+        },
+        "unix_time": 1791590505
+      },
+      {
+        "cells_done": 475,
+        "index": 20,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780651773,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208587855,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286705652,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65643439,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238810850,
+            85152
+          ]
+        },
+        "unix_time": 1791590660
+      },
+      {
+        "cells_done": 500,
+        "index": 21,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            789630723,
+            85152
+          ],
+          "lleaves/-/serving": [
+            210033184,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            289080606,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65747524,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            240138154,
+            85152
+          ]
+        },
+        "unix_time": 1791591799
+      },
+      {
+        "cells_done": 525,
+        "index": 22,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            782248890,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208858696,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287834168,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65797491,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239447134,
+            85152
+          ]
+        },
+        "unix_time": 1791594945
+      },
+      {
+        "cells_done": 550,
+        "index": 23,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780307502,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208642002,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286893355,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65423046,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238807668,
+            85152
+          ]
+        },
+        "unix_time": 1791599741
+      },
+      {
+        "cells_done": 575,
+        "index": 24,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780561766,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208580820,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287099531,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65435757,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238895390,
+            85152
+          ]
+        },
+        "unix_time": 1791603602
+      },
+      {
+        "cells_done": 600,
+        "index": 25,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780896413,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208664298,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287175379,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65500428,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238952980,
+            85152
+          ]
+        },
+        "unix_time": 1791603743
+      },
+      {
+        "cells_done": 625,
+        "index": 26,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780995931,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208622219,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287250877,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65586969,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238906956,
+            85152
+          ]
+        },
+        "unix_time": 1791604018
+      },
+      {
+        "cells_done": 650,
+        "index": 27,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            784751418,
+            85152
+          ],
+          "lleaves/-/serving": [
+            209227910,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287858853,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65788169,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239457723,
+            85152
+          ]
+        },
+        "unix_time": 1791605392
+      },
+      {
+        "cells_done": 675,
+        "index": 28,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            781159868,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208544064,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286911289,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65575580,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238780891,
+            85152
+          ]
+        },
+        "unix_time": 1791608401
+      },
+      {
+        "cells_done": 700,
+        "index": 29,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780096387,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208617630,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286670554,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65411309,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238922657,
+            85152
+          ]
+        },
+        "unix_time": 1791614648
+      },
+      {
+        "cells_done": 725,
+        "index": 30,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            784011914,
+            85152
+          ],
+          "lleaves/-/serving": [
+            209344805,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            288290034,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65787196,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239297112,
+            85152
+          ]
+        },
+        "unix_time": 1791614664
+      },
+      {
+        "cells_done": 750,
+        "index": 31,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            782583624,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208979096,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287752366,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65667460,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239272527,
+            85152
+          ]
+        },
+        "unix_time": 1791614690
+      },
+      {
+        "cells_done": 775,
+        "index": 32,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            784660751,
+            85152
+          ],
+          "lleaves/-/serving": [
+            209764370,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            288080249,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65994817,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239529175,
+            85152
+          ]
+        },
+        "unix_time": 1791614754
+      },
+      {
+        "cells_done": 800,
+        "index": 33,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            783953000,
+            85152
+          ],
+          "lleaves/-/serving": [
+            209212279,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            288032761,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65731540,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239590053,
+            85152
+          ]
+        },
+        "unix_time": 1791614839
+      },
+      {
+        "cells_done": 825,
+        "index": 34,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780829216,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208625361,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286953235,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65587993,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238834483,
+            85152
+          ]
+        },
+        "unix_time": 1791615069
+      },
+      {
+        "cells_done": 850,
+        "index": 35,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            784899084,
+            85152
+          ],
+          "lleaves/-/serving": [
+            209875798,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            288410829,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65897501,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239591703,
+            85152
+          ]
+        },
+        "unix_time": 1791615729
+      },
+      {
+        "cells_done": 875,
+        "index": 36,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            781704941,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208528994,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287289048,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65437365,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238826730,
+            85152
+          ]
+        },
+        "unix_time": 1791615906
+      },
+      {
+        "cells_done": 900,
+        "index": 37,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780987486,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208673900,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286620839,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65533983,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239226944,
+            85152
+          ]
+        },
+        "unix_time": 1791617063
+      },
+      {
+        "cells_done": 925,
+        "index": 38,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            782806168,
+            85152
+          ],
+          "lleaves/-/serving": [
+            209170553,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287669636,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65699290,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239338032,
+            85152
+          ]
+        },
+        "unix_time": 1791618499
+      },
+      {
+        "cells_done": 950,
+        "index": 39,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            781933461,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208994700,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287234106,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65607958,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239079312,
+            85152
+          ]
+        },
+        "unix_time": 1791619078
+      },
+      {
+        "cells_done": 975,
+        "index": 40,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780076617,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208578370,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287211806,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65466965,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238964881,
+            85152
+          ]
+        },
+        "unix_time": 1791622731
+      },
+      {
+        "cells_done": 1000,
+        "index": 41,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            779846898,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208641031,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286934638,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65605269,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238912890,
+            85152
+          ]
+        },
+        "unix_time": 1791624367
+      },
+      {
+        "cells_done": 1025,
+        "index": 42,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780627091,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208589329,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286783504,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65511220,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238933543,
+            85152
+          ]
+        },
+        "unix_time": 1791624667
+      },
+      {
+        "cells_done": 1050,
+        "index": 43,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            779965442,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208673911,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286739400,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65528578,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238688317,
+            85152
+          ]
+        },
+        "unix_time": 1791624956
+      },
+      {
+        "cells_done": 1075,
+        "index": 44,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780887585,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208886799,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287115821,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65554998,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239181573,
+            85152
+          ]
+        },
+        "unix_time": 1791625263
+      },
+      {
+        "cells_done": 1100,
+        "index": 45,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780746389,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208718031,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286666992,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65514959,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239249458,
+            85152
+          ]
+        },
+        "unix_time": 1791625544
+      },
+      {
+        "cells_done": 1125,
+        "index": 46,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            780338951,
+            85152
+          ],
+          "lleaves/-/serving": [
+            208576745,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287024232,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65563885,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239135392,
+            85152
+          ]
+        },
+        "unix_time": 1791625823
+      }
+    ]
+  },
+  "source": {
+    "commit": "913fd70e7c936b617445462f983d4ff04ffe970c",
+    "from": "experiments/SOURCE_COMMIT (git archive)"
+  },
+  "started": 1791580531,
+  "suite": "factorial",
+  "system_info": {
+    "apt_snapshot": "20261005T111000Z",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "cmake": "cmake version 4.2.3",
+    "cxx": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "git": "git version 2.53.0",
+    "git_ref": "913fd70",
+    "image": "projects/ubuntu-os-cloud/global/images/ubuntu-2604-resolute-arm64-v20260918",
+    "image_requested": "ubuntu-os-cloud/ubuntu-2604-resolute-arm64-v20260918",
+    "kernel_cmdline": "BOOT_IMAGE=/vmlinuz-7.0.0-1011-gcp root=PARTUUID=d49ff458-7f9a-45d1-bcb4-17111d7e7726 ro console=ttyS0,115200 panic=-1",
+    "machine_type": "c4a-highmem-16",
+    "os_release": "Ubuntu 26.04.1 LTS",
+    "page_size": "4096",
+    "pmu_level": "STANDARD",
+    "rustup": "rustup 1.29.1 (d95a37b6a 2026-08-13)",
+    "thp_defrag": "always defer defer+madvise [madvise] never",
+    "thp_enabled": "always [madvise] never",
+    "turbo_mode": "unset: Arm runs at its all-core turbo frequency",
+    "uv": "uv 0.13.0 (aarch64-unknown-linux-gnu)",
+    "zone": "us-east4-a"
+  },
+  "timer": {
+    "amortized_check": {
+      "amortized_mean": 54.78845,
+      "calls": 20000,
+      "difference": 23.646150000000006,
+      "overhead_p50": 21,
+      "per_call_mean": 78.4346
+    },
+    "calibration": {
+      "check_ms": 200,
+      "counter": "cntvct_el0",
+      "hz": 1000000000.0,
+      "measured_hz": 1000000359.831115,
+      "overhead": {
+        "max": 6199,
+        "mean": 21.13544,
+        "min": 10,
+        "n": 100000,
+        "p50": 21,
+        "p90": 21,
+        "p99": 22
+      },
+      "relative_difference": -3.598309855634696e-7,
+      "resolution_ticks": 20,
+      "source": "cntfrq_el0"
+    }
+  },
+  "tl2cgen_runtime": {
+    "path": "/home/bench/treewalker/.venv/lib/python3.14/site-packages/tl2cgen/lib/libtl2cgen.so",
+    "sha256": "d784d6bb9cb7cd31eb5e3954f165b902c75f8fabef418c090b2040686673efc9"
+  }
+}
