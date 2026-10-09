@@ -71,6 +71,15 @@ def test_heatmap_tex_has_every_cell_and_contrasting_text():
     assert tex.startswith("% Auto-generated") and tex.rstrip().endswith(r"\end{tikzpicture}")
 
 
+def test_numbers_round_half_up_as_the_paper_prints():
+    from treewalker_exp import numbers
+
+    assert (
+        numbers.r(2.25, 1) == "2.3" and numbers.r(2.35, 1) == "2.4" and numbers.r(44.5, 0) == "45"
+    )
+    assert numbers.rng(1.04, 2.96, 1) == "1.0-3.0"
+
+
 def test_decomposition_is_theorem_1s_per_row_work_over_g_t_l():
     import polars as pl
 
