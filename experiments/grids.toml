@@ -64,7 +64,13 @@ min_groups_per_round = 200
 # turns it off.
 sentinel_cell = "support/nt500_md4_h16/lightgbm/panel"
 sentinel_every = 25
-sentinel_drift_pct = 3.0
+sentinel_drift_pct = 2.0
+# Each cell, and each sentinel, runs in a new process of the runner. In one
+# long-lived process, a LightGBM model loaded after hundreds of other models ran
+# up to 6.9% slower by the end of the final run's factorial (same instructions);
+# one loaded into a new process did not, nor with jemalloc (the heap-drift
+# diagnostic, 2026-10-09). With fresh processes the sentinel measures the machine.
+fresh_process = true
 # XGBoost's AVX2 block walk runs only when a heap buffer happens to be 32-byte
 # aligned, so on Intel its speed has two modes, random across processes and
 # sometimes switching within one. Each XGBoost cell also times XGBoost alone in

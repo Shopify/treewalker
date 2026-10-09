@@ -1856,7 +1856,7 @@ pub fn xgboost_process(_: &Value) -> Result<Value> {
 }
 
 /// What a finished cell reports to the run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CellOutcome {
     pub id: String,
     pub dir: PathBuf,

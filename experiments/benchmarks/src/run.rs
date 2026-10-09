@@ -1,5 +1,6 @@
 //! Runs: `run.json`, resume keys, preflight, and the loop over a manifest's cells.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
@@ -446,7 +447,7 @@ pub fn run(
                     interfaces: std::collections::BTreeMap::new(),
                 });
             }
-            driver::run_cell(&mut ctx, mc, &dir, run_dir, &key, true)
+            time_cell(&mut ctx, mc, &dir, run_dir, &key)
         })();
         let measured = ctx.timing_began > began;
         match outcome {
@@ -491,6 +492,121 @@ pub fn run(
         eprintln!("{} cells failed; see run.json and failed/", failed.len());
     }
     Ok(failed.is_empty())
+}
+
+/// What a cell's own process needs to time it: the parent's context, the cell,
+/// and where its results go.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CellRequest {
+    suite: String,
+    config: RunConfig,
+    natives: Natives,
+    tl2cgen_runtime: Option<(PathBuf, String)>,
+    only: Option<Vec<String>>,
+    tl2cgen_override: Option<PathBuf>,
+    require_pmu: bool,
+    interface_override: BTreeMap<String, BTreeMap<String, String>>,
+    cell: ManifestCell,
+    cell_dir: PathBuf,
+    out_dir: PathBuf,
+    key: String,
+}
+
+/// What the cell's process reports: its outcome or why it failed, and whether its
+/// timing began (the sentinel's cadence counts those cells).
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CellResult {
+    outcome: Option<driver::CellOutcome>,
+    error: Option<String>,
+    timing_began: bool,
+}
+
+/// Time one cell into `out_dir`, in this process or, with `fresh_process`, in a
+/// new process of this executable.
+///
+/// A new process gives the cell a fresh heap. In one long-lived process, a LightGBM
+/// model loaded after hundreds of other models ran up to 6.9% slower by the end of
+/// the final run's factorial, with the same instructions; one loaded into a new
+/// process did not (the heap-drift diagnostic, 2026-10-09).
+pub fn time_cell(
+    ctx: &mut Context,
+    mc: &ManifestCell,
+    cell_dir: &Path,
+    out_dir: &Path,
+    key: &str,
+) -> Result<driver::CellOutcome> {
+    if !ctx.config.fresh_process {
+        return driver::run_cell(ctx, mc, cell_dir, out_dir, key, true);
+    }
+    let request = CellRequest {
+        suite: ctx.suite.clone(),
+        config: ctx.config.clone(),
+        natives: ctx.natives.clone(),
+        tl2cgen_runtime: ctx.tl2cgen_runtime.clone(),
+        only: ctx.only.clone(),
+        tl2cgen_override: ctx.tl2cgen_override.clone(),
+        require_pmu: ctx.require_pmu,
+        interface_override: ctx.interface_override.clone(),
+        cell: mc.clone(),
+        cell_dir: cell_dir.to_path_buf(),
+        out_dir: out_dir.to_path_buf(),
+        key: key.to_string(),
+    };
+    let dir = std::env::temp_dir().join(format!(
+        "sweep_bench-cell-{}-{}",
+        std::process::id(),
+        Cell::slug(&mc.id)?
+    ));
+    std::fs::create_dir_all(&dir)?;
+    let (req, out) = (dir.join("request.json"), dir.join("result.json"));
+    std::fs::write(&req, serde_json::to_string(&request)?)?;
+    let exe = std::env::current_exe().context("the runner's own executable")?;
+    let status = std::process::Command::new(exe)
+        .arg("cell-process")
+        .arg(&req)
+        .arg(&out)
+        .status()
+        .context("starting the cell's process")?;
+    let doc = std::fs::read_to_string(&out);
+    std::fs::remove_dir_all(&dir)?;
+    anyhow::ensure!(status.success(), "the cell's process exited with {status}");
+    let result: CellResult =
+        serde_json::from_str(&doc.context("the cell's process wrote no result")?)?;
+    if result.timing_began {
+        ctx.timing_began += 1;
+    }
+    match (result.outcome, result.error) {
+        (Some(o), None) => Ok(o),
+        (_, e) => bail!(
+            "{}",
+            e.unwrap_or_else(|| "the cell's process reported nothing".into())
+        ),
+    }
+}
+
+/// The cell's own process: a [`CellRequest`] in, a [`CellResult`] out. It builds
+/// its context as the run did, checking the libraries' hashes again.
+pub fn cell_process(request: &Path, result: &Path) -> Result<()> {
+    let r: CellRequest = serde_json::from_str(&std::fs::read_to_string(request)?)?;
+    let opts = Options {
+        lgb_lib: None,
+        xgb_lib: None,
+        tl2cgen_runtime: None,
+        tl2cgen_override: r.tl2cgen_override,
+        only: r.only,
+        require_pmu: r.require_pmu,
+        system_info: None,
+    };
+    let mut ctx = context(&r.suite, r.config, &r.natives, r.tl2cgen_runtime, &opts)?;
+    ctx.interface_override = r.interface_override;
+    eprintln!("    (in process {})", std::process::id());
+    let outcome = driver::run_cell(&mut ctx, &r.cell, &r.cell_dir, &r.out_dir, &r.key, true);
+    let doc = CellResult {
+        timing_began: ctx.timing_began > 0,
+        error: outcome.as_ref().err().map(|e| format!("{e:#}")),
+        outcome: outcome.ok(),
+    };
+    output::write_json(result, &serde_json::to_value(doc)?)
 }
 
 /// Shell-style `*` matching, enough for cell IDs.

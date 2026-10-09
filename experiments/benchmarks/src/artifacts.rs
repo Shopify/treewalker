@@ -68,7 +68,7 @@ pub struct Natives {
 }
 
 /// One cell of the manifest.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct ManifestCell {
     pub id: String,
     /// Relative to the artifacts directory.
@@ -193,6 +193,9 @@ pub struct RunConfig {
     pub xgboost_processes: usize,
     /// `std::env::consts::ARCH` values the extra processes run on.
     pub xgboost_process_arches: Vec<String>,
+    /// Time each cell, and each sentinel, in a new process of the runner, so none
+    /// runs in a heap that earlier cells' models have churned.
+    pub fresh_process: bool,
 }
 
 impl Default for RunConfig {
@@ -210,9 +213,10 @@ impl Default for RunConfig {
             min_groups_per_round: 200,
             sentinel_cell: "support/nt500_md4_h16/lightgbm/panel".into(),
             sentinel_every: 25,
-            sentinel_drift_pct: 3.0,
+            sentinel_drift_pct: 2.0,
             xgboost_processes: 6,
             xgboost_process_arches: vec!["x86_64".into()],
+            fresh_process: true,
         }
     }
 }

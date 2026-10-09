@@ -89,6 +89,10 @@ enum Command {
     /// a JSON request in, a JSON result out.
     #[command(hide = true)]
     XgboostProcess { request: PathBuf, result: PathBuf },
+    /// One cell's own process, which `run` starts for each cell and sentinel with
+    /// `fresh_process`: a JSON request in, a JSON result out.
+    #[command(hide = true)]
+    CellProcess { request: PathBuf, result: PathBuf },
     /// Validate one cell's TreeWalker outputs (and baselines, given their libraries)
     /// without timing.
     Validate {
@@ -284,6 +288,10 @@ fn real_main() -> Result<bool> {
                 o.timed_methods,
                 o.dir.display()
             );
+            Ok(true)
+        }
+        Command::CellProcess { request, result } => {
+            run::cell_process(&request, &result)?;
             Ok(true)
         }
         Command::XgboostProcess { request, result } => {

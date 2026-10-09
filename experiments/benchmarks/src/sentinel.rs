@@ -141,7 +141,7 @@ impl Sentinel {
                 serde_json::from_str(&std::fs::read_to_string(dir.join("cell.json"))?)?;
             crate::run::check_entry(&mc, &doc)?;
             let key = crate::run::resume_key(header, &mc, &dir, &doc, ctx);
-            driver::run_cell(ctx, &mc, &dir, &out_dir, &key, true)
+            crate::run::time_cell(ctx, &mc, &dir, &out_dir, &key)
         })();
         // The sentinel is not one of the run's cells.
         ctx.timing_began = began;
