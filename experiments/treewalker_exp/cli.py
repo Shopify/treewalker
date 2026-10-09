@@ -438,6 +438,19 @@ def tables(
 
 
 @app.command()
+def numbers(
+    out: Annotated[
+        Path | None, typer.Option(help="Output directory (experiments/figures).")
+    ] = None,
+) -> None:
+    """The paper's in-text numbers from the final runs, with their paper locations."""
+    from . import numbers as nb
+
+    paths = _paths()
+    print("\n".join(nb.generate(paths.runs, out or paths.figures)))
+
+
+@app.command()
 def summarize(
     run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
     reference: Annotated[str, typer.Option(help="The method speedups are against.")] = "treewalker",
