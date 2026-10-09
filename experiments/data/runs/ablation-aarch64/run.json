@@ -1,0 +1,524 @@
+{
+  "binary_sha256": "e2e3564d162fba23174797f6c581be27b5a2350d2d4d9706b28a656581f59d34",
+  "events": {
+    "events": [
+      {
+        "code": 17,
+        "column": "cycles",
+        "kind": "raw",
+        "name": "CPU_CYCLES"
+      },
+      {
+        "code": 8,
+        "column": "instructions",
+        "kind": "raw",
+        "name": "INST_RETIRED"
+      },
+      {
+        "code": 16,
+        "column": "branch_misses",
+        "kind": "raw",
+        "name": "BR_MIS_PRED"
+      },
+      {
+        "code": 57,
+        "column": "l1d_load_misses",
+        "kind": "raw",
+        "name": "L1D_CACHE_LMISS_RD"
+      },
+      {
+        "code": 16393,
+        "column": "l2_data_read_misses",
+        "kind": "raw",
+        "name": "L2D_CACHE_LMISS_RD"
+      },
+      {
+        "code": 3,
+        "column": "context_switches",
+        "kind": "software",
+        "name": "PERF_COUNT_SW_CONTEXT_SWITCHES"
+      },
+      {
+        "code": 1,
+        "column": "task_clock_ns",
+        "kind": "software",
+        "name": "PERF_COUNT_SW_TASK_CLOCK"
+      }
+    ],
+    "table": "neoverse-v2"
+  },
+  "hardware_counters": "ok",
+  "host": {
+    "arch": "aarch64",
+    "aslr": "0",
+    "cpu": "0xd4f",
+    "cpu_id": {
+      "cpu_family": null,
+      "cpu_implementer": "0x41",
+      "cpu_part": "0xd4f",
+      "model": null,
+      "stepping": null,
+      "vendor_id": null
+    },
+    "features": [
+      "external-bench",
+      "quickscorer-bench",
+      "pmu"
+    ],
+    "governor": null,
+    "kernel": "7.0.0-1011-gcp",
+    "kernel_version": "#11-Ubuntu SMP PREEMPT Tue Aug 11 17:16:20 UTC 2026",
+    "logical_cpus": 1,
+    "os": "linux",
+    "perf_event_paranoid": "2",
+    "pinned_cpus": [
+      0
+    ],
+    "profile": "release",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "rustflags": "-C target-cpu=native",
+    "smt_active": "0"
+  },
+  "invocations": [
+    {
+      "cells_done": [
+        {
+          "id": "support/nt50_md4_h1/lightgbm/panel",
+          "seconds": 0.480667561
+        },
+        {
+          "id": "support/nt50_md4_h1/xgboost/panel",
+          "seconds": 0.484137869
+        },
+        {
+          "id": "flchain/nt50_md4_h1/lightgbm/panel",
+          "seconds": 0.349234485
+        },
+        {
+          "id": "flchain/nt50_md4_h1/xgboost/panel",
+          "seconds": 0.362669293
+        },
+        {
+          "id": "expedia/nt50_md4/lightgbm/sessions",
+          "seconds": 6.554200887
+        },
+        {
+          "id": "expedia/nt50_md4/xgboost/sessions",
+          "seconds": 5.182511849
+        },
+        {
+          "id": "support/nt500_md8_h4/lightgbm/panel",
+          "seconds": 6.858257234
+        },
+        {
+          "id": "support/nt500_md8_h4/xgboost/panel",
+          "seconds": 7.319918788
+        },
+        {
+          "id": "flchain/nt500_md8_h4/lightgbm/panel",
+          "seconds": 3.68756164
+        },
+        {
+          "id": "flchain/nt500_md8_h4/xgboost/panel",
+          "seconds": 4.370527492
+        },
+        {
+          "id": "expedia/nt500_md8/lightgbm/sessions",
+          "seconds": 320.559973568
+        },
+        {
+          "id": "expedia/nt500_md8/xgboost/sessions",
+          "seconds": 338.93081304
+        },
+        {
+          "id": "support/nt500_md8_h16/lightgbm/panel",
+          "seconds": 51.790556528
+        },
+        {
+          "id": "support/nt500_md8_h16/xgboost/panel",
+          "seconds": 50.255749927
+        },
+        {
+          "id": "flchain/nt500_md8_h16/lightgbm/panel",
+          "seconds": 36.326710989
+        },
+        {
+          "id": "flchain/nt500_md8_h16/xgboost/panel",
+          "seconds": 38.951640178
+        },
+        {
+          "id": "support/nt1000_md16_h32/lightgbm/panel",
+          "seconds": 632.00219915
+        },
+        {
+          "id": "support/nt1000_md16_h32/xgboost/panel",
+          "seconds": 459.070181812
+        },
+        {
+          "id": "flchain/nt1000_md16_h32/lightgbm/panel",
+          "seconds": 402.581574016
+        },
+        {
+          "id": "flchain/nt1000_md16_h32/xgboost/panel",
+          "seconds": 322.743553463
+        },
+        {
+          "id": "expedia/nt1000_md16/lightgbm/sessions",
+          "seconds": 2542.258666965
+        },
+        {
+          "id": "expedia/nt1000_md16/xgboost/sessions",
+          "seconds": 2498.80252974
+        },
+        {
+          "id": "support/nt500_md4_h16/lightgbm/panel",
+          "seconds": 3.246315494
+        },
+        {
+          "id": "support/nt500_md4_h16/xgboost/panel",
+          "seconds": 3.194612807
+        },
+        {
+          "id": "flchain/nt500_md4_h16/lightgbm/panel",
+          "seconds": 2.329027678
+        },
+        {
+          "id": "flchain/nt500_md4_h16/xgboost/panel",
+          "seconds": 2.231327502
+        },
+        {
+          "id": "expedia/nt500_md4/lightgbm/sessions",
+          "seconds": 24.569212356
+        },
+        {
+          "id": "expedia/nt500_md4/xgboost/sessions",
+          "seconds": 25.853893608
+        },
+        {
+          "id": "support/nt500_md8_h64/lightgbm/panel",
+          "seconds": 9.733989784
+        },
+        {
+          "id": "support/nt500_md8_h64/xgboost/panel",
+          "seconds": 10.547847225
+        },
+        {
+          "id": "flchain/nt500_md8_h64/lightgbm/panel",
+          "seconds": 10.63766736
+        },
+        {
+          "id": "flchain/nt500_md8_h64/xgboost/panel",
+          "seconds": 10.127855396
+        },
+        {
+          "id": "support/nt500_md8_h128/lightgbm/panel",
+          "seconds": 11.839268628
+        },
+        {
+          "id": "support/nt500_md8_h128/xgboost/panel",
+          "seconds": 10.538067984
+        },
+        {
+          "id": "flchain/nt500_md8_h128/lightgbm/panel",
+          "seconds": 13.970368637
+        },
+        {
+          "id": "flchain/nt500_md8_h128/xgboost/panel",
+          "seconds": 11.377376794
+        }
+      ],
+      "cells_failed": [],
+      "cells_skipped": [],
+      "finished": 1791460307,
+      "peak_rss_bytes": 1398149120,
+      "started": 1791452418
+    }
+  ],
+  "manifest": {
+    "artifacts_dir": "/home/bench/treewalker/experiments/artifacts",
+    "cells": 36,
+    "grids_sha256": "f4b4599908399181d31b918c65077cb9ded77d3f1658e08c79e59a7ed83cbea0",
+    "source": {
+      "commit": "5b21f1a3c128634c80a833d4b7122e4b7c0ac374",
+      "dirty": false,
+      "from": "experiments/SOURCE_COMMIT"
+    },
+    "suite": "ablation"
+  },
+  "natives": {
+    "lightgbm": {
+      "build": {
+        "cmake_args": [
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_C_FLAGS=-march=native",
+          "-DCMAKE_CXX_FLAGS=-march=native",
+          "-DUSE_OPENMP=ON"
+        ],
+        "compiler": {
+          "path": "/usr/bin/c++",
+          "version": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+        },
+        "identity": {
+          "cc": {
+            "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+            "target": "aarch64-linux-gnu",
+            "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+          },
+          "cmake": "cmake version 4.2.3",
+          "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-march=native",
+            "-DCMAKE_CXX_FLAGS=-march=native",
+            "-DUSE_OPENMP=ON"
+          ],
+          "commit": "8f7036f03627054d5a54a6f965b13f4b9ff2cb63",
+          "cxx": {
+            "path": "/usr/bin/aarch64-linux-gnu-g++-15",
+            "target": "aarch64-linux-gnu",
+            "version": "aarch64-linux-gnu-g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+          },
+          "host_cpu": "unknown",
+          "platform": "linux",
+          "tag": "v4.7.0",
+          "url": "https://github.com/lightgbm-org/LightGBM.git"
+        },
+        "key": "0cf7656d9d87d68edbee571f8fa763c00ae898e6edce9a430d0fffacef3f8474"
+      },
+      "commit": "8f7036f03627054d5a54a6f965b13f4b9ff2cb63",
+      "path": "/home/bench/treewalker/experiments/.cache/native/lightgbm-4.7.0-8f7036f03627/lib_lightgbm.so",
+      "sha256": "9b82c1dcef03fdcfbdf882d4d41a997567c45c4faff644176a04c8146e912944",
+      "version": "4.7.0"
+    },
+    "xgboost": {
+      "build": {
+        "cmake_args": [
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_C_FLAGS=-march=native",
+          "-DCMAKE_CXX_FLAGS=-march=native",
+          "-DUSE_OPENMP=ON"
+        ],
+        "compiler": {
+          "path": "/usr/bin/c++",
+          "version": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+        },
+        "identity": {
+          "cc": {
+            "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+            "target": "aarch64-linux-gnu",
+            "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+          },
+          "cmake": "cmake version 4.2.3",
+          "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-march=native",
+            "-DCMAKE_CXX_FLAGS=-march=native",
+            "-DUSE_OPENMP=ON"
+          ],
+          "commit": "6fe8c547bdd21c73e4555d85b087d9260595d30d",
+          "cxx": {
+            "path": "/usr/bin/aarch64-linux-gnu-g++-15",
+            "target": "aarch64-linux-gnu",
+            "version": "aarch64-linux-gnu-g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+          },
+          "host_cpu": "unknown",
+          "platform": "linux",
+          "tag": "v3.4.1",
+          "url": "https://github.com/dmlc/xgboost.git"
+        },
+        "key": "c1027309022ffda5273986a018c7eddbb393533d69aee7ece973ff71592ac4ca"
+      },
+      "commit": "6fe8c547bdd21c73e4555d85b087d9260595d30d",
+      "path": "/home/bench/treewalker/experiments/.cache/native/xgboost-3.4.1-6fe8c547bdd2/libxgboost.so",
+      "sha256": "3ac9dda26ac7d0e6999449710c396b02cc5c2f784bee94b456524c48620d54c5",
+      "version": "3.4.1"
+    }
+  },
+  "output_schema": 5,
+  "run": {
+    "batch_rows": 1024,
+    "hardware_counters": true,
+    "max_rounds": 10,
+    "max_rows_per_round": 65536,
+    "min_groups_per_round": 200,
+    "min_rounds": 3,
+    "mode_budget_secs": 120.0,
+    "precision_pct": 1.0,
+    "seed": 42,
+    "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+    "sentinel_drift_pct": 3.0,
+    "sentinel_every": 25,
+    "target_batches": 12,
+    "xgboost_process_arches": [
+      "x86_64"
+    ],
+    "xgboost_processes": 6
+  },
+  "sentinel": {
+    "cell": "support/nt500_md4_h16/lightgbm/panel",
+    "every": 25,
+    "interfaces": {
+      "lightgbm_native": {
+        "serving": "PredictForMatSingleRowFast loop"
+      },
+      "lleaves": {
+        "serving": "forest_root"
+      },
+      "tl2cgen": {
+        "serving": "predict loop"
+      },
+      "treewalker": {
+        "serving": "predict_group"
+      },
+      "treewalker_fullwalk": {
+        "serving": "predict_full_walk"
+      }
+    },
+    "records": [
+      {
+        "cells_done": 0,
+        "index": 0,
+        "role": "warm-up",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            781457641,
+            85152
+          ],
+          "lleaves/-/serving": [
+            212046729,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286524612,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65198559,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239880327,
+            85152
+          ]
+        },
+        "unix_time": 1791452421
+      },
+      {
+        "cells_done": 0,
+        "index": 1,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            786504120,
+            85152
+          ],
+          "lleaves/-/serving": [
+            212187569,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            286661301,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65404781,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            238914415,
+            85152
+          ]
+        },
+        "unix_time": 1791452424
+      },
+      {
+        "cells_done": 25,
+        "index": 2,
+        "role": "measure",
+        "status": "ok",
+        "totals": {
+          "lightgbm_native/-/serving": [
+            806965303,
+            85152
+          ],
+          "lleaves/-/serving": [
+            212474548,
+            85152
+          ],
+          "tl2cgen/-/serving": [
+            287028335,
+            85152
+          ],
+          "treewalker/all-on/serving": [
+            65601354,
+            85152
+          ],
+          "treewalker_fullwalk/-/serving": [
+            239037313,
+            85152
+          ]
+        },
+        "unix_time": 1791460166
+      }
+    ]
+  },
+  "source": {
+    "commit": "5b21f1a3c128634c80a833d4b7122e4b7c0ac374",
+    "from": "experiments/SOURCE_COMMIT (git archive)"
+  },
+  "started": 1791452418,
+  "suite": "ablation",
+  "system_info": {
+    "apt_snapshot": "20261005T111000Z",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "cmake": "cmake version 4.2.3",
+    "cxx": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "git": "git version 2.53.0",
+    "git_ref": "5b21f1a",
+    "image": "projects/ubuntu-os-cloud/global/images/ubuntu-2604-resolute-arm64-v20260918",
+    "image_requested": "ubuntu-os-cloud/ubuntu-2604-resolute-arm64-v20260918",
+    "kernel_cmdline": "BOOT_IMAGE=/vmlinuz-7.0.0-1011-gcp root=PARTUUID=d49ff458-7f9a-45d1-bcb4-17111d7e7726 ro console=ttyS0,115200 panic=-1",
+    "machine_type": "c4a-highmem-16",
+    "os_release": "Ubuntu 26.04.1 LTS",
+    "page_size": "4096",
+    "pmu_level": "STANDARD",
+    "rustup": "rustup 1.29.1 (d95a37b6a 2026-08-13)",
+    "thp_defrag": "always defer defer+madvise [madvise] never",
+    "thp_enabled": "always [madvise] never",
+    "turbo_mode": "unset: Arm runs at its all-core turbo frequency",
+    "uv": "uv 0.12.23 (aarch64-unknown-linux-gnu)",
+    "zone": "us-east4-a"
+  },
+  "timer": {
+    "amortized_check": {
+      "amortized_mean": 54.7887,
+      "calls": 20000,
+      "difference": 23.375850000000007,
+      "overhead_p50": 21,
+      "per_call_mean": 78.16455
+    },
+    "calibration": {
+      "check_ms": 200,
+      "counter": "cntvct_el0",
+      "hz": 1000000000.0,
+      "measured_hz": 1000000004.9977086,
+      "overhead": {
+        "max": 5312,
+        "mean": 21.07986,
+        "min": 9,
+        "n": 100000,
+        "p50": 21,
+        "p90": 21,
+        "p99": 22
+      },
+      "relative_difference": -4.997708580312121e-9,
+      "resolution_ticks": 20,
+      "source": "cntfrq_el0"
+    }
+  },
+  "tl2cgen_runtime": {
+    "path": "/home/bench/treewalker/.venv/lib/python3.14/site-packages/tl2cgen/lib/libtl2cgen.so",
+    "sha256": "09418f1e3fbf2155400a16cb4e8bea3808d4f175def2e7b632a24994fe83df1d"
+  }
+}
