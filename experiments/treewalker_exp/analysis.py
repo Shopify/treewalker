@@ -492,7 +492,7 @@ def estimates(
     """Every cell's estimates, for summarize and the paper's figures and tables.
 
     ``by_cell[cell]`` lists, per method, variant and mode (in mode order, then
-    us/row), p50 and p99 per group in us, us/row, and the ratio to ``reference``
+    us/row), p5, p50, p95 and p99 per group in us, us/row, and the ratio to ``reference``
     (variant all-on): in serving mode the paired bootstrap ratio with its interval
     (`serving_intervals`), in batch mode the ratio of us/row; NaN without a
     reference. ``xgboost[(cell, mode)]`` is `xgboost_faster_mode`'s result, with
@@ -506,7 +506,9 @@ def estimates(
         s = s.filter(pl.col("process") == 0)
     keys = ["cell", "method", "variant", "mode"]
     stats = s.group_by(keys).agg(
+        p5=pl.col("us").quantile(0.05),
         p50=pl.col("us").quantile(0.5),
+        p95=pl.col("us").quantile(0.95),
         p99=pl.col("us").quantile(0.99),
         per_row=pl.col("us").sum() / pl.col("rows").sum(),
     )
