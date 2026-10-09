@@ -31,15 +31,16 @@ import numpy as np
 from . import formats as fm
 
 
-def load(run_dir: Path) -> dict[str, Any]:
-    """A packed run (treewalker-exp pack): run.json, three tables and the manifests."""
+def load(run_dir: Path, sample_columns: list[str] | None = None) -> dict[str, Any]:
+    """A packed run (treewalker-exp pack): run.json, three tables and the manifests;
+    ``sample_columns`` reads only those columns of the samples."""
     import polars as pl
 
     from . import pack
 
     pack.require_packed(run_dir)
     run = fm.read_json(run_dir / "run.json")
-    samples = pl.read_parquet(run_dir / "samples.parquet")
+    samples = pl.read_parquet(run_dir / "samples.parquet", columns=sample_columns)
     groups = pl.read_parquet(run_dir / "groups.parquet")
     hw = pl.read_parquet(run_dir / "hw.parquet")
     manifests = fm.read_json(run_dir / pack.CELLS)
@@ -63,22 +64,52 @@ def bootstrap_ratio(
     one phase), so a round-wide shock is one observation, not one per entity.
     Without ``rounds``, each pair is its own round.
     """
-    estimate = float(ticks[:, 1].sum() / ticks[:, 0].sum())
     rounds = np.arange(len(ticks)) if rounds is None else rounds
-    ents, ei = np.unique(entity, return_inverse=True)
-    rs, ri = np.unique(rounds, return_inverse=True)
-    t0 = np.zeros((len(ents), len(rs)))
-    t1 = np.zeros((len(ents), len(rs)))
-    np.add.at(t0, (ei, ri), ticks[:, 0])
-    np.add.at(t1, (ei, ri), ticks[:, 1])
+    _, ei = np.unique(entity, return_inverse=True)
+    _, ri = np.unique(rounds, return_inverse=True)
+    n_ent, n_rounds = int(ei.max()) + 1, int(ri.max()) + 1
+    flat = ei * n_rounds + ri
+    t0 = np.bincount(flat, ticks[:, 0], n_ent * n_rounds).reshape(1, n_ent, n_rounds)
+    t1 = np.bincount(flat, ticks[:, 1], n_ent * n_rounds).reshape(1, n_ent, n_rounds)
+    _, lo, hi = bootstrap_ratios(t0, t1, *resample_weights(n_ent, n_rounds, n_boot, seed))
+    return float(ticks[:, 1].sum() / ticks[:, 0].sum()), float(lo[0]), float(hi[0])
+
+
+def resample_weights(
+    n_ent: int, n_rounds: int, n_boot: int = 1000, seed: int = 0
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bootstrap weights for crossed entity and round clusters: (n_boot, n_ent) and
+    (n_boot, n_rounds) counts, each row a draw of n units with replacement. They
+    depend only on the shape and the seed, so every method of a cell, and every
+    cell of the same shape, shares the same resamples."""
     rng = np.random.default_rng(seed)
-    draws = np.empty(n_boot)
-    for b in range(n_boot):
-        we = np.bincount(rng.integers(0, len(ents), len(ents)), minlength=len(ents))
-        wr = np.bincount(rng.integers(0, len(rs), len(rs)), minlength=len(rs))
-        draws[b] = (we @ t1 @ wr) / (we @ t0 @ wr)
-    lo, hi = np.percentile(draws, [2.5, 97.5])
-    return estimate, float(lo), float(hi)
+
+    def counts(n: int) -> np.ndarray:
+        draws = rng.integers(0, n, size=(n_boot, n), dtype=np.int64)
+        draws += (np.arange(n_boot, dtype=np.int64) * n)[:, None]
+        return np.bincount(draws.ravel(), minlength=n_boot * n).reshape(n_boot, n).astype(float)
+
+    return counts(n_ent), counts(n_rounds)
+
+
+def bootstrap_ratios(
+    t0: np.ndarray, t1: np.ndarray, we: np.ndarray, wr: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`bootstrap_ratio` for K comparisons at once. ``t0`` and ``t1`` are (K, E, R):
+    each comparison's tick totals per entity and round, the reference's and the
+    method's; ``we`` and ``wr`` are `resample_weights` for (E, R). Returns the
+    ratios sum(t1[k]) / sum(t0[k]) and their 95% percentile intervals."""
+
+    def resampled(t: np.ndarray) -> np.ndarray:
+        k, e, r = t.shape
+        by_round = (we @ t.transpose(1, 0, 2).reshape(e, k * r)).reshape(len(we), k, r)
+        return (by_round * wr[:, None, :]).sum(axis=2)
+
+    # The reference's totals are usually the same for every comparison (every method
+    # timed every group): resample them once.
+    shared = bool((t0 == t0[:1]).all())
+    lo, hi = np.percentile(resampled(t1) / resampled(t0[:1] if shared else t0), [2.5, 97.5], axis=0)
+    return t1.sum(axis=(1, 2)) / t0.sum(axis=(1, 2)), lo, hi
 
 
 def split_modes(values: np.ndarray, threshold: float, min_side: int = 2) -> np.ndarray:
@@ -99,18 +130,16 @@ def split_modes(values: np.ndarray, threshold: float, min_side: int = 2) -> np.n
     return labels
 
 
-def xgboost_blocks(samples: Any, hw: Any, cell: str, mode: str) -> Any:
-    """XGBoost's blocks in one cell and mode, every process: ticks, rows, batch,
+def xgboost_block_table(samples: Any, hw: Any) -> Any:
+    """XGBoost's blocks in every cell and mode, every process: ticks, rows, batch,
     round and instructions (null where the block's counters were not read in
-    full)."""
+    full), sorted by cell, mode, process and block."""
     import polars as pl
 
-    key = ["process", "block"]
-    sel = (
-        (pl.col("cell") == cell) & (pl.col("method") == "xgboost_native") & (pl.col("mode") == mode)
-    )
+    key = ["cell", "mode", "process", "block"]
+    xgb = pl.col("method") == "xgboost_native"
     blocks = (
-        samples.filter(sel)
+        samples.filter(xgb)
         .group_by(key)
         .agg(
             pl.col("ticks").sum(),
@@ -120,7 +149,7 @@ def xgboost_blocks(samples: Any, hw: Any, cell: str, mode: str) -> Any:
         )
     )
     if "process" in hw.columns:
-        ins = hw.filter(sel).select(
+        ins = hw.filter(xgb).select(
             *key,
             instructions=pl.when(pl.col("status") == "ok").then(pl.col("instructions")),
         )
@@ -128,6 +157,14 @@ def xgboost_blocks(samples: Any, hw: Any, cell: str, mode: str) -> Any:
     else:
         blocks = blocks.with_columns(instructions=pl.lit(None, dtype=pl.UInt64))
     return blocks.sort(key)
+
+
+def xgboost_blocks(samples: Any, hw: Any, cell: str, mode: str) -> Any:
+    """XGBoost's blocks in one cell and mode (`xgboost_block_table`)."""
+    import polars as pl
+
+    sel = (pl.col("cell") == cell) & (pl.col("mode") == mode)
+    return xgboost_block_table(samples.filter(sel), hw.filter(sel)).drop("cell", "mode")
 
 
 # A gap in instructions per row above this, inside one batch, separates XGBoost's
@@ -349,10 +386,99 @@ def xgboost_line(mode: str, r: dict[str, Any], us: float) -> str:
     )
 
 
-def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) -> list[str]:
+# The pairing key packs (cell, block, group) into one integer; these bound the parts.
+_BLOCK_BITS = _GROUP_BITS = 20
+
+
+def serving_intervals(
+    samples: Any, groups: Any, reference: str = "treewalker", n_boot: int = 1000, seed: int = 0
+) -> dict[tuple[str, str, str], tuple[float, float, float]]:
+    """`bootstrap_ratio` of every serving method against ``reference`` (variant
+    all-on), in every cell: {(cell, method, variant): (ratio, lo, hi)}.
+
+    One join pairs every sample with the reference's sample of the same block and
+    group; each cell's pairs then scatter into (method, entity, round) tick totals,
+    and one matrix product per cell resamples all its methods. Cells are taken in
+    order of their (entity, round) shape, so each shape's weights are drawn once
+    (`resample_weights`). The reference's entities and rounds are the resampling
+    units for every method of its cell: a method missing a pair has zero totals
+    there. ``samples`` is one process's."""
     import polars as pl
 
-    d = load(run_dir)
+    srv = samples.filter(pl.col("mode") == "serving")
+    if srv.is_empty():
+        return {}
+    u64 = pl.UInt64
+    cell_code = pl.col("cell").to_physical().cast(u64)
+    limit = max(int(srv["block"].max()), int(srv["group"].max()))
+    if limit >= 1 << _BLOCK_BITS or int(srv.select(cell_code.max()).item()) >= 1 << 24:
+        raise ValueError("a block, group or cell code does not fit the pairing key")
+    key = (cell_code * (1 << _BLOCK_BITS) + pl.col("block").cast(u64)) * (
+        1 << _GROUP_BITS
+    ) + pl.col("group").cast(u64)
+    pair = pl.col("method").to_physical().cast(u64) * (1 << 32) + pl.col(
+        "variant"
+    ).to_physical().cast(u64)
+    ref = (
+        srv.filter((pl.col("method") == reference) & (pl.col("variant") == "all-on"))
+        .join(groups.select("cell", "group", "entity"), on=["cell", "group"])
+        .select(
+            key=key,
+            cell=cell_code,
+            t0="ticks",
+            e=pl.col("entity").rank("dense").over("cell") - 1,
+            r=pl.col("repetition").rank("dense").over("cell") - 1,
+        )
+    )
+    if ref.is_empty():
+        return {}
+    pairs = srv.select(key=key, pair=pair, t1="ticks").join(ref, on="key").sort("cell")
+    names = {
+        (c, p): (cell, method, variant)
+        for c, p, cell, method, variant in srv.select("cell", "method", "variant")
+        .unique()
+        .select(
+            cell_code.alias("code"),
+            pair.alias("pair"),
+            pl.col("cell", "method", "variant").cast(pl.String),
+        )
+        .iter_rows()
+    }
+    cells = pairs["cell"].to_numpy()
+    pid, e, r = (pairs[c].to_numpy() for c in ("pair", "e", "r"))
+    t0, t1 = pairs["t0"].to_numpy().astype(float), pairs["t1"].to_numpy().astype(float)
+    starts = np.flatnonzero(np.r_[True, cells[1:] != cells[:-1]])
+    bounds = list(zip(starts, np.r_[starts[1:], len(cells)], strict=True))
+    shape = {int(cells[a]): (int(e[a:b].max()) + 1, int(r[a:b].max()) + 1) for a, b in bounds}
+    out: dict[tuple[str, str, str], tuple[float, float, float]] = {}
+    weights: tuple[tuple[int, int], Any] = ((-1, -1), None)
+    for a, b in sorted(bounds, key=lambda ab: shape[int(cells[ab[0]])]):
+        c = int(cells[a])
+        n_ent, n_rounds = shape[c]
+        if weights[0] != (n_ent, n_rounds):
+            weights = ((n_ent, n_rounds), resample_weights(n_ent, n_rounds, n_boot, seed))
+        kinds, k = np.unique(pid[a:b], return_inverse=True)
+        flat = (k * n_ent + e[a:b]) * n_rounds + r[a:b]
+        size = len(kinds) * n_ent * n_rounds
+        dims = (len(kinds), n_ent, n_rounds)
+        ratio, lo, hi = bootstrap_ratios(
+            np.bincount(flat, t0[a:b], size).reshape(dims),
+            np.bincount(flat, t1[a:b], size).reshape(dims),
+            *weights[1],
+        )
+        for i, kind in enumerate(kinds):
+            out[names[(c, int(kind))]] = (float(ratio[i]), float(lo[i]), float(hi[i]))
+    return out
+
+
+def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) -> list[str]:
+    """The run cell by cell: exclusions, the sample, the oracle, each mode's rounds,
+    probes and conversion, XGBoost's modes, and per method p50, p99, us/row and the
+    speedup with its interval. Every table is computed for all cells at once."""
+    import polars as pl
+
+    columns = ["cell", "method", "variant", "mode", "process", "block", "batch", "group"]
+    d = load(run_dir, [*columns, "repetition", "rows", "ticks"])
     timer = d["run"]["timer"]["calibration"]
     hz = float(timer["hz"])
     s = d["samples"].with_columns(us=pl.col("ticks") / hz * 1e6)
@@ -363,8 +489,45 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
         f"read-pair overhead p50 {timer['overhead']['p50']} ticks",
     ]
     lines += sentinel_lines(d["run"])
+
+    keys = ["cell", "method", "variant", "mode"]
+    stats = s.group_by(keys).agg(
+        p50=pl.col("us").quantile(0.5),
+        p99=pl.col("us").quantile(0.99),
+        per_row=pl.col("us").sum() / pl.col("rows").sum(),
+    )
+    ref_rows = (pl.col("method") == reference) & (pl.col("variant") == "all-on")
+    ref_per_row = {
+        (cell, mode): per_row
+        for cell, mode, per_row in stats.filter(ref_rows)
+        .select(pl.col("cell", "mode").cast(pl.String), "per_row")
+        .iter_rows()
+    }
+    by_cell = {
+        cell: g.drop("cell").to_dicts()
+        for (cell,), g in stats.sort("cell", "mode", "per_row")
+        .partition_by("cell", as_dict=True, maintain_order=True)
+        .items()
+    }
+    intervals = serving_intervals(s, d["groups"], reference, n_boot)
+    xgb = {
+        (cell, mode): g.drop("cell", "mode")
+        for (cell, mode), g in xgboost_block_table(d["samples"], d["hw"])
+        .partition_by("cell", "mode", as_dict=True, maintain_order=True)
+        .items()
+    }
+    ref_batches = {
+        (cell, mode): g.drop("cell", "mode")
+        for (cell, mode), g in s.filter(ref_rows)
+        .group_by("cell", "mode", "batch")
+        .agg(pl.col("ticks").sum(), pl.col("rows").sum())
+        .partition_by("cell", "mode", as_dict=True)
+        .items()
+    }
+    # On the Linux VMs (x86 and Arm) XGBoost's counters are required.
+    required = (d["run"].get("host") or {}).get("os") == "linux"
+
     for cell, m in d["manifests"].items():
-        cs = s.filter(pl.col("cell") == cell)
         lines.append(f"\n{cell}: {m['groups']} groups, {m['rows']} rows")
         for e in m["excluded"]:
             lines.append(f"  excluded {e['method']}/{e['variant']}: {e['reason']}")
@@ -399,11 +562,8 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
             lines.append(f"  XGBoost process {p['process']} {p['mode']}: {p['status']}")
         fasters = {}
         for mode in m["stop"]:
-            # On the Linux VMs (x86 and Arm) XGBoost's counters are required.
-            required = (d["run"].get("host") or {}).get("os") == "linux"
-            r = xgboost_faster_mode(
-                xgboost_blocks(d["samples"], d["hw"], cell, mode), counters_required=required
-            )
+            blocks = xgb.get((cell, mode))
+            r = None if blocks is None else xgboost_faster_mode(blocks, counters_required=required)
             if r is None:
                 continue
             lines.append(xgboost_line(mode, r, 1e6 / hz))
@@ -413,45 +573,17 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
             f"  {'method':<24}{'variant':<34}{'mode':<8}{'p50 us':>10}{'p99 us':>10}"
             f"{'us/row':>10}{'speedup':>9}  95% interval (preliminary)"
         )
-        stats = (
-            cs.group_by("method", "variant", "mode")
-            .agg(
-                p50=pl.col("us").quantile(0.5),
-                p99=pl.col("us").quantile(0.99),
-                per_row=pl.col("us").sum() / pl.col("rows").sum(),
-            )
-            .sort("mode", "per_row")
-        )
-        groups = d["groups"].filter(pl.col("cell") == cell).select("group", "entity")
-        for row in stats.iter_rows(named=True):
+        for row in by_cell.get(cell, []):
             interval = ""
-            ref = cs.filter(
-                (pl.col("method") == reference)
-                & (pl.col("variant") == "all-on")
-                & (pl.col("mode") == row["mode"])
-            )
             ratio = float("nan")
-            if row["mode"] == "serving" and not ref.is_empty():
-                this = cs.filter(
-                    (pl.col("method") == row["method"])
-                    & (pl.col("variant") == row["variant"])
-                    & (pl.col("mode") == "serving")
-                )
-                paired = (
-                    ref.select("block", "group", "repetition", t0="ticks")
-                    .join(this.select("block", "group", t1="ticks"), on=["block", "group"])
-                    .join(groups, on="group")
-                )
-                ticks = paired.select("t0", "t1").to_numpy().astype(np.float64)
-                ratio, lo, hi = bootstrap_ratio(
-                    ticks,
-                    paired["entity"].to_numpy(),
-                    n_boot,
-                    rounds=paired["repetition"].to_numpy(),
-                )
-                interval = f"[{lo:.3f}, {hi:.3f}]"
-            elif not ref.is_empty():
-                ratio = row["per_row"] / float(ref["us"].sum() / ref["rows"].sum())
+            ref = ref_per_row.get((cell, row["mode"]))
+            if row["mode"] == "serving" and ref is not None:
+                hit = intervals.get((cell, row["method"], row["variant"]))
+                if hit is not None:
+                    ratio, lo, hi = hit
+                    interval = f"[{lo:.3f}, {hi:.3f}]"
+            elif ref is not None:
+                ratio = row["per_row"] / ref
             p99 = f"{row['p99']:>10.2f}" if row["mode"] == "serving" else f"{'-':>10}"
             variant = "[process 0]" if row["method"] == "xgboost_native" else row["variant"]
             lines.append(
@@ -460,14 +592,9 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
             )
         # XGBoost's faster mode against TreeWalker over the same batches and weights.
         for mode, r in fasters.items():
-            ref = cs.filter(
-                (pl.col("method") == reference)
-                & (pl.col("variant") == "all-on")
-                & (pl.col("mode") == mode)
-            )
-            if ref.is_empty():
+            per_batch = ref_batches.get((cell, mode))
+            if per_batch is None:
                 continue
-            per_batch = ref.group_by("batch").agg(pl.col("ticks").sum(), pl.col("rows").sum())
             tw = batch_weighted(per_batch, r["weights"])
             label = (
                 "[faster mode, all processes]"
