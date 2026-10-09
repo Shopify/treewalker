@@ -224,17 +224,28 @@ full machine recipe; it now builds the versions `uv.lock` installs, LightGBM
 ```bash
 cd infra
 terraform init
-terraform apply -var project=YOUR_PROJECT -var git_ref=REF              # factorial grid (bench_suite = "paper")
-terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var bench_suite=rebuttal   # scenario + chunked runs
+terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var 'suites=["acceptance"]' -var layout_check=true
+terraform apply -var project=YOUR_PROJECT -var git_ref=REF      # factorial and ablation
 ```
 
-The factorial grid needs `experiments/data/expedia.parquet` from
+With `-var cache_bucket=NAME`, an existing bucket keeps the prepared models and each
+machine type's compiled baselines across deployments, so a rerun retrains and
+recompiles only what changed. Prep and `compile-baselines` reuse a cached file only
+when its recorded key and hash match. Create the bucket once, outside Terraform, so
+`terraform destroy` leaves it:
+`gcloud storage buckets create gs://NAME --location US --uniform-bucket-level-access`.
+
+The VMs run with the GCE PMU at `STANDARD` and `turbo_mode = "ALL_CORE_MAX"`. They boot
+a pinned image, and every `apt` operation uses one Ubuntu archive snapshot
+(`apt_snapshot`), so the compiler and tools, and with them the cached compiled
+baselines, stay the same across deployments.
+Suites with Expedia cells need `experiments/data/expedia.parquet` from
 `treewalker-exp fetch-expedia`; Terraform uploads it for the trainer VM, which checks its
 fingerprint before training. Terraform uploads `git archive` of `var.git_ref`
 to a new bucket. The ref has no default: it must contain `experiments/` and
 `treewalker-exp`, which the `neurips2026` tag predates. The Intel VM trains the models and shares them, so both machines
-evaluate identical models. Results land in the bucket under `results/`. The
-scenario and chunked runs take about 25 minutes per VM.
+evaluate identical models, checked by hash. Results land in the bucket under
+`results/`.
 
 ### By hand on a prepared machine
 
