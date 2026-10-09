@@ -60,8 +60,33 @@ cargo build --manifest-path experiments/benchmarks/Cargo.toml --target-dir targe
   --release --features external-bench
 ```
 
-The `external-bench` feature enables the C FFI baselines and QuickScorer.
-`quickscorer-bench` enables the legacy CLI's QuickScorer baseline.
+The `external-bench` feature enables the C baselines and QuickScorer;
+`quickscorer-bench` enables QuickScorer alone, and `pmu` the Linux hardware
+counters. `cargo bench` runs small divan benchmarks of the library on the
+committed fixtures.
+
+### Development checks
+
+Every commit passes `cargo fmt --check`, `cargo clippy --workspace --all-targets
+-- -D warnings` and `cargo test`. The Linux-only code (the timestamp counter's
+calibration, `perf_event`) is checked by cross clippy. Parquet's zstd is C, so
+without a Linux cross toolchain the check compiles it with clang and the macOS
+SDK headers; nothing builds or links for Linux:
+
+```bash
+SDK=$(xcrun --show-sdk-path)
+export CC_x86_64_unknown_linux_gnu=clang \
+  CFLAGS_x86_64_unknown_linux_gnu="--target=x86_64-unknown-linux-gnu -isystem $SDK/usr/include" \
+  CC_aarch64_unknown_linux_gnu=clang \
+  CFLAGS_aarch64_unknown_linux_gnu="--target=aarch64-unknown-linux-gnu -isystem $SDK/usr/include -D__arm64__"
+for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids" \
+         "x86_64-unknown-linux-gnu x86-64" "aarch64-unknown-linux-gnu neoverse-v2"; do
+  set -- $t
+  for f in "" "--features treewalker-bench/external-bench,treewalker-bench/pmu"; do
+    RUSTFLAGS="-C target-cpu=$2" cargo clippy --target $1 --workspace --all-targets $f -- -D warnings
+  done
+done
+```
 
 ## Using the library
 
@@ -211,36 +236,85 @@ to a new bucket. The ref has no default: it must contain `experiments/` and
 evaluate identical models. Results land in the bucket under `results/`. The
 scenario and chunked runs take about 25 minutes per VM.
 
-### By hand on a prepared Linux machine
+### By hand on a prepared machine
 
 ```bash
 uv sync --group baselines
+uv run --group baselines treewalker-exp build-native            # LightGBM, XGBoost from pinned sources
 uv run --group baselines treewalker-exp fetch-expedia --train-csv PATH/data.zip
-uv run --group baselines treewalker-exp prepare --suite factorial
-uv run --group baselines treewalker-exp compile-baselines --suite factorial   # tl2cgen, lleaves
-uv run --group baselines treewalker-exp build-bench
-cargo test --manifest-path experiments/benchmarks/Cargo.toml --target-dir target \
-  --release --features research
-
-taskset -c 0 ./target/release/sweep_bench experiments/artifacts --grid all \
-  --output-dir experiments/data --warmup 3 --iters 21 --min-iters 11 \
-  --max-time-secs 30 --lgb-lib /usr/local/lib/lib_lightgbm.so --xgb-lib PATH/libxgboost.so
-
-uv run --group baselines treewalker-exp prepare --suite scenario-v1 --validate
-uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage prepare
-taskset -c 0 ./target/release/sweep_bench experiments/artifacts --grid scen \
-  --output-dir experiments/data --warmup 3 --iters 21 --min-iters 11 --max-time-secs 10
-taskset -c 0 uv run --group baselines python3 experiments/scripts/prepare_chunked.py --stage timing
+uv run --group baselines treewalker-exp prepare --suite acceptance
+uv run --group baselines treewalker-exp compile-baselines --suite acceptance   # tl2cgen, lleaves, QuickScorer XML
+uv run --group baselines treewalker-exp preflight --suite acceptance
+uv run --group baselines treewalker-exp run --suite acceptance --run-id acceptance
+uv run --group baselines treewalker-exp pack experiments/data/runs/acceptance
+uv run --group baselines treewalker-exp summarize experiments/data/runs/acceptance
 ```
+
+Then the same with `--suite factorial` and `--suite ablation`. `run` resolves
+the suite into an execution manifest, builds `sweep_bench` and runs it pinned to
+core 0 with `taskset` where it exists; a rerun with the same run ID reuses the
+finished cells whose manifests match. The runner writes `run.json` and, per
+cell, `manifest.json` and the `samples`, `groups`, `counters` and `hw` Parquet
+tables. `pack` then writes one file per table and one `cells.json` for the run
+(the sentinel's cells under `sentinel/`), checks every table against its cells,
+and with `--remove` deletes the per-cell directories; `summarize`,
+`validation-readout` and `budget` read packed runs. `run --set KEY=VALUE` overrides a `grids.toml [run]` setting, after
+the suite's own `[suites.NAME.run]` settings (the validation suite's).
+
+The protocol, per cell (settings in `grids.toml [run]`):
+
+- Each suite declares its modes: serving (one call per group) everywhere,
+  batch (calls of up to 1,024 rows) in the ablation suite as well.
+- Methods run one at a time. The timed groups are split into 12 batches; a
+  round gives each method its own phase, a warm-up on the batch it times last
+  and then a timed pass over every batch, the same groups in the same order for
+  every method. Method order alternates across rounds, forward then reversed
+  (A B B A). A mode times at least 3 rounds, then stops at the 1% precision
+  target or its time budget.
+- A cell whose pool exceeds `max_rows_per_round` rows times a seeded sample of
+  its groups, the same for every method: every group has the same inclusion
+  probability, the cap's share of the pool's rows (the cap is the expected rows),
+  raised to keep at least `min_groups_per_round` groups, stratified by group size.
+  The manifest records the seed, the fraction, the drawn rows and their overshoot,
+  where the minimum binds, the strata with their weights and a hash of the group
+  indices.
+- Baselines get their faster interface per cell and mode: in its first phase,
+  each method's candidates (its multi-row call, or a loop over its single-row
+  call) run on the warm-up batch, and the faster is timed. One-row serving calls
+  use the single-row interface. The manifest records each probe.
+- QuickScorer is excluded up front from LightGBM models with categorical
+  splits, and from cells with missing values in a feature the model may route
+  otherwise than left (a conservative rule: QuickScorer sends every missing value
+  left); its f64-to-f32 copy is timed separately, outside the samples, and its
+  share reported.
+- On x86_64, each XGBoost cell also times XGBoost alone in 6 extra one-round
+  processes (`process` in the samples), because its AVX2 block walk depends on
+  a heap buffer's alignment. `summarize` tells the modes apart inside each batch
+  by instructions per row and reports the faster one over the batches holding
+  both, with the expected time across processes beside it.
+- A sentinel, SUPPORT's acceptance cell, runs at the start of each run
+  invocation (a warm-up, then a measure) and after every 25 measured cells,
+  under `sentinel/`, its ticks and rows in `run.json`; `summarize` flags drift
+  beyond 3% from the run's first measured sentinel and shows the first-load
+  effect.
+
+`compile-baselines` runs as many compiler processes at once as there are CPUs
+(`--jobs`, at least 4), largest models first, tl2cgen at 2 threads per model and
+lleaves at its recipe's 4 chunks. The chunk count shapes lleaves's library, so it
+is part of the recipe: on the 32-vCPU Intel VM the acceptance and shakedown runs
+compiled lleaves in 8 chunks, the final run in 4. Running the largest models first
+puts the biggest compiles side by side; their peak memory is checked on the
+validation deployment. The artifact tests run on whatever was prepared:
+`cargo test --manifest-path experiments/benchmarks/Cargo.toml --release
+--features research`.
 
 tl2cgen comes from the locked `baselines` dependency group. It has no aarch64
 Linux wheel, so there it builds from source with
 `CXX=$PWD/infra/scripts/cxx-cstdint`. lleaves runs in
-`experiments/compile.py`'s own script lock, with `llc` and `clang` from LLVM 20
-on `PATH` or given by `--llc` and `--clang`. Every `uv run` passes
+`experiments/compile.py`'s own script lock and compiles through the LLVM that
+llvmlite bundles; the system C compiler links it. Every `uv run` passes
 `--group baselines`, because `uv run` removes packages outside the groups it
-syncs. `sweep_bench` loads the native LightGBM and XGBoost
-libraries given by `--lgb-lib` and `--xgb-lib`.
+syncs.
 
 `uv.lock`, `experiments/compile.py.lock` and
 `tests/fixtures/import/generate.py.lock` resolve against PyPI through the

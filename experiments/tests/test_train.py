@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 from treelite.model_builder import Metadata, ModelBuilder, PostProcessorFunc, TreeAnnotation
@@ -113,3 +115,37 @@ def test_export_skips_json_over_the_loader_limit(tmp_path, monkeypatch):
     monkeypatch.undo()
     _, none = tr.export_treelite("lightgbm", native, json_path, bin_path, json=False)
     assert none is None and not json_path.exists() and bin_path.exists()
+
+
+FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "import"
+
+
+@pytest.mark.parametrize("name", ["average_base", "sigmoid_f32", "random_forest", "identity"])
+def test_oracle_stages_are_the_fsum_and_the_staged_finalization(name):
+    import math
+
+    import treelite
+
+    from treewalker_exp import formats as fm
+
+    tl = treelite.Model.deserialize(str(FIXTURES / f"{name}.bin"))
+    X = np.array(fm.read_matrix(FIXTURES / "data.bin"))
+    offsets = np.arange(0, X.shape[0] + 1, 128)
+    rows, header = tr.oracle(tl, X, offsets)
+    assert header["groups"] == sorted(header["groups"])
+    assert len(rows) == 128 * len(header["groups"])
+    dtype = np.float32 if tl.input_type == "float32" else np.float64
+    for r, tree_sum, raw_margin in rows[:20]:
+        leaves = treelite.gtil.predict_per_tree(tl, X[int(r) : int(r) + 1].astype(dtype)).ravel()
+        assert tree_sum == math.fsum(float(v) for v in leaves)
+        assert raw_margin == tree_sum / header["divisor"] + header["base_score"]
+    averaging = name in ("average_base", "random_forest")
+    assert header["divisor"] == (tl.num_tree if averaging else 1.0)
+
+
+def test_oracle_rounds_once_where_tree_order_would_not():
+    # fsum([1, 2^-53, 2^-53]) is 1 + 2^-52; adding in order gives 1.0.
+    import math
+
+    assert math.fsum([1.0, 2**-53, 2**-53]) == 1.0 + 2**-52
+    assert (1.0 + 2**-53) + 2**-53 == 1.0

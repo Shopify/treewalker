@@ -2,9 +2,7 @@
 # requires-python = ">=3.14"
 # dependencies = [
 #     "lleaves @ git+https://github.com/siboehm/lleaves@v1.4.1",
-#     # 0.47 is the last llvmlite on LLVM 20: its IR must parse in the VMs'
-#     # LLVM 20 llc (infra/scripts/startup.sh).
-#     "llvmlite<0.48",
+#     "llvmlite>=0.50.0",
 # ]
 #
 # [[tool.uv.index]]
@@ -14,10 +12,12 @@
 """Compile a LightGBM model into an lleaves shared library.
 
 lleaves generates LLVM IR through llvmlite. The IR is split into one module
-for ``forest_root`` and per-worker chunks of trees, each chunk is compiled
-with ``llc`` in parallel, and ``clang`` links the objects. This avoids
-llvmlite's in-process optimization, which hangs on models of 500 trees or
-more.
+for ``forest_root`` and per-worker chunks of trees; llvmlite's own LLVM, the
+one this script's lock pins, compiles each chunk to an object in parallel
+processes, and the system C compiler links the objects. No LLVM install is
+needed. The objects come from LLVM's code generator alone, as ``llc`` made
+them before: llvmlite's in-process IR optimization hangs on models of 500
+trees or more, so the IR is not optimized.
 
 treewalker-exp runs this script as a subprocess, with its own lock
 (compile.py.lock), so the project's uv.lock does not govern lleaves:
@@ -25,7 +25,14 @@ treewalker-exp runs this script as a subprocess, with its own lock
     uv run --locked --script experiments/compile.py REQUEST.json
 
 The request holds every setting, and the script prints the effective settings
-and the library's SHA-256 as JSON. Tools come from the request or PATH.
+and the library's SHA-256 as JSON. The linker comes from the request or PATH.
+
+The recipe's four settings map onto llvmlite's target machine: code
+generation at O3 (``opt=3``), position-independent code (``reloc="pic"``),
+the host CPU and its features (``get_host_cpu_name`` and
+``get_host_cpu_features``), and FP contraction "on", which is LLVM's default
+``TargetOptions::AllowFPOpFusion`` (``FPOpFusion::Standard``) and so what
+llvmlite's target machine uses; ``llc -fp-contract=on`` set the same.
 """
 
 import hashlib
@@ -38,7 +45,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -48,7 +55,7 @@ import llvmlite.ir
 from lleaves.compiler.ast import parse_to_ast
 from lleaves.compiler.codegen import gen_forest
 
-_SUBPROCESS_TIMEOUT = 300  # seconds per subprocess invocation
+_SUBPROCESS_TIMEOUT = 300  # seconds per link
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,14 +63,13 @@ class Request:
     model: str  # LightGBM model_native.txt
     output: str  # the shared library to write
     fblocksize: int
-    opt_level: str  # llc -O
-    fp_contract: str  # llc -fp-contract
-    n_jobs: int  # parallel llc processes, and the number of tree chunks
+    opt_level: str  # code generation level, 0-3
+    fp_contract: str  # "on": LLVM's default FP contraction
+    n_jobs: int  # parallel compile processes, and the number of tree chunks
     target_cpu: str = "native"
     relocation_model: str = "pic"
     use_fp64: bool = True
-    llc: str = ""  # empty: from PATH
-    clang: str = ""  # empty: from PATH
+    cc: str = ""  # the linker, a C compiler; empty: cc from PATH
 
 
 def _find_tool(name: str, configured: str) -> str:
@@ -164,46 +170,46 @@ def _chunk_module(ir: ForestIR, blocks: list[str]) -> str:
 # --- compilation -------------------------------------------------------------------
 
 
-def _llc(ir_text: str, obj: Path, llc_args: list[str]) -> None:
-    try:
-        r = subprocess.run(
-            [*llc_args, "-o", str(obj)],
-            input=ir_text.encode(),
-            capture_output=True,
-            check=False,
-            timeout=_SUBPROCESS_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"llc timed out for {obj.name}") from e
-    if r.returncode != 0:
-        raise RuntimeError(f"llc failed for {obj.name}:\n{r.stderr.decode()}")
+def _target_machine(req: Request) -> llvm.TargetMachine:
+    llvm.initialize_native_target()
+    llvm.initialize_native_asmprinter()
+    target = llvm.Target.from_triple(llvm.get_process_triple())
+    if req.target_cpu != "native":
+        raise ValueError(f"target_cpu {req.target_cpu!r}: only the host CPU is supported")
+    if req.fp_contract != "on":
+        raise ValueError(f"fp_contract {req.fp_contract!r}: llvmlite sets only LLVM's default, on")
+    return target.create_target_machine(
+        cpu=llvm.get_host_cpu_name(),
+        features=llvm.get_host_cpu_features().flatten(),
+        opt=int(req.opt_level),
+        reloc=req.relocation_model,
+        codemodel="default",
+    )
 
 
-def _link(clang: str, objs: list[Path], lib: Path) -> list[str]:
+def _compile_object(ir_text: str, obj: str, req: Request) -> None:
+    """One module to one object file, in a worker process."""
+    module = llvm.parse_assembly(ir_text)
+    module.verify()
+    Path(obj).write_bytes(_target_machine(req).emit_object(module))
+
+
+def _link(cc: str, objs: list[Path], lib: Path) -> list[str]:
     tmp = lib.with_suffix(lib.suffix + ".tmp")
-    cmd = [clang, "-shared", "-o", str(tmp), *map(str, objs)]
+    cmd = [cc, "-shared", "-o", str(tmp), *map(str, objs)]
     r = subprocess.run(cmd, capture_output=True, check=False, timeout=_SUBPROCESS_TIMEOUT)
     if r.returncode != 0:
         tmp.unlink(missing_ok=True)
         raise RuntimeError(f"link failed:\n{r.stderr.decode()}")
     tmp.replace(lib)
-    return [clang, "-shared", "-o", str(lib), "<objects>"]
+    return [cc, "-shared", "-o", str(lib), "<objects>"]
 
 
 def compile_model(req: Request) -> dict:
     t0 = time.perf_counter()
-    llc = _find_tool("llc", req.llc)
-    clang = _find_tool("clang", req.clang)
+    cc = _find_tool("cc", req.cc)
+    tm = _target_machine(req)
     ir = generate_ir(req.model, use_fp64=req.use_fp64, fblocksize=req.fblocksize)
-    llc_args = [
-        llc,
-        "-",
-        f"-O{req.opt_level}",
-        f"-relocation-model={req.relocation_model}",
-        "-filetype=obj",
-        f"-mcpu={req.target_cpu}",
-        f"-fp-contract={req.fp_contract}",
-    ]
     n = len(ir.tree_blocks)
     size = max(1, (n + req.n_jobs - 1) // req.n_jobs)
     chunks = [ir.tree_blocks[i : i + size] for i in range(0, n, size)]
@@ -213,9 +219,9 @@ def compile_model(req: Request) -> dict:
     lib.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="lleaves_") as tmpdir:
         objs = [Path(tmpdir) / f"{name}.o" for name, _ in modules]
-        with ThreadPoolExecutor(max_workers=req.n_jobs) as pool:
+        with ProcessPoolExecutor(max_workers=req.n_jobs) as pool:
             futures = {
-                pool.submit(_llc, text, obj, llc_args): name
+                pool.submit(_compile_object, text, str(obj), req): name
                 for (name, text), obj in zip(modules, objs, strict=True)
             }
             for fut in as_completed(futures):
@@ -223,7 +229,7 @@ def compile_model(req: Request) -> dict:
                     fut.result()
                 except Exception as e:
                     raise RuntimeError(f"compilation failed for chunk {futures[fut]}") from e
-        link_cmd = _link(clang, objs, lib)
+        link_cmd = _link(cc, objs, lib)
     digest = hashlib.sha256(lib.read_bytes()).hexdigest()
     return {
         "output": str(lib),
@@ -233,16 +239,23 @@ def compile_model(req: Request) -> dict:
         "n_chunks": len(chunks),
         "settings": {
             **asdict(req),
-            "llc": llc,
-            "clang": clang,
-            "llc_version": _tool_version(llc),
-            "clang_version": _tool_version(clang),
-            "llc_command": [*llc_args, "-o", "<object>"],
+            "cc": cc,
+            "cc_version": _tool_version(cc),
+            "codegen": {
+                "llvm": ".".join(map(str, llvm.llvm_version_info)),
+                "triple": tm.triple,
+                "cpu": llvm.get_host_cpu_name(),
+                "features": llvm.get_host_cpu_features().flatten(),
+                "opt": int(req.opt_level),
+                "reloc": req.relocation_model,
+                "codemodel": "default",
+                "fp_contract": "on (TargetOptions default, FPOpFusion::Standard)",
+                "ir_optimization": "none",
+            },
             "link_command": link_cmd,
             "target_triple": ir.target_triple,
             "lleaves": importlib.metadata.version("lleaves"),
             "llvmlite": llvmlite.__version__,
-            "llvmlite_llvm": ".".join(map(str, llvm.llvm_version_info)),
         },
     }
 
