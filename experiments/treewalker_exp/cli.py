@@ -412,6 +412,19 @@ def pack(
 
 
 @app.command()
+def figures(
+    out: Annotated[
+        Path | None, typer.Option(help="Output directory (experiments/figures).")
+    ] = None,
+) -> None:
+    """The paper's figures from the final runs: PNG and PDF, and the heatmap as TikZ."""
+    from . import figures as fg
+
+    paths = _paths()
+    fg.generate(paths.runs, out or paths.figures)
+
+
+@app.command()
 def summarize(
     run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
     reference: Annotated[str, typer.Option(help="The method speedups are against.")] = "treewalker",
