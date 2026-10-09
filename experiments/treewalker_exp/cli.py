@@ -425,6 +425,19 @@ def figures(
 
 
 @app.command()
+def tables(
+    out: Annotated[
+        Path | None, typer.Option(help="Output directory (experiments/figures).")
+    ] = None,
+) -> None:
+    """The paper's tables from the final runs: Table 1 as TeX, Tables 3 and 10 as Markdown."""
+    from . import tables as tb
+
+    paths = _paths()
+    tb.generate(paths.runs, out or paths.figures)
+
+
+@app.command()
 def summarize(
     run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
     reference: Annotated[str, typer.Option(help="The method speedups are against.")] = "treewalker",
