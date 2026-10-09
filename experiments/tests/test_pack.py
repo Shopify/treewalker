@@ -117,3 +117,13 @@ def test_a_uint32_flag_from_older_runs_packs_as_a_bool(tmp_path):
     pack.pack_run(run)
     g = pl.read_parquet(run / "groups.parquet")
     assert g.filter(pl.col("cell") == "b/cell")["timed"].to_list() == [True, False]
+
+
+def test_readers_name_a_git_lfs_pointer(tmp_path):
+    run = write_run(tmp_path)
+    pack.pack_run(run)
+    (run / "samples.parquet").write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n"
+    )
+    with pytest.raises(ValueError, match="is a git-lfs pointer: run `git lfs pull`"):
+        analysis.load(run)
