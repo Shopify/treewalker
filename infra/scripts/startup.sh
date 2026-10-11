@@ -16,7 +16,10 @@
 #   git_ref           — the ref archived; the commit is in experiments/SOURCE_COMMIT
 #   role              — "trainer" (prepares and uploads models) or "benchmarker"
 #                       (downloads the trainer's models, checked by hash)
-#   suites            — space-separated suites from experiments/grids.toml
+#   suites            — space-separated suites from experiments/grids.toml; NAME@TAG
+#                       runs NAME again, into the run ID NAME-TAG-<arch>
+#   run_settings      — "--set KEY=VALUE" arguments for every run, the layout
+#                       check's included; empty for none
 #   layout_check      — "true": also time TreeWalker on the acceptance cells in a
 #                       build with 64-byte function alignment
 #   gcs_gate_uri      — gs:// path to a candidate's source archive: instead of the
@@ -42,7 +45,9 @@ GCS_CACHE_URI="${gcs_cache_uri}"
 ROLE="${role}"
 GIT_REF="${git_ref}"
 SUITES="${suites}"
+RUN_SETTINGS="${run_settings}"
 LAYOUT_CHECK="${layout_check}"
+RETIME="${retime}"
 GCS_GATE_URI="${gcs_gate_uri}"
 DIAGNOSTIC="${diagnostic}"
 APT_SNAPSHOT="${apt_snapshot}"
@@ -65,6 +70,8 @@ REPO_DIR=$BENCH_HOME/treewalker
 # The trainer's hand-over marker names this ref and these suites, so a marker
 # left in the bucket by an earlier deployment cannot release the benchmarker.
 UPLOAD_MARKER="UPLOAD_DONE-$GIT_REF-$(echo "$SUITES" | tr ' ' '+')"
+# The suites to prepare, compile and preflight: each name once, without its @TAG.
+SUITE_NAMES=$(for s in $SUITES; do echo "$${s%%@*}"; done | awk '!seen[$0]++' | tr '\n' ' ')
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,6 +81,7 @@ log() { echo "[$(date -Iseconds)] $*"; }
 fail() {
   log "ERROR: $*"
   mkdir -p "$RESULTS_DIR"
+  rm -f "$RESULTS_DIR/DONE"
   echo "$*" > "$RESULTS_DIR/ERROR"
   chown -R $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
   exit 1
@@ -135,12 +143,34 @@ phase 0 "Bench user"
 if ! id $BENCH_USER &>/dev/null; then
   useradd -m -s /bin/bash $BENCH_USER
 fi
+# An earlier boot that failed before useradd (fail() writes the results) can have
+# created the home as root: the bench user must own it to install its tools.
+chown $BENCH_USER:$BENCH_USER "$BENCH_HOME"
 mkdir -p "$RESULTS_DIR"
 chown $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
 # Compile only exists to fill the cache: without a bucket its compiles would be
 # lost with the VM, so it stops before preparing anything.
 [ "$COMPILE_ONLY" != "true" ] || [ -n "$GCS_CACHE_URI" ] \
   || fail "compile_only needs cache_bucket: the compiled baselines would be lost with the VM"
+
+# A restarted boot retires the previous boot's terminal marker, into the results'
+# MARKER_HISTORY and out of the bucket, so check_done reads RUNNING while it runs.
+# It runs once the bench user and its results directory exist (nothing under the
+# bench home may be created before useradd, which would leave the home root's),
+# and before anything writes a marker or the results.
+retire_markers() {
+  local m
+  for m in DONE ERROR; do
+    if [ -f "$RESULTS_DIR/$m" ]; then
+      printf '%s, retired at a boot on %s: %s\n' "$m" "$(date -Iseconds)" \
+        "$(cat "$RESULTS_DIR/$m")" >> "$RESULTS_DIR/MARKER_HISTORY"
+      rm -f "$RESULTS_DIR/$m"
+    fi
+  done
+  [ ! -f "$RESULTS_DIR/MARKER_HISTORY" ] || chown $BENCH_USER:$BENCH_USER "$RESULTS_DIR/MARKER_HISTORY"
+  gcloud storage rm --quiet "$GCS_RESULTS_BASE/DONE" "$GCS_RESULTS_BASE/ERROR" >/dev/null 2>&1 || true
+}
+retire_markers
 
 # ---------------------------------------------------------------------------
 # Phase 1: System packages: a C/C++ compiler, CMake, git and curl. No LLVM:
@@ -216,7 +246,7 @@ if [ "$ROLE" = "trainer" ]; then
     twx fetch-expedia --check-only
   fi
   cache_pull prepared
-  for suite in $SUITES; do
+  for suite in $SUITE_NAMES; do
     twx prepare --suite "$suite"
   done
   cache_push prepared "$COMPILED_RE"
@@ -249,7 +279,7 @@ if [ -n "$EXPECTED_CPU" ]; then
 fi
 cache_pull "compiled/$CACHE_MACHINE"
 COMPILED_OK=true
-for suite in $SUITES; do
+for suite in $SUITE_NAMES; do
   twx compile-baselines --suite "$suite" --threads "$TL2CGEN_THREADS" || COMPILED_OK=false
 done
 if [ "$COMPILE_ONLY" = "true" ]; then
@@ -286,6 +316,8 @@ cat > "$SYSTEM_INFO" <<SYSINFO
   "git_ref": "$GIT_REF",
   "machine_type": "$MACHINE_TYPE",
   "zone": "$(metadata zone | awk -F/ '{print $NF}')",
+  "instance_id": "$(metadata id)",
+  "hostname": "$(hostname)",
   "image_requested": "$IMAGE",
   "image": "$(metadata image)",
   "apt_snapshot": "$APT_SNAPSHOT",
@@ -311,7 +343,7 @@ cat "$SYSTEM_INFO"
 # Phase 7: Preflight and runs, pinned to core 0
 # ---------------------------------------------------------------------------
 phase 7 "Runs: $SUITES"
-for suite in $SUITES; do
+for suite in $SUITE_NAMES; do
   twx preflight --suite "$suite" --require-pmu
 done
 ARCH_LABEL=$(uname -m)
@@ -320,6 +352,38 @@ ARCH_LABEL=$(uname -m)
 # being written live under temporary names, which the copy skips.
 # As the bench user: the runs write into it.
 as_bench "mkdir -p experiments/data/runs"
+# Every run this deployment launches is claimed in $CLAIMS, one run ID a line,
+# which survives a reboot. The source archive ships no runs, so a run directory
+# that exists is this VM's own from an earlier boot, resumed by run ID only if
+# this deployment claimed it; any other existing directory is refused.
+CLAIMS=$BENCH_HOME/runs-claimed.txt
+touch "$CLAIMS"
+chown $BENCH_USER:$BENCH_USER "$CLAIMS"
+run_state() { twx run-state "experiments/data/runs/$1"; }
+# claim_run ID: whether to launch run ID. A run this deployment claimed in
+# an earlier boot resumes while raw, is skipped once packed (never timed again,
+# no sentinel appended), and fails if packed tables sit beside raw cells; an
+# existing directory it never claimed is refused. Returns 1 to skip.
+claim_run() {
+  local state
+  state=$(run_state "$1")
+  if grep -qxF -- "$1" "$CLAIMS"; then
+    case "$state" in
+      packed)
+        log "Run $1: packed by an earlier boot of this VM; skipping"
+        return 1
+        ;;
+      mixed)
+        fail "Run directory experiments/data/runs/$1 holds packed tables beside raw cells or an incomplete pack; nothing deleted, investigate"
+        ;;
+    esac
+    log "Run $1: claimed by an earlier boot of this VM; resuming"
+    return 0
+  fi
+  [ "$state" = "absent" ] \
+    || fail "Run directory experiments/data/runs/$1 exists but was not claimed by this deployment"
+  echo "$1" >> "$CLAIMS"
+}
 # The copy runs niced on the last CPU, away from the pinned benchmark on core 0.
 ( while sleep 1800; do
     taskset -c "$(( $(nproc) - 1 ))" nice -n 19 gcloud storage rsync --no-user-output-enabled -r --exclude='.*/\.tmp-.*' \
@@ -384,39 +448,83 @@ elif [ -n "$GCS_GATE_URI" ]; then
 else
   # A run exits nonzero when a cell fails; the cell's diagnostics are in failed/.
   # Keep going, so one cell cannot cost the later suites or the results upload.
-  for suite in $SUITES; do
-    twx run --suite "$suite" --run-id "$suite-$ARCH_LABEL" --core 0 \
-      --system-info "$SYSTEM_INFO" --require-pmu \
-      || log "Run $suite: some cells failed; see runs/$suite-$ARCH_LABEL/failed/"
+  # NAME@TAG is a second run of NAME (the camera-ready ablation runs twice), in a
+  # run directory of its own, so it reuses none of the first run's cells.
+  for entry in $SUITES; do
+    suite=$${entry%%@*}
+    rid=$suite
+    [ "$entry" = "$suite" ] || rid="$suite-$${entry#*@}"
+    claim_run "$rid-$ARCH_LABEL" || continue
+    twx run --suite "$suite" --run-id "$rid-$ARCH_LABEL" --core 0 \
+      --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
+      || log "Run $rid: some cells failed; see runs/$rid-$ARCH_LABEL/failed/"
   done
 fi
 kill "$SYNC_PID" 2>/dev/null || true
 if [ "$LAYOUT_CHECK" = "true" ]; then
   # Layout sensitivity: the same kernel, instruction-identical, in a build whose
   # functions are aligned to 64 bytes. The spread is reported with the results.
-  twx run --suite acceptance --run-id "layout-default-$ARCH_LABEL" --core 0 \
-    --only treewalker,treewalker_research --system-info "$SYSTEM_INFO" --require-pmu \
-    || log "Layout check (default): some cells failed"
-  twx run --suite acceptance --run-id "layout-align64-$ARCH_LABEL" --core 0 \
-    --only treewalker,treewalker_research --system-info "$SYSTEM_INFO" --require-pmu \
-    --rustflags "'-C target-cpu=native -C llvm-args=-align-all-functions=6'" \
-    || log "Layout check (align64): some cells failed"
+  if claim_run "layout-default-$ARCH_LABEL"; then
+    twx run --suite acceptance --run-id "layout-default-$ARCH_LABEL" --core 0 \
+      --only treewalker,treewalker_research --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
+      || log "Layout check (default): some cells failed"
+  fi
+  if claim_run "layout-align64-$ARCH_LABEL"; then
+    twx run --suite acceptance --run-id "layout-align64-$ARCH_LABEL" --core 0 \
+      --only treewalker,treewalker_research --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
+      --rustflags "'-C target-cpu=native -C llvm-args=-align-all-functions=6'" \
+      || log "Layout check (align64): some cells failed"
+  fi
 fi
 # One Parquet file per table per run, verified against the cells, which it then
 # deletes. The bucket keeps the per-cell copies made while the suites ran; a run
 # that fails to pack keeps its cells, and they are uploaded instead.
+# A run an earlier boot packed is skipped, not packed again.
 for run in "$REPO_DIR"/experiments/data/runs/*/; do
+  [ "$(run_state "$(basename "$run")")" = "raw" ] || continue
   twx pack "$run" --remove || log "Pack $(basename "$run"): failed; uploading its cells"
 done
+if [ "$RETIME" = "true" ]; then
+  # Re-timing: every cell and mode of the paper's runs whose speedup or
+  # ablation-effect interval is wider than ±2% is timed once more with twice the
+  # rounds, here on the parent runs' VM (an attempt on another instance is
+  # refused), from this machine's own manifests, into runs of their own
+  # (RUN-retime-rN-ARCH), pinned to core 0 with the PMU required. The analysis
+  # reports each cell's longer attempt; both are uploaded.
+  RETIME_DIR="$REPO_DIR/experiments/data/retime"
+  for entry in $SUITES; do
+    suite=$${entry%%@*}
+    rid=$suite
+    [ "$entry" = "$suite" ] || rid="$suite-$${entry#*@}"
+    [ "$suite" = "acceptance" ] && continue
+    twx retime "$rid" --out "$RETIME_DIR" || log "Retime $rid: no plan; see the log"
+  done
+  for script in "$RETIME_DIR"/*-"$ARCH_LABEL".sh; do
+    [ -e "$script" ] || continue
+    claim_run "$(basename "$script" .sh)" || continue
+    as_bench "SYSTEM_INFO='$SYSTEM_INFO' sh '$script'" \
+      || log "Retime $(basename "$script"): some cells failed"
+  done
+  for run in "$REPO_DIR"/experiments/data/runs/*-retime-*/; do
+    [ -d "$run" ] || continue
+    [ "$(run_state "$(basename "$run")")" = "raw" ] || continue
+    twx pack "$run" --remove || log "Pack $(basename "$run"): failed; uploading its cells"
+  done
+fi
 
 # ---------------------------------------------------------------------------
 # Phase 8: Results
 # ---------------------------------------------------------------------------
 phase 8 "Results"
+# A restarted boot stages its results afresh (the bucket keeps every upload).
+rm -rf "$RESULTS_DIR/runs" "$RESULTS_DIR/retime"
 cp -r "$REPO_DIR/experiments/data/runs" "$RESULTS_DIR/"
 cp "$SYSTEM_INFO" "$RESULTS_DIR/"
-chown -R $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
+[ -d "$REPO_DIR/experiments/data/retime" ] && cp -r "$REPO_DIR/experiments/data/retime" "$RESULTS_DIR/"
+# This boot's start retired any earlier marker, and a failure exits through fail(),
+# so reaching here is success.
 echo "$(date -Iseconds)" > "$RESULTS_DIR/DONE"
+chown -R $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
 gcloud storage cp -r "$RESULTS_DIR/*" "$GCS_RESULTS_BASE/"
 log "Results uploaded to $GCS_RESULTS_BASE/"
 log "===== ALL PHASES COMPLETE ====="

@@ -19,7 +19,8 @@ resource "terraform_data" "source_archive" {
   triggers_replace = [timestamp()]
 
   provisioner "local-exec" {
-    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/source.tar.gz ${var.git_ref}"
+    # The released runs stay out: the VM writes its own runs, under the same IDs.
+    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/source.tar.gz ${var.git_ref} -- . ':(exclude)experiments/data/runs'"
   }
 }
 
@@ -29,7 +30,7 @@ resource "terraform_data" "gate_archive" {
   triggers_replace = [timestamp()]
 
   provisioner "local-exec" {
-    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/gate.tar.gz ${var.gate_ref}"
+    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/gate.tar.gz ${var.gate_ref} -- . ':(exclude)experiments/data/runs'"
   }
 }
 
@@ -63,7 +64,8 @@ locals {
     )
   }
   # Suites with Expedia cells need the parquet; acceptance and smoke do not.
-  needs_expedia = length(setsubtract(var.suites, ["acceptance", "smoke", "scenario-v1"])) > 0
+  # A suite listed as NAME@TAG is a second run of NAME.
+  needs_expedia = length(setsubtract([for s in var.suites : split("@", s)[0]], ["acceptance", "smoke", "scenario-v1"])) > 0
 }
 
 # The Expedia data cannot be redistributed; suites with Expedia cells need the
@@ -148,6 +150,8 @@ resource "google_compute_instance" "bench" {
       role              = each.value.role
       suites            = join(" ", var.suites)
       layout_check      = var.layout_check
+      retime            = var.retime
+      run_settings      = join(" ", [for s in var.run_settings : "--set ${s}"])
       diagnostic        = var.diagnostic
       gcs_gate_uri      = var.gate_ref == "" ? "" : "gs://${google_storage_bucket.bench.name}/${google_storage_bucket_object.gate_source[0].name}"
       apt_snapshot      = var.apt_snapshot

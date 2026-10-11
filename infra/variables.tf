@@ -22,6 +22,18 @@ variable "suites" {
   default     = ["factorial", "ablation"]
 }
 
+variable "run_settings" {
+  description = "grids.toml [run] overrides (KEY=VALUE) for every run, the layout check's included, after each suite's own settings; the camera-ready set uses [\"exact_sums=false\"]"
+  type        = list(string)
+  default     = []
+}
+
+variable "retime" {
+  description = "After the suites are packed, re-time every cell and mode of the paper's runs whose interval is wider than ±2% with twice the rounds (treewalker-exp retime and retime-run), on the same VM"
+  type        = bool
+  default     = false
+}
+
 variable "layout_check" {
   description = "Also time TreeWalker on the acceptance cells in a build with 64-byte function alignment (layout sensitivity)"
   type        = bool
