@@ -135,10 +135,12 @@ def export_treelite(
 class Reference:
     """Reference predictions for one model.
 
-    LightGBM uses Treelite GTIL: thresholds are f64, so it matches TreeWalker
-    exactly. XGBoost uses native predict: Treelite stores XGBoost thresholds
-    as f32 and GTIL evaluates in f32, while TreeWalker reads the f64-promoted
-    JSON thresholds, so the f32 model's own predict is the ground truth."""
+    LightGBM uses Treelite GTIL: its thresholds are f64, as TreeWalker's are,
+    and it adds the leaf values in f64 in tree order, so it agrees with
+    TreeWalker up to the rounding of that sum (TreeWalker's exact sums round
+    once, and tree ordering changes the order). XGBoost uses its own predict,
+    the model's own semantics: its thresholds are f32, and TreeWalker, like
+    XGBoost, compares in f32 (``(val as f32) < (thr as f32)``)."""
 
     def __init__(self, framework: str, native: Path, feature_names: list[str], cat: list[int]):
         self.framework = framework

@@ -53,6 +53,55 @@ fn empty_thresholds(path: &Path) -> usize {
         .count()
 }
 
+/// A copy of a Treelite JSON export, under the target's temporary directory, with
+/// every empty threshold filled with 0: what the export would be without them.
+fn with_empty_thresholds_filled(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COPIES: AtomicUsize = AtomicUsize::new(0);
+    const KEY: &[u8] = b"\"threshold\":";
+    let bytes = std::fs::read(path).unwrap();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(KEY) {
+            out.extend_from_slice(KEY);
+            i += KEY.len();
+            let next = bytes[i..]
+                .iter()
+                .position(|b| !b.is_ascii_whitespace())
+                .map_or(bytes.len(), |n| i + n);
+            if matches!(bytes.get(next), Some(b',' | b'}')) {
+                out.extend_from_slice(b" 0");
+                i = next;
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("filled-thresholds");
+    std::fs::create_dir_all(&dir).unwrap();
+    let n = COPIES.fetch_add(1, Ordering::Relaxed);
+    let filled = dir.join(format!("{}-{n}.json", std::process::id()));
+    std::fs::write(&filled, out).unwrap();
+    filled
+}
+
+fn is_json_syntax_error(e: &LoadError) -> bool {
+    matches!(e, LoadError::MalformedModel(m) if m.starts_with("JSON: "))
+}
+
+#[test]
+fn empty_thresholds_are_filled_in_a_copy() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fill-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("m.json");
+    std::fs::write(&path, r#"{"threshold": , "x": [{"threshold":   }]}"#).unwrap();
+    let filled = std::fs::read_to_string(with_empty_thresholds_filled(&path)).unwrap();
+    assert_eq!(filled, r#"{"threshold": 0, "x": [{"threshold": 0}]}"#);
+    assert_eq!(empty_thresholds(&path), 2);
+}
+
 // ---------------------------------------------------------------------------
 // Config discovery — test every artifact
 // ---------------------------------------------------------------------------
@@ -624,16 +673,23 @@ fn test_binary_matches_json() {
             continue;
         }
 
-        let forest_json = match Forest::load(&json_path, cfg.param_dir.join("walker_config.json")) {
+        let load = |path: &Path| Forest::load(path, cfg.param_dir.join("walker_config.json"));
+        let forest_json = match load(&json_path) {
             Ok(forest) => forest,
             Err(e) => {
                 let empty = empty_thresholds(&json_path);
                 assert!(
-                    empty > 0
-                        && matches!(&e, LoadError::MalformedModel(m) if m.starts_with("JSON: ")),
+                    empty > 0 && is_json_syntax_error(&e),
                     "{}: {e}",
                     json_path.display()
                 );
+                if let Err(f) = load(&with_empty_thresholds_filled(&json_path)) {
+                    assert!(
+                        !is_json_syntax_error(&f),
+                        "{}: {f}, beyond its {empty} empty thresholds",
+                        json_path.display()
+                    );
+                }
                 eprintln!(
                     "{}: {empty} empty thresholds ({e}); skipped",
                     json_path.display()
