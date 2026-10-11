@@ -30,7 +30,7 @@ for round in 1 2 3 4; do
       as_bench "taskset -c 0 target/release/sweep_bench run $manifest \
         --output-dir experiments/data/runs/xgbwheel-$round-$pos-$build-$i-$ARCH_LABEL \
         --cells '$glob' --only xgboost_native --system-info '$SYSTEM_INFO' --require-pmu" \
-        > /dev/null || log "xgbwheel $round $pos $build $i: failed"
+        > /dev/null || failed_step "xgbwheel $round $pos $build $i: failed"
     done
   done
 done

@@ -148,10 +148,6 @@ fi
 chown $BENCH_USER:$BENCH_USER "$BENCH_HOME"
 mkdir -p "$RESULTS_DIR"
 chown $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
-# Compile only exists to fill the cache: without a bucket its compiles would be
-# lost with the VM, so it stops before preparing anything.
-[ "$COMPILE_ONLY" != "true" ] || [ -n "$GCS_CACHE_URI" ] \
-  || fail "compile_only needs cache_bucket: the compiled baselines would be lost with the VM"
 
 # A restarted boot retires the previous boot's terminal marker, into the results'
 # MARKER_HISTORY and out of the bucket, so check_done reads RUNNING while it runs.
@@ -171,6 +167,10 @@ retire_markers() {
   gcloud storage rm --quiet "$GCS_RESULTS_BASE/DONE" "$GCS_RESULTS_BASE/ERROR" >/dev/null 2>&1 || true
 }
 retire_markers
+# Compile only exists to fill the cache: without a bucket its compiles would be
+# lost with the VM, so it stops before preparing anything.
+[ "$COMPILE_ONLY" != "true" ] || [ -n "$GCS_CACHE_URI" ] \
+  || fail "compile_only needs cache_bucket: the compiled baselines would be lost with the VM"
 
 # ---------------------------------------------------------------------------
 # Phase 1: System packages: a C/C++ compiler, CMake, git and curl. No LLVM:

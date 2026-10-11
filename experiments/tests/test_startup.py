@@ -222,6 +222,9 @@ def test_every_failure_in_the_runs_phase_is_recorded():
     text = startup()
     runs = text[text.index('phase 7 "') : text.index('phase 8 "')]
     assert "|| log" not in runs  # each failure goes through failed_step
+    # The diagnostics are sourced into the runs phase, so they record theirs too.
+    for script in sorted((INFRA / "scripts" / "diagnostics").glob("*.sh")):
+        assert "|| log" not in script.read_text(), script.name
 
 
 def test_the_boot_ends_with_done_only_without_failures(tmp_path):
