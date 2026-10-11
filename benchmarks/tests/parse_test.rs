@@ -41,23 +41,71 @@ fn empty_thresholds(path: &Path) -> usize {
         .count()
 }
 
-/// Load the cell's LightGBM JSON export, or `None` if the export is missing or has
-/// empty thresholds. Every other load error fails the test.
+/// A copy of a Treelite JSON export, under the target's temporary directory, with
+/// every empty threshold filled with 0: what the export would be without them.
+fn with_empty_thresholds_filled(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COPIES: AtomicUsize = AtomicUsize::new(0);
+    const KEY: &[u8] = b"\"threshold\":";
+    let bytes = std::fs::read(path).unwrap();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(KEY) {
+            out.extend_from_slice(KEY);
+            i += KEY.len();
+            let next = bytes[i..]
+                .iter()
+                .position(|b| !b.is_ascii_whitespace())
+                .map_or(bytes.len(), |n| i + n);
+            if matches!(bytes.get(next), Some(b',' | b'}')) {
+                out.extend_from_slice(b" 0");
+                i = next;
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("filled-thresholds");
+    std::fs::create_dir_all(&dir).unwrap();
+    let n = COPIES.fetch_add(1, Ordering::Relaxed);
+    let filled = dir.join(format!("{}-{n}.json", std::process::id()));
+    std::fs::write(&filled, out).unwrap();
+    filled
+}
+
+fn is_json_syntax_error(e: &LoadError) -> bool {
+    matches!(e, LoadError::MalformedModel(m) if m.starts_with("JSON: "))
+}
+
+/// Load the cell's LightGBM JSON export, or `None` if the export is missing or its
+/// empty thresholds are its only defect (with them filled, it parses). Every other
+/// load error fails the test.
 fn load_json(dir: &Path, parse: &ParseConfig) -> Option<Forest> {
     let model = dir.join("lightgbm/model_treelite.json");
     if !model.exists() {
         eprintln!("Skipping: {} not found (run prepare.py)", model.display());
         return None;
     }
-    match Forest::try_load_with_config(&model, dir.join("walker_config.json"), parse) {
+    let load =
+        |path: &Path| Forest::try_load_with_config(path, dir.join("walker_config.json"), parse);
+    match load(&model) {
         Ok(forest) => Some(forest),
         Err(e) => {
             let empty = empty_thresholds(&model);
             assert!(
-                empty > 0 && matches!(&e, LoadError::MalformedModel(m) if m.starts_with("JSON: ")),
+                empty > 0 && is_json_syntax_error(&e),
                 "{}: {e}",
                 model.display()
             );
+            if let Err(f) = load(&with_empty_thresholds_filled(&model)) {
+                assert!(
+                    !is_json_syntax_error(&f),
+                    "{}: {f}, beyond its {empty} empty thresholds",
+                    model.display()
+                );
+            }
             eprintln!(
                 "Skipping: {} has {empty} empty thresholds ({e})",
                 model.display()
@@ -78,6 +126,31 @@ fn temp_config(test: &str) -> PathBuf {
     )
     .unwrap();
     path
+}
+
+/// A cell directory under the target's temporary directory whose LightGBM JSON
+/// export is ``json``.
+fn temp_cell(test: &str, json: &str) -> PathBuf {
+    let dir = temp_config(test).parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(dir.join("lightgbm")).unwrap();
+    std::fs::write(dir.join("lightgbm/model_treelite.json"), json).unwrap();
+    dir
+}
+
+#[test]
+fn test_an_export_whose_only_defect_is_an_empty_threshold_is_skipped() {
+    let dir = temp_cell("only_empty_threshold", r#"{"threshold": , "x": 1}"#);
+    assert!(load_json(&dir, &ParseConfig::default()).is_none());
+}
+
+#[test]
+#[should_panic(expected = "beyond its 1 empty thresholds")]
+fn test_a_syntax_error_beside_an_empty_threshold_fails() {
+    let dir = temp_cell(
+        "syntax_beside_empty_threshold",
+        r#"{"foo": @, "threshold": , "x": 1}"#,
+    );
+    load_json(&dir, &ParseConfig::default());
 }
 
 #[test]
