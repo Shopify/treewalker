@@ -25,7 +25,9 @@ use crate::{data, system, timer};
 /// 5: the manifest's `stop` loses `instructions` and each conversion pass its
 /// `share`, and `xgboost_processes` its instruction totals (the `hw` table
 /// holds every block's counters).
-pub const OUTPUT_SCHEMA: u32 = 5;
+/// 6: each cell gains `stages.parquet`, TreeWalker's tree sum, raw margin and
+/// output on the stage oracle's rows; resuming requires it.
+pub const OUTPUT_SCHEMA: u32 = 6;
 
 /// Options shared by `run`, `cell` and `preflight`.
 #[derive(Debug, Clone, Default)]
@@ -769,7 +771,11 @@ pub fn preflight(manifest_path: &Path, artifacts: Option<&Path>, opts: &Options)
             if load.is_empty() || !seen.insert(load.clone()) {
                 continue;
             }
-            if let Err(e) = v.load_options().and_then(|o| cell.forest(&o)) {
+            let exact_sums = manifest.run.exact_sums;
+            let options = v
+                .load_options()
+                .map(|o| treewalker_gbdt::LoadOptions { exact_sums, ..o });
+            if let Err(e) = options.and_then(|o| cell.forest(&o)) {
                 unsupported.push(format!("load {}: {e:#}", load.join("+")));
             }
         }

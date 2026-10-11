@@ -118,15 +118,75 @@ fn calls_for(g: &Gathered, nf: usize, budget: usize) -> Vec<Call> {
 struct Loaded {
     methods: Vec<TimedMethod>,
     excluded: Vec<Excluded>,
-    /// Forests by load options, for counters and full walks.
+    /// Forests by [`load_key`], for counters and full walks.
     forests: BTreeMap<String, Forest>,
     load_seconds: BTreeMap<String, f64>,
+    /// The run's `exact_sums` setting, which every forest is loaded with.
+    exact_sums: bool,
+    /// The production forest's key in `forests`.
+    base: String,
+    /// Every TreeWalker forest loaded, with the `exact_sums` it reports, by key:
+    /// the `forests` and the 128-row chunks' (`chunked128`).
+    records: BTreeMap<String, Value>,
 }
 
-fn load_key(spec: &VariantSpec) -> String {
+impl Loaded {
+    /// The production forest: the model with the default layout.
+    fn base(&self) -> &Forest {
+        &self.forests[&self.base]
+    }
+
+    fn record(&mut self, key: &str, forest: &Forest, load: &[String]) {
+        let rec = json!({
+            "load": load,
+            "max_group_width": forest.config().max_group_width(),
+            "exact_sums": forest.exact_sums(),
+        });
+        self.records.insert(key.to_string(), rec);
+    }
+
+    /// Why the loaded forests disagree with the run's `exact_sums`, if they do. With
+    /// it off, every forest must report exact sums off. With it on, a model whose
+    /// leaves allow no exact sums reports off, so every forest must report what the
+    /// production forest reports.
+    fn exact_sums_mismatch(&self) -> Option<String> {
+        let want = if self.exact_sums {
+            self.records.get(&self.base)?["exact_sums"].as_bool()?
+        } else {
+            false
+        };
+        let bad: Vec<&String> = self
+            .records
+            .iter()
+            .filter(|(_, r)| r["exact_sums"].as_bool() != Some(want))
+            .map(|(k, _)| k)
+            .collect();
+        (!bad.is_empty()).then(|| {
+            format!(
+                "the run sets exact_sums = {}, and forests {bad:?} report exact_sums != {want}",
+                self.exact_sums
+            )
+        })
+    }
+}
+
+/// A forest's key: its load flags, sorted and joined by `+`, and `exact_sums_off`
+/// when the run turns exact sums off. The production forest has no load flags.
+fn load_key(spec: &VariantSpec, exact_sums: bool) -> String {
     let mut l = spec.load.clone();
     l.sort();
+    if !exact_sums {
+        l.push("exact_sums_off".into());
+    }
     l.join("+")
+}
+
+/// A variant's load options, with the run's `exact_sums`.
+fn load_options(spec: &VariantSpec, exact_sums: bool) -> Result<LoadOptions> {
+    Ok(LoadOptions {
+        exact_sums,
+        ..spec.load_options()?
+    })
 }
 
 fn wanted(ctx: &Context, method: &str) -> bool {
@@ -137,17 +197,23 @@ fn wanted(ctx: &Context, method: &str) -> bool {
 
 fn load_methods(cell: &Cell, mc: &ManifestCell, ctx: &Context, max_rows: usize) -> Result<Loaded> {
     let set = MethodSet::parse(&mc.methods)?;
+    let exact_sums = ctx.config.exact_sums;
+    let base_key = load_key(&VariantSpec::default(), exact_sums);
     let mut l = Loaded {
         methods: Vec::new(),
         excluded: Vec::new(),
         forests: BTreeMap::new(),
         load_seconds: BTreeMap::new(),
+        exact_sums,
+        base: base_key.clone(),
+        records: BTreeMap::new(),
     };
     let t0 = Instant::now();
-    let base = cell.forest(&LoadOptions::default())?;
+    let base = cell.forest(&load_options(&VariantSpec::default(), exact_sums)?)?;
     l.load_seconds
-        .insert(String::new(), t0.elapsed().as_secs_f64());
-    l.forests.insert(String::new(), base.clone());
+        .insert(base_key.clone(), t0.elapsed().as_secs_f64());
+    l.record(&base_key, &base, &[]);
+    l.forests.insert(base_key, base.clone());
 
     if wanted(ctx, "treewalker") {
         l.methods.push(TimedMethod::new(
@@ -167,13 +233,16 @@ fn load_methods(cell: &Cell, mc: &ManifestCell, ctx: &Context, max_rows: usize) 
     }
     if set.full_walk() && cell.max_group_rows() > CHUNK_ROWS && wanted(ctx, "treewalker_chunked128")
     {
-        match cell.forest_at_width(CHUNK_ROWS) {
-            Ok(f) => l.methods.push(TimedMethod::new(
-                "treewalker_chunked128",
-                "-",
-                Engine::Chunked(f.predictor()),
-                max_rows,
-            )),
+        match cell.forest_at_width(CHUNK_ROWS, exact_sums) {
+            Ok(f) => {
+                l.record("chunked128", &f, &[]);
+                l.methods.push(TimedMethod::new(
+                    "treewalker_chunked128",
+                    "-",
+                    Engine::Chunked(f.predictor()),
+                    max_rows,
+                ));
+            }
             Err(e) => l.excluded.push(Excluded {
                 method: "treewalker_chunked128".into(),
                 variant: "-".into(),
@@ -186,15 +255,18 @@ fn load_methods(cell: &Cell, mc: &ManifestCell, ctx: &Context, max_rows: usize) 
             break;
         }
         let id = spec.id();
-        let key = load_key(spec);
+        let key = load_key(spec, exact_sums);
         let forest = if let Some(f) = l.forests.get(&key) {
             f.clone()
         } else {
             let t0 = Instant::now();
-            match spec.load_options().and_then(|o| cell.forest(&o)) {
+            match load_options(spec, exact_sums).and_then(|o| cell.forest(&o)) {
                 Ok(f) => {
                     l.load_seconds
                         .insert(key.clone(), t0.elapsed().as_secs_f64());
+                    let mut load = spec.load.clone();
+                    load.sort();
+                    l.record(&key, &f, &load);
                     l.forests.insert(key, f.clone());
                     f
                 }
@@ -495,8 +567,9 @@ fn outputs(
 
 /// Check the stage oracle: `tree_sum` and `raw_margin` must equal the oracle's bit
 /// for bit when the model supports exact sums, and the stages' output must equal
-/// production `predict`'s.
-fn check_oracle(cell: &Cell, forest: &Forest) -> Result<Value> {
+/// production `predict`'s. Each oracle row's stages go to `stages_t`, so the
+/// analysis can compare them with the oracle and with the baselines.
+fn check_oracle(cell: &Cell, forest: &Forest, suite: &str, stages_t: &mut Table) -> Result<Value> {
     let Some(o) = &cell.oracle else {
         return Ok(json!({"status": "no oracle"}));
     };
@@ -516,6 +589,15 @@ fn check_oracle(cell: &Cell, forest: &Forest) -> Result<Value> {
         for (i, (&ts, &rm)) in stages.tree_sum.iter().zip(&stages.raw_margin).enumerate() {
             let (row, o_sum, o_margin) = *want.next().context("oracle has fewer rows")?;
             anyhow::ensure!(row == cell.offsets[g] + i, "oracle row {row} out of order");
+            stages_t.push(&[
+                V::S(suite),
+                V::S(&cell.id),
+                V::U32(g as u32),
+                V::U64(row as u64),
+                V::F64(ts),
+                V::F64(rm),
+                V::F64(stages.output[i]),
+            ]);
             let (ds, dm) = ((ts - o_sum).abs(), (rm - o_margin).abs());
             // NaN differences count as infinite.
             sum_max = if ds.is_nan() {
@@ -592,7 +674,7 @@ fn validate(
 ) -> (Vec<Check>, Vec<f64>) {
     let nf = cell.n_features;
     let n = *g.offsets.last().unwrap_or(&0);
-    let base = &l.forests[""];
+    let base = &l.forests[&l.base];
     let exact = base.exact_sums();
     let f64_tol = f64_sum_tolerance(base, cell.oracle.as_ref().map_or(0.0, |o| o.base_score));
     let mut prod = vec![0.0; n];
@@ -611,7 +693,7 @@ fn validate(
         let mut targets: Vec<(String, Vec<f64>, bool, f64)> = Vec::new();
         if m.is_treewalker() {
             if adds_in_f64 {
-                let key = spec.map(load_key).unwrap_or_default();
+                let key = spec.map_or_else(|| l.base.clone(), |s| load_key(s, l.exact_sums));
                 let walk = walks.entry(key.clone()).or_insert_with(|| {
                     let mut out = vec![0.0; n];
                     l.forests[&key].predict_full_walk(&g.rows, &mut out);
@@ -875,7 +957,7 @@ fn counters(
     l: &mut Loaded,
     table: &mut Table,
 ) -> Result<BTreeMap<String, Value>> {
-    let facts = Facts::of(&l.forests[""], cell);
+    let facts = Facts::of(l.base(), cell);
     let mut totals: BTreeMap<(String, Vec<String>), WorkCounters> = BTreeMap::new();
     let mut total_of =
         |forests: &BTreeMap<String, Forest>, key: &str, rt: &[String], per_group: bool| {
@@ -892,7 +974,8 @@ fn counters(
             totals.insert((key.to_string(), rt), t);
             Ok((t, g))
         };
-    let (_, all_on) = total_of(&l.forests, "", &[], true)?;
+    let base = l.base.clone();
+    let (_, all_on) = total_of(&l.forests, &base, &[], true)?;
     for (g, c) in all_on.iter().enumerate() {
         push_counters(table, &ctx.suite, &cell.id, "all-on", g, c);
     }
@@ -903,7 +986,7 @@ fn counters(
         .collect();
     for (i, spec) in variants {
         let id = spec.id();
-        let key = load_key(&spec);
+        let key = load_key(&spec, l.exact_sums);
         let (v, groups) = if id == "all-on" {
             (
                 all_on.iter().fold(WorkCounters::default(), |mut a, c| {
@@ -1932,7 +2015,12 @@ pub fn run_cell(
     // them: every timed input is checked, and no more.
     let order = &timed_groups;
     let vgroups = Gathered::new(&cell, order);
-    let oracle = check_oracle(&cell, &loaded.forests[""])?;
+    if let Some(reason) = loaded.exact_sums_mismatch() {
+        let diag = json!({"exact_sums": cfg.exact_sums, "forests": loaded.records});
+        return Err(refuse(run_dir, &cell.id, &reason, &diag));
+    }
+    let mut stages_t = output::stages_table();
+    let oracle = check_oracle(&cell, loaded.base(), &ctx.suite, &mut stages_t)?;
     let oracle_ok = oracle["status"] == "pass" && oracle["rows"].as_u64().unwrap_or(0) > 0;
     if timing && !oracle_ok {
         return Err(refuse(
@@ -2065,7 +2153,7 @@ pub fn run_cell(
         let shared = Shared {
             cell_dir,
             cell: &cell,
-            forest: &loaded.forests[""],
+            forest: &loaded.forests[&loaded.base],
             groups: &timed_groups,
             modes: &modes,
             max_rows,
@@ -2080,6 +2168,7 @@ pub fn run_cell(
     groups_t.write(&out.path("groups.parquet"))?;
     counters_t.write(&out.path("counters.parquet"))?;
     hw.write(&out.path("hw.parquet"))?;
+    stages_t.write(&out.path("stages.parquet"))?;
 
     let timed: Vec<Value> = loaded
         .methods
@@ -2095,7 +2184,7 @@ pub fn run_cell(
                    "settings": m.settings()})
         })
         .collect();
-    let forest = &loaded.forests[""];
+    let forest = loaded.base();
     let manifest = json!({
         "resume_key": resume_key,
         "suite": ctx.suite,
@@ -2110,6 +2199,7 @@ pub fn run_cell(
             "exact_sums": forest.exact_sums(),
         },
         "load_seconds": loaded.load_seconds,
+        "exact_sums": {"setting": cfg.exact_sums, "forests": loaded.records},
         "groups": cell.n_groups(),
         "timed_groups": timed_groups.len(),
         "sample": sample,
@@ -2718,6 +2808,9 @@ mod timing_tests {
             excluded: Vec::new(),
             forests: BTreeMap::new(),
             load_seconds: BTreeMap::new(),
+            exact_sums: true,
+            base: String::new(),
+            records: BTreeMap::new(),
         };
         for name in ["a", "b", "c"] {
             let mut m = fake(name, &log, 1);
@@ -2741,6 +2834,218 @@ mod timing_tests {
             left,
             [("a", Some("a")), ("c", Some("c")), ("baseline", None)]
         );
+    }
+
+    /// The import fixture `identity.bin` as a cell of `sizes` groups, with a walker
+    /// config wide enough for its widest group, under a temporary directory.
+    fn fixture_cell(sizes: &[usize], tag: &str) -> (Cell, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tw-fixture-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let width = sizes.iter().copied().max().unwrap_or(1);
+        let config = dir.join("walker_config.json");
+        std::fs::write(
+            &config,
+            json!({"n_features": 2, "max_group_width": width, "varying_features": [0],
+                   "mono_inc_features": [], "mono_dec_features": []})
+            .to_string(),
+        )
+        .unwrap();
+        let mut c = cell(sizes);
+        c.model_treelite = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/import/identity.bin"
+        ));
+        c.walker_config = config;
+        (c, dir)
+    }
+
+    #[test]
+    fn every_forest_is_loaded_with_the_runs_exact_sums() {
+        let (cell, dir) = fixture_cell(&[200, 3, 130], "exact");
+        let variants = vec![
+            VariantSpec::default(),
+            VariantSpec {
+                runtime: vec!["disable_unsplit".into()],
+                load: Vec::new(),
+            },
+            VariantSpec {
+                runtime: Vec::new(),
+                load: vec!["disable_tree_ordering".into()],
+            },
+            VariantSpec {
+                runtime: vec!["disable_varying_precompute".into()],
+                load: vec![
+                    "disable_prefix_grouping".into(),
+                    "disable_bitset_intern".into(),
+                ],
+            },
+        ];
+        for (methods, variants) in [("factorial", Vec::new()), ("ablation", variants)] {
+            let mc = ManifestCell {
+                id: "test/cell".into(),
+                dir: dir.clone(),
+                status: "ready".into(),
+                key: "k".into(),
+                methods: methods.into(),
+                variants,
+                modes: vec!["serving".into()],
+            };
+            for exact_sums in [false, true] {
+                let ctx = context(RunConfig {
+                    exact_sums,
+                    ..RunConfig::default()
+                });
+                let l = load_methods(&cell, &mc, &ctx, 256).unwrap();
+                // Production, research variants of three layouts, and the chunks.
+                let want = if methods == "factorial" { 2 } else { 3 };
+                assert_eq!(l.records.len(), want, "{methods}: {:?}", l.records.keys());
+                for (key, r) in &l.records {
+                    assert_eq!(r["exact_sums"], exact_sums, "{methods} {key}");
+                }
+                for (key, f) in &l.forests {
+                    assert_eq!(f.exact_sums(), exact_sums, "{methods} {key}");
+                    assert_eq!(key.ends_with("exact_sums_off"), !exact_sums, "{key}");
+                }
+                assert_eq!(l.base().exact_sums(), exact_sums);
+                assert_eq!(l.exact_sums_mismatch(), None);
+                if methods == "factorial" {
+                    assert!(l.records.contains_key("chunked128"));
+                    assert!(
+                        l.methods
+                            .iter()
+                            .any(|m| m.method == "treewalker_chunked128")
+                    );
+                }
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_oracle_rows_stages_are_written_in_the_oracles_order() {
+        let (mut cell, dir) = fixture_cell(&[3, 5, 2], "stages");
+        // Rows that differ within each group, so every row has its own stages.
+        for (i, v) in cell.data.iter_mut().enumerate() {
+            *v = (i % 7) as f64 - 3.0;
+        }
+        for exact_sums in [false, true] {
+            let forest = cell
+                .forest(&LoadOptions {
+                    exact_sums,
+                    ..LoadOptions::default()
+                })
+                .unwrap();
+            let mut r = forest.research_predictor(Ablation::default());
+            let mut want = Vec::new();
+            let mut stages = Stages::default();
+            for g in [0, 2] {
+                r.predict_group_stages(cell.group(g), &mut stages);
+                for i in 0..stages.output.len() {
+                    let row = cell.offsets[g] + i;
+                    want.push((
+                        g,
+                        row,
+                        stages.tree_sum[i],
+                        stages.raw_margin[i],
+                        stages.output[i],
+                    ));
+                }
+            }
+            cell.oracle = Some(crate::artifacts::Oracle {
+                groups: vec![0, 2],
+                rows: want
+                    .iter()
+                    .map(|&(_, row, ts, rm, _)| (row, ts, rm))
+                    .collect(),
+                divisor: 1.0,
+                base_score: 0.0,
+                postprocessor: "identity".into(),
+                sigmoid_alpha: 1.0,
+            });
+            let mut t = output::stages_table();
+            let got = check_oracle(&cell, &forest, "s", &mut t).unwrap();
+            assert_eq!(got["status"], "pass");
+            assert_eq!(got["exact_sums"], exact_sums);
+            let rows = t.rows_json();
+            assert_eq!(rows.len(), 5);
+            for (r, &(g, row, ts, rm, out)) in rows.iter().zip(&want) {
+                assert_eq!(
+                    r[..4],
+                    [json!("s"), json!("test/cell"), json!(g), json!(row)]
+                );
+                for (v, w) in r[4..].iter().zip([ts, rm, out]) {
+                    assert_eq!(v.as_f64().unwrap().to_bits(), w.to_bits());
+                }
+            }
+            t.write(&dir.join("stages.parquet")).unwrap();
+        }
+        // No oracle, no rows: the table is still written, empty.
+        cell.oracle = None;
+        let mut t = output::stages_table();
+        let forest = cell.forest(&LoadOptions::default()).unwrap();
+        assert_eq!(
+            check_oracle(&cell, &forest, "s", &mut t).unwrap()["status"],
+            "no oracle"
+        );
+        assert_eq!(t.len(), 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn forests_that_disagree_with_the_setting_are_refused() {
+        let (cell, dir) = fixture_cell(&[4, 4], "refuse");
+        let mc = ManifestCell {
+            id: "test/cell".into(),
+            dir: dir.clone(),
+            status: "ready".into(),
+            key: "k".into(),
+            methods: "treewalker".into(),
+            variants: Vec::new(),
+            modes: vec!["serving".into()],
+        };
+        let ctx = context(RunConfig {
+            exact_sums: false,
+            ..RunConfig::default()
+        });
+        let mut l = load_methods(&cell, &mc, &ctx, 8).unwrap();
+        assert_eq!(l.exact_sums_mismatch(), None);
+        // A forest loaded with exact sums in a run that turns them off.
+        let exact = cell.forest(&LoadOptions::default()).unwrap();
+        l.record("stray", &exact, &[]);
+        assert!(l.exact_sums_mismatch().unwrap().contains("stray"));
+        // With exact sums on, every forest must report what production reports.
+        l.exact_sums = true;
+        l.records.clear();
+        l.base = String::new();
+        l.record("", &exact, &[]);
+        assert_eq!(l.exact_sums_mismatch(), None);
+        let off = cell.forest_at_width(128, false).unwrap();
+        l.record("chunked128", &off, &[]);
+        assert!(l.exact_sums_mismatch().unwrap().contains("chunked128"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_keys_carry_the_exact_sums_setting() {
+        let v = VariantSpec {
+            runtime: vec!["disable_unsplit".into()],
+            load: vec![
+                "disable_tree_ordering".into(),
+                "disable_bitset_intern".into(),
+            ],
+        };
+        assert_eq!(
+            load_key(&v, true),
+            "disable_bitset_intern+disable_tree_ordering"
+        );
+        assert_eq!(
+            load_key(&v, false),
+            "disable_bitset_intern+disable_tree_ordering+exact_sums_off"
+        );
+        assert_eq!(load_key(&VariantSpec::default(), true), "");
+        assert_eq!(load_key(&VariantSpec::default(), false), "exact_sums_off");
+        let o = load_options(&v, false).unwrap();
+        assert!(!o.exact_sums && o.disable_tree_ordering && o.disable_bitset_intern);
     }
 
     #[test]

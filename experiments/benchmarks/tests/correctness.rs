@@ -521,7 +521,7 @@ fn wide_groups(width: usize) {
         eprintln!("no panel cell; skipped");
         return;
     };
-    let f = c.forest_at_width(width).unwrap();
+    let f = c.forest_at_width(width, true).unwrap();
     let nf = c.n_features;
     let mut data = Vec::new();
     for g in 0..c.n_groups().min(10) {

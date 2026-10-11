@@ -196,6 +196,10 @@ pub struct RunConfig {
     /// Time each cell, and each sentinel, in a new process of the runner, so none
     /// runs in a heap that earlier cells' models have churned.
     pub fresh_process: bool,
+    /// Load every TreeWalker forest with exact leaf sums (`LoadOptions::exact_sums`),
+    /// the library's default; false sums each row's leaves in `f64`, as the paper's
+    /// algorithms do. A cell whose forests report otherwise is refused.
+    pub exact_sums: bool,
 }
 
 impl Default for RunConfig {
@@ -217,6 +221,7 @@ impl Default for RunConfig {
             xgboost_processes: 6,
             xgboost_process_arches: vec!["x86_64".into()],
             fresh_process: true,
+            exact_sums: true,
         }
     }
 }
@@ -532,8 +537,9 @@ impl Cell {
         )?)
     }
 
-    /// Load the model with the cell's feature roles at another maximum group width.
-    pub fn forest_at_width(&self, width: usize) -> Result<Forest> {
+    /// Load the model with the cell's feature roles at another maximum group width,
+    /// with the default layout and `exact_sums` as given.
+    pub fn forest_at_width(&self, width: usize, exact_sums: bool) -> Result<Forest> {
         let file = WalkerConfig::from_file(&self.walker_config)?;
         let nf = file.n_features();
         let pick = |role: fn(&WalkerConfig, usize) -> bool| {
@@ -549,7 +555,10 @@ impl Cell {
             std::fs::File::open(&self.model_treelite)?,
             ModelFormat::TreeliteBinaryV4,
             config,
-            &LoadOptions::default(),
+            &LoadOptions {
+                exact_sums,
+                ..LoadOptions::default()
+            },
         )?)
     }
 

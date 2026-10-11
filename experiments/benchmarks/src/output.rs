@@ -361,6 +361,25 @@ pub fn counters_table() -> Table {
     ])
 }
 
+/// The `stages` table: TreeWalker's three stages on each row of the cell's stage
+/// oracle, written untimed, before timing.
+///
+/// They come from the base forest, with the run's `exact_sums` and every
+/// optimization on (the research predictor's default, whose `output` the oracle
+/// check requires to equal production `predict`'s bit for bit). `row` is the row's
+/// index in the cell's test data, as in the oracle; `group` its group.
+pub fn stages_table() -> Table {
+    Table::new(&[
+        ("suite", Kind::Str),
+        ("cell", Kind::Str),
+        ("group", Kind::U32),
+        ("row", Kind::U64),
+        ("tree_sum", Kind::F64),
+        ("raw_margin", Kind::F64),
+        ("output", Kind::F64),
+    ])
+}
+
 /// The `hw` table: event deltas per cell, variant, method, mode and block.
 pub fn hw_table() -> Table {
     let mut schema = vec![
@@ -456,12 +475,13 @@ impl CellDir {
 
 /// The resume key of a finished cell, from its `manifest.json`.
 /// The tables a finished cell holds; resume requires every one.
-pub const CELL_FILES: [&str; 5] = [
+pub const CELL_FILES: [&str; 6] = [
     "manifest.json",
     "samples.parquet",
     "groups.parquet",
     "counters.parquet",
     "hw.parquet",
+    "stages.parquet",
 ];
 
 pub fn finished_key(run_dir: &Path, slug: &str) -> Option<String> {
