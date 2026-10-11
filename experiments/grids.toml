@@ -197,8 +197,9 @@ replicate_fraction = 0.8
 # expedia-filled: the Expedia split with every missing value encoded, before
 # training, as its column's training minimum minus max(1, |minimum|), the same
 # constant in train and test. QuickScorer has no missing-value handling, so it
-# computes these models' function; trees of at most 16 leaves fit its 128. The
-# sessions, their order and the varying features are Expedia's.
+# can take these models (trees of at most 16 leaves fit its 128); it compares
+# thresholds in f32, so only cells whose QuickScorer outputs validate are timed.
+# The sessions, their order and the varying features are Expedia's.
 [workloads.ranking-filled]
 generator = "ranking-sessions-v2"
 datasets = ["expedia-filled"]

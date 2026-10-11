@@ -153,7 +153,10 @@ The factorial suite also prepares two kinds of derived models
   training as its column's training-split minimum minus max(1, |minimum|), the
   same constant in train and test (test values below it are kept). The constant
   stays below the minimum after the f32 conversion, so QuickScorer, which has no
-  missing-value handling, computes the same function as every other method.
+  missing-value handling, can take these models. That does not make it compute
+  the same function: it compares thresholds in f32, and in the final run 5 of the
+  16 cells' QuickScorer outputs failed validation against LightGBM's f64
+  thresholds. Only cells whose QuickScorer outputs validate are timed.
   Sessions workload, T in {50, 500, 1000, 2000}, L in {2, 4}, with Expedia's
   sessions, order and varying features.
 - Seed replicates, `_r1` to `_r4` after a model's name. Training is

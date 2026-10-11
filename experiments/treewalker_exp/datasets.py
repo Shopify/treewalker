@@ -517,7 +517,8 @@ def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) 
 
 # expedia-filled: Expedia with every missing value encoded as an ordinary number
 # below its column's training minimum, so methods without missing-value handling
-# (QuickScorer) compute the same function as the rest.
+# (QuickScorer) can take these models. It does not make them compute the same
+# function (QuickScorer compares thresholds in f32); only validated cells are timed.
 FILL_RULE = (
     "a missing value becomes its column's training-split minimum minus max(1, |minimum|), "
     "in train and test alike; test values below it are kept"
