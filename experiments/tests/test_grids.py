@@ -66,10 +66,11 @@ def test_factorial_cells_default_to_every_method(doc):
 
 
 def test_suites_declare_their_modes(doc):
-    # Batch mode only in the ablation suite; every other suite serves only.
+    # Batch mode only in the ablation suites; every other suite serves only.
     for name in doc["suites"]:
         s = grids.suite(doc, name)
-        want = ["serving", "batch"] if name == "ablation" else ["serving"]
+        ablation = name in ("ablation", "camera-ready-ablation")
+        want = ["serving", "batch"] if ablation else ["serving"]
         assert {tuple(s.plan_for(c)["modes"]) for c in s.cells} == {tuple(want)}, name
     for bad in ({}, {"modes": []}, {"modes": ["warm"]}, {"modes": ["batch", "batch"]}):
         with pytest.raises(ValueError):
@@ -151,3 +152,28 @@ def test_the_sentinel_resolves_against_the_artifacts(doc, tmp_path):
     assert missing["status"] == "skipped"
     # compile-baselines covers the sentinel's model in every suite.
     assert sentinel_cell(doc).id == cell.id
+
+
+def test_camera_ready_suites_turn_exact_sums_off_and_keep_the_factorial():
+    doc = grids.load(Path(__file__).parents[1] / "grids.toml")
+    assert grids.run_config(doc, (), "factorial")["exact_sums"] is True
+    assert grids.run_config(doc, (), "factorial")["min_rounds"] == 3
+    for name in ("camera-ready", "camera-ready-ablation", "scenario-v1"):
+        run = grids.run_config(doc, (), name)
+        assert run["exact_sums"] is False and run["min_rounds"] == 4, name
+    cr = grids.suite(doc, "camera-ready")
+    gens = {c.generator for c in cr.cells}
+    assert "whatif-v2" not in gens and not any(c.model.replicate for c in cr.cells)
+    assert {c.model.horizon for c in cr.cells if c.model.dataset == "flchain"} >= {1, 128, 1024}
+    ab = grids.suite(doc, "camera-ready-ablation")
+    assert ab.name == "camera-ready-ablation"
+    assert {c.id for c in ab.cells} == {c.id for c in grids.suite(doc, "ablation").cells}
+    for plan in ab.plan.values():
+        assert plan["methods"] == "ablation"
+        assert not any("disable_exact_sums" in v["runtime"] for v in plan["variants"])
+    sc = grids.suite(doc, "scenario-v1")
+    assert len(sc.cells) == 16
+    assert {tuple(v["runtime"]) for p in sc.plan.values() for v in p["variants"]} == {
+        (),
+        ("disable_varying_precompute",),
+    }

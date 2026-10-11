@@ -230,8 +230,8 @@ def suite(doc: dict[str, Any], name: str) -> Suite:
     s = doc["suites"].get(name)
     if s is None:
         raise KeyError(f"unknown suite {name}; grids.toml has {', '.join(doc['suites'])}")
-    if name == "ablation":
-        return _ablation(doc, s)
+    if "anchors" in s:  # the ablation suites: variants at the anchors
+        return _ablation(doc, name, s)
     cells: dict[str, Cell] = {}
     models: dict[str, Model] = {}
     memberships: dict[str, tuple[str, ...]] = {}
@@ -296,7 +296,7 @@ def ablation_variants(s: dict[str, Any], interaction: bool) -> list[dict[str, An
     return list(unique.values())
 
 
-def _ablation(doc: dict[str, Any], s: dict[str, Any]) -> Suite:
+def _ablation(doc: dict[str, Any], name: str, s: dict[str, Any]) -> Suite:
     frameworks = doc["defaults"]["frameworks"]
     inter = {tuple(a) for a in s["interaction_anchors"]}
     inter_tl = {(t, d) for t, d, _ in inter}
@@ -315,7 +315,7 @@ def _ablation(doc: dict[str, Any], s: dict[str, Any]) -> Suite:
                 interaction[c.id] = (nt, md) in inter_tl
     unique = list({c.id: c for c in cells}.values())
     extra = {k: s[k] for k in ("anchors", "runtime_variants", "parse_flags", "interaction_anchors")}
-    modes = suite_modes("ablation", s)
+    modes = suite_modes(name, s)
     plan = {
         c.id: {
             "methods": "ablation",
@@ -325,7 +325,7 @@ def _ablation(doc: dict[str, Any], s: dict[str, Any]) -> Suite:
         }
         for c in unique
     }
-    return Suite("ablation", s["description"], unique, extra, plan)
+    return Suite(name, s["description"], unique, extra, plan)
 
 
 def defaults(doc: dict[str, Any]) -> dict[str, Any]:
