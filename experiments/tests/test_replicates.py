@@ -403,3 +403,20 @@ def test_one_id_cannot_name_two_models():
     doc["suites"]["factorial"]["workloads"].append("panel-replicates-half")
     with pytest.raises(ValueError, match="names two models"):
         grids.suite(doc, "factorial")
+
+
+def test_one_model_id_cannot_name_two_models_through_distinct_cells():
+    # Other what-if parameters give other cell IDs, but the same replicate model
+    # directory; a second fraction would overwrite the first model.
+    doc = grids.load(GRIDS)
+    w = dict(doc["workloads"]["whatif-credit-replicates"], k=[2], replicate_fraction=0.5)
+    doc["workloads"]["whatif-credit-replicates-half"] = w
+    doc["suites"]["factorial"]["workloads"].append("whatif-credit-replicates-half")
+    with pytest.raises(ValueError, match=r"model credit/nt500_md4_r1 names two models"):
+        grids.suite(doc, "factorial")
+
+
+def test_every_committed_suite_names_each_model_once():
+    doc = grids.load(GRIDS)
+    for name in doc["suites"]:
+        grids.suite(doc, name)

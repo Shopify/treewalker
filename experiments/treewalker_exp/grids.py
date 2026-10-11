@@ -165,12 +165,20 @@ def suite(doc: dict[str, Any], name: str) -> Suite:
     if name == "ablation":
         return _ablation(doc, s)
     cells: dict[str, Cell] = {}
+    models: dict[str, Model] = {}
     memberships: dict[str, tuple[str, ...]] = {}
     for w in s["workloads"]:
         for c in workload_cells(doc, w):
             first = cells.setdefault(c.id, c)  # overlapping workloads share a cell
             if first.model != c.model:
                 raise ValueError(f"suite {name}: {c.id} names two models: {first.model}, {c.model}")
+            # One model directory holds one model: distinct cells may not give it two
+            # (a replicate's fraction is not part of its name).
+            same = models.setdefault(c.model.id, c.model)
+            if same != c.model:
+                raise ValueError(
+                    f"suite {name}: model {c.model.id} names two models: {same}, {c.model}"
+                )
             if w not in memberships.get(c.id, ()):
                 memberships[c.id] = (*memberships.get(c.id, ()), w)
     return Suite(name, s["description"], list(cells.values()), memberships=memberships)
