@@ -28,10 +28,12 @@ struct WalkerConfigFile {
     mono_dec_features: Vec<usize>,
 }
 
-/// Load-time options: optimizations baked into the model's layout.
+/// Load-time options: optimizations baked into the model's layout, and how its leaves
+/// are summed.
 ///
-/// Every option defaults to the optimized layout. The `disable_*` options and
-/// `prefix_depth = 0` exist to measure what each optimization contributes; changing
+/// Every option defaults to the optimized layout with exact sums. The `disable_*`
+/// options and `prefix_depth = 0` exist to measure what each optimization
+/// contributes, and `exact_sums = false` to predict with per-row `f64` sums; changing
 /// one means loading the model again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LoadOptions {
@@ -48,6 +50,12 @@ pub struct LoadOptions {
     /// identical splits. This multiplies the precompute work, and large models can
     /// exceed the 65,535 predicate limit.
     pub disable_predicate_dedup: bool,
+    /// Sum each row's leaf values exactly and round once, when the model's leaves
+    /// allow it (the default). False adds them per row in `f64`, in the loaded tree
+    /// order, as the full walk does; [`Forest::exact_sums`](crate::Forest::exact_sums)
+    /// then reports false. Predictions can differ from the exact sums in the last
+    /// bits, and with tree ordering on they depend on the order it chooses.
+    pub exact_sums: bool,
 }
 
 impl Default for LoadOptions {
@@ -57,6 +65,7 @@ impl Default for LoadOptions {
             disable_bitset_intern: false,
             prefix_depth: 2,
             disable_predicate_dedup: false,
+            exact_sums: true,
         }
     }
 }

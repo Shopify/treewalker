@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `LoadOptions::exact_sums`, true by default. False loads the model without exact
+  leaf sums: production prediction adds each row's leaves in `f64` in the loaded
+  tree order, bit for bit as `predict_full_walk` does, and `Forest::exact_sums()`
+  reports false. The default prediction is unchanged. `LoadOptions` gains a public
+  field, so code that builds it from every field without `..Default::default()`
+  must add this one.
+
 ## 2.0.0
 
 2.0 predicts through a reusable `Predictor`, loads with `Result` everywhere, and

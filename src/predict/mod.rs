@@ -3,7 +3,8 @@
 //! A call checks its input once, borrows the model once, and dispatches once on
 //! (threshold type × mask width). The monomorphized path then runs every group of the
 //! call in pieces of at most `M::WIDTH` rows; groups wider than [`MAX_PIECE_ROWS`]
-//! run in pieces of that many rows, and exact sums make the split invisible.
+//! run in pieces of that many rows. The split is invisible: a row's sum, exact or in
+//! `f64` in tree order, does not depend on the other rows of its piece.
 //!
 //! The kernel ([`kernel`]) is generic over `const F32: bool` (threshold comparison
 //! type), `M: RowMask` (u16/u32/u64/`Bits<W>`, chosen from the maximum group width),

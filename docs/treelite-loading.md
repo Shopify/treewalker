@@ -97,8 +97,16 @@ output   = margin                           # identity
 output   = 1 / (1 + exp(-alpha * margin))    # sigmoid
 ```
 
-The base score is stored on the forest, rather than distributed across leaves.
-This can change the last few rounding bits from older TreeWalker versions.
+The base score is stored on the forest and added once, after the sum and the
+division, each step rounded to float64: the finalization is staged. Treelite GTIL
+finalizes in the same order, so with exact sums off and tree ordering off
+production prediction can equal GTIL bit for bit (`sweep_bench precision-order`
+measures it per cell). Version 1 (the `neurips2026` tag) instead spread the base
+score across the leaves: its parser added `base_score / tree_count` to every leaf
+value, each addition rounded, and the margin was the float64 sum of those leaves.
+The two agree up to rounding, so outputs can differ from version 1's in the last
+few bits. Version 1 also read no `average_tree_output` and accepted only sigmoid
+models.
 
 Prediction computes `tree_sum` exactly: every leaf value is
 an integer multiple of 2^-e for one scale e per model, the scaled leaves add as
@@ -106,7 +114,9 @@ an integer multiple of 2^-e for one scale e per model, the scaled leaves add as
 nearest to the true sum and does not depend on tree order, node layout or group
 width. This needs the scaled sums to fit in 126 bits; a model with a non-finite leaf
 or leaf exponents too far apart adds in float64 in tree order instead, which
-`Forest::exact_sums` reports. The research feature's `predict_full_walk` and the
+`Forest::exact_sums` reports. So does a model loaded with
+`LoadOptions { exact_sums: false, .. }`: each row's leaves then add in float64
+in the loaded tree order, as the full walk does, bit for bit. The research feature's `predict_full_walk` and the
 `disable_exact_sums` ablation always add in float64 in tree order, so they can
 differ from production prediction in the last bits.
 

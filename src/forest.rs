@@ -452,10 +452,14 @@ impl Forest {
             (Vec::new(), 0)
         };
 
-        let fixed_scale = crate::exact::scale(
-            nodes.iter().filter(|n| n.is_leaf()).map(|n| n.value),
-            trees.len(),
-        );
+        let fixed_scale = if options.exact_sums {
+            crate::exact::scale(
+                nodes.iter().filter(|n| n.is_leaf()).map(|n| n.value),
+                trees.len(),
+            )
+        } else {
+            None
+        };
 
         // SAFETY: malloc_trim takes no pointers; it only returns free heap pages to
         // the system.
@@ -491,8 +495,10 @@ impl Forest {
     /// Whether prediction sums leaf values exactly and rounds once, so each row's tree
     /// sum is the `f64` nearest to the true sum whatever the tree order. Averaging, the
     /// base score and the link function are applied afterwards in ordinary `f64`.
-    /// False only if a leaf is not finite or the leaf exponents span too wide a range
-    /// for a 126-bit fixed point; prediction then adds in `f64` in tree order.
+    /// False if the model was loaded with [`LoadOptions::exact_sums`] off, or if a leaf
+    /// is not finite or the leaf exponents span too wide a range for a 126-bit fixed
+    /// point; prediction then adds each row's leaves in `f64` in tree order, as the
+    /// full walk does.
     #[inline]
     #[must_use]
     pub fn exact_sums(&self) -> bool {
