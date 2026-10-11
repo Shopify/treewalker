@@ -171,8 +171,13 @@ The factorial suite also prepares two kinds of derived models
 with `treewalker-exp pack`: `run.json` (configuration, host, timer, sentinel and
 the order cells ran in), `cells.json` (each cell's manifest: its sample,
 validation, stopping, probes and XGBoost's processes), the `samples`, `groups`,
-`counters` and `hw` tables, `timer.parquet`, and the sentinel's cells under
-`sentinel/`. The tables are Parquet in git-lfs: run `git lfs pull` after cloning.
+`counters`, `hw` and `stages` tables, `timer.parquet`, and the sentinel's cells
+under `sentinel/`. The tables are Parquet in git-lfs: run `git lfs pull` after
+cloning. `stages` (per cell `stages.parquet`; packed as `stages.parquet` and
+`sentinel/stages.parquet`) holds TreeWalker's tree sum, raw margin and output on
+each row of the cell's stage oracle (columns suite, cell, group, row, tree_sum,
+raw_margin, output), written untimed before timing; output schema 6, absent from
+older runs.
 
 | Run | Contents |
 |---|---|
@@ -190,12 +195,14 @@ git-lfs, not the benchmark machines. From the repository root:
 git lfs pull
 uv sync
 uv run treewalker-exp figures   # Figures 2-9: PNG and PDF, and the heatmap as TikZ
-uv run treewalker-exp tables    # Table 1 (TeX), Tables 3 and 10 (Markdown)
+uv run treewalker-exp tables    # Table 1 (TeX), Tables 3 and 10, App. A.5 and D, ablation runs (Markdown)
 uv run treewalker-exp numbers   # every in-text number, with its paper location
 uv run treewalker-exp summarize experiments/data/runs/factorial-x86_64   # one run, cell by cell
 ```
 
-Outputs go to `experiments/figures/`. The f32 audit also needs prepared models
+Outputs go to `experiments/figures/`. `figures`, `tables` and `numbers` read a
+campaign's runs (`--campaign`): `final`, the run above, or `camera-ready`
+(below); without the option, the camera-ready runs where they exist. The f32 audit also needs prepared models
 and cells under `experiments/artifacts/`; `treewalker-exp audit-f32
 --list-missing` lists the files it reads.
 
@@ -205,15 +212,24 @@ and cells under `experiments/artifacts/`; `treewalker-exp audit-f32
 | Figures 3, 4, 6-9 | `figures` | `horizon_amortization`, `method_comparison`, `cross_platform`, `ablation_waterfall`, `ablation_nodes`, `depth_sensitivity`, `ntrees_scaling` |
 | Table 1, Figure 5 | `tables`, `figures` | `decomposition_table.tex`, `asymptotic_convergence` |
 | Tables 3 and 10 | `tables` | `scenario_credit_{intel,arm}.md` |
-| Tables 9 and 11, in-text numbers (§4-§7, App. A.6, D, F) | `numbers` | `paper_numbers.txt` |
+| App. A.5 (tl2cgen's f64 aliasing defect) | `tables` | `tl2cgen_defect_{intel,arm}.md` |
+| App. D (QuickScorer on `expedia-filled`, replacing the withdrawn Table 9) | `tables` | `quickscorer_filled_{intel,arm}.md` |
+| §5.7 ablation effects per run and their between-run range | `tables`, `figures` | `ablation_effects.md`, `ablation_waterfall` |
+| Table 11, in-text numbers (§4-§7, App. A.6, D, F) | `numbers` | `paper_numbers.txt` |
 | App. A.3 (f32 audit) | `audit-f32` | `audit_f32.md` |
 
-A speedup is the ratio of mean time per row over the same groups, with a 95%
-bootstrap interval that resamples entities and rounds as crossed clusters;
-latencies are the median per group. Every cell runs in a process of its own, so
-no method is corrected for drift, and XGBoost native is its faster mode where it
-shows two. The v1 scripts compared medians; `numbers` keeps their items, and
-its module docstring says where an item changed.
+A method's latency in a cell is v1's estimand, completed for rounds: the median
+over blocks (one round's pass over one batch) of each block's median time per
+group, by v1's nearest-rank convention, from process 0; p5-p95 over blocks is
+descriptive dispersion. A speedup is the ratio of two latencies, with a 95%
+bootstrap interval that resamples entities and rounds as crossed clusters, pairs
+the two methods and recomputes the nested medians. Sampled cells give every group
+the same inclusion probability, which the analysis checks, so the medians are
+unweighted. The row-weighted ratio of mean time per row and its interval are kept
+as a sensitivity column (`speedup_rw`), and XGBoost native's faster mode across
+its extra processes as a sensitivity row. Every cell runs in a process of its
+own, so no method is corrected for drift. `numbers` keeps the v1 scripts' items,
+and its module docstring says where an item changed.
 
 ## Rerunning the benchmarks
 
@@ -269,16 +285,19 @@ uv run --group baselines treewalker-exp preflight --suite acceptance
 uv run --group baselines treewalker-exp run --suite acceptance --run-id acceptance
 uv run --group baselines treewalker-exp pack experiments/data/runs/acceptance
 uv run --group baselines treewalker-exp summarize experiments/data/runs/acceptance
+uv run --group baselines treewalker-exp check-run experiments/data/runs/acceptance
 ```
 
 Then the same with `--suite factorial` and `--suite ablation`. `run` resolves
 the suite into an execution manifest, builds `sweep_bench` and runs it pinned to
 core 0 with `taskset` where it exists; a rerun with the same run ID reuses the
 finished cells whose manifests match. The runner writes `run.json` and, per
-cell, `manifest.json` and the `samples`, `groups`, `counters` and `hw` Parquet
-tables. `pack` then writes one file per table and one `cells.json` for the run
+cell, `manifest.json` and the `samples`, `groups`, `counters`, `hw` and `stages`
+Parquet tables. `pack` then writes one file per table and one `cells.json` for the run
 (the sentinel's cells under `sentinel/`), checks every table against its cells,
-and with `--remove` deletes the per-cell directories; `summarize`,
+and with `--remove` deletes only the finished cell directories it packed and
+verified, keeping unfinished cells, failed sentinel attempts and the run's
+`failed/`; from output schema 6 it requires `stages.parquet`. `summarize`,
 `validation-readout` and `budget` read packed runs. `run --set KEY=VALUE` overrides a `grids.toml [run]` setting, after
 the suite's own `[suites.NAME.run]` settings (the validation suite's).
 
@@ -306,13 +325,16 @@ The protocol, per cell (settings in `grids.toml [run]`):
 - QuickScorer is excluded up front from LightGBM models with categorical
   splits, and from cells with missing values in a feature the model may route
   otherwise than left (a conservative rule: QuickScorer sends every missing value
-  left); its f64-to-f32 copy is timed separately, outside the samples, and its
-  share reported.
+  left). Every method receives f64 row-major input and converts it inside its
+  timed call; QuickScorer's f64-to-f32 copy is part of its samples, and is also
+  timed alone, right after its timed passes, so `summarize` reports its share.
 - On x86_64, each XGBoost cell also times XGBoost alone in 6 extra one-round
   processes (`process` in the samples), because its AVX2 block walk depends on
-  a heap buffer's alignment. `summarize` tells the modes apart inside each batch
-  by instructions per row and reports the faster one over the batches holding
-  both, with the expected time across processes beside it.
+  a heap buffer's alignment. XGBoost's main number is process 0's, timed and
+  paired like every method. As a sensitivity row, `summarize` tells the modes
+  apart inside each batch by instructions per row and reports the faster one
+  over the batches holding both, with the expected time across processes beside
+  it; the extra processes validate only their first 32 groups.
 - Each cell, and each sentinel, runs in a new process of the runner
   (`fresh_process`). In one long-lived process, LightGBM native ran up to 6.9%
   slower by the end of an earlier factorial, with the same instructions: a model
@@ -350,6 +372,137 @@ over any index in a user's uv configuration. Relock with `uv lock`,
 `uv lock --script experiments/compile.py` and
 `uv lock --script tests/fixtures/import/generate.py`; `uv lock --check` (with
 `--script` for a script) verifies a lock without changing it.
+
+### The camera-ready rerun
+
+The camera-ready reruns the paper's cells with the algorithm as reviewed: every
+TreeWalker forest loads with exact sums off (`exact_sums = false`), so each row's
+leaves add in f64 in tree order, as Algorithms 1 and 2 describe, and production
+`predict` equals `predict_full_walk` bit for bit. The library's default stays on
+(`LoadOptions::exact_sums`, true by default: the leaves add as exact fixed-point
+integers rounded once; see `docs/treelite-loading.md`). In the final run's
+ablation suites (`ablation-{x86_64,aarch64}`, measured 2026-10-09/10, `numbers`
+item README), turning exact sums off (`disable_exact_sums`, research build, serving,
+T=500, L=8) took 1.26-1.29x the default's latency at G=128 on Intel and 1.59-1.60x
+on Arm, 1.25-1.28x and 1.40-1.45x at G=64, 1.10-1.15x and 1.13-1.15x at G=16,
+1.02-1.06x and 0.99-1.02x at G=4, and 0.98-0.99x and 0.96-0.97x on Expedia's
+sessions, where exact sums are the slower. Each mode times at least 4
+rounds (`min_rounds = 4`), one full forward and reversed order cycle. The suites,
+in `grids.toml`, each set both in their own run table, so `factorial` and
+`ablation` keep their defaults:
+
+- `camera-ready`: survival panels at horizons 1-128 and FLCHAIN's 256-1,024 (128-row
+  chunks beside whole groups), Expedia's sessions, the fixed-model cohorts of 4-32
+  rows and `expedia-filled`.
+- `camera-ready-ablation`: the ablation's anchors and switches without the
+  `disable_exact_sums` variant, run twice as two runs.
+- `scenario-v1`: E1, the released credit scenario cells, with the trace evaluator
+  for Table 3's d_v columns.
+
+`infra/camera-ready.tfvars` holds the campaign: acceptance, the ablation, the
+camera-ready suite, the ablation again, `scenario-v1` and the layout check, every
+run with `--set exact_sums=false`:
+
+```bash
+cd infra
+terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var 'suites=["acceptance"]' -var layout_check=true -var 'run_settings=["exact_sums=false"]'
+terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var-file=camera-ready.tfvars
+```
+
+The runs land as `camera-ready-ARCH`, `camera-ready-ablation-1-ARCH`,
+`camera-ready-ablation-2-ARCH` and `scenario-v1-ARCH`. By hand, the same suites
+run with `treewalker-exp run --suite NAME --run-id NAME-ARCH --set exact_sums=false`
+(the second ablation run as `camera-ready-ablation-2-ARCH`). Then, per run:
+
+```bash
+uv run treewalker-exp pack experiments/data/runs/RUN
+uv run treewalker-exp check-run experiments/data/runs/RUN ...   # gates and warnings
+uv run treewalker-exp retime camera-ready                       # wide intervals, twice the rounds (below)
+uv run treewalker-exp figures --campaign camera-ready           # and tables, numbers
+uv run treewalker-exp audit-f32 --suite camera-ready            # f32 margins against the oracle
+cargo run --release --manifest-path experiments/benchmarks/Cargo.toml --features external-bench \
+  --bin sweep_bench -- precision-order --manifest MANIFEST --output order.json   # offline: ordering on vs off
+```
+
+`audit-f32 --suite camera-ready` reads TreeWalker's f32 margins from each run's
+packed `stages.parquet` and compares them, and native XGBoost's, with the same f64
+oracle. `sweep_bench precision-order` runs offline over prepared LightGBM cells
+(cell directories, or `--manifest` with `--cells` and `--artifacts-dir`): with
+exact sums off it compares tree ordering on against off on the tree sums and raw
+margins, and both orderings' outputs with the cell's GTIL reference
+(`experiments/benchmarks/src/precision.rs`, `docs/treelite-loading.md`).
+
+`check-run` exits non-zero when a validity gate fails, and fails closed: the
+run's tables missing, a failed cell or sentinel attempt, a cell whose stage oracle
+did not pass, a required method not timed, a timed interface without a passing
+check on the timed rows, process 0's samples not covering the timed groups in
+every round, or a forest whose `exact_sums` differs from the run's, which the
+camera-ready suites must set off (pass `--exact-sums off` for the campaign's
+acceptance and layout runs). It prints the warnings (sentinel drift, the layout
+check, G=1 at the survival anchors, E1 against the released numbers).
+
+Re-timing runs on each machine, from that machine's own execution manifest (the
+native libraries differ), for every run the paper reads: `camera-ready`,
+`camera-ready-ablation-1`, `camera-ready-ablation-2` and `scenario-v1`:
+
+```bash
+for run in camera-ready camera-ready-ablation-1 camera-ready-ablation-2 scenario-v1; do
+  uv run --group baselines treewalker-exp retime $run   # this machine; --manifest <artifacts>/manifests/SUITE.json
+done
+SYSTEM_INFO=PATH experiments/data/retime/RUN-retime-rN-ARCH.sh   # each script it writes
+```
+
+`retime` lists every cell and mode where a method's speedup over TreeWalker, or a
+research variant's ablation effect over its own denominator (the research build's
+all-on; a monotonic variant's precompute-off counterpart), has a paired interval
+wider than ±2% of the ratio. It checks the manifest against the run's record
+(suite, libraries, artifacts, source, settings, cell keys), and writes manifests
+that time those cells again with twice the rounds, with a script per manifest
+that runs it as the campaign does (`treewalker-exp retime-run`: core 0, the PMU
+required, the system facts recorded) into a run of its own, `RUN-retime-rN-ARCH`.
+The analysis checks each attempt against its parent and reports each cell's
+longer attempt; both stay in the data.
+
+A campaign VM that stops is restarted by hand (`automatic_restart` is off), and
+`startup.sh` then picks up where it was. It records every run it launches in
+`~bench/runs-claimed.txt`; on a restart a claimed run that is still raw resumes by
+run ID, one already packed is skipped (never timed again, no sentinel appended,
+not packed twice), and a packed directory that also holds raw cells, or an
+incomplete pack, stops the boot with nothing deleted (`treewalker-exp run-state`
+names the state). An existing directory this deployment never claimed is refused,
+and `run` and `retime-run` refuse a packed run directory themselves. A new boot
+moves the previous boot's `DONE` or `ERROR` into the results' `MARKER_HISTORY` and
+out of the bucket, so `check_done` reads `RUNNING` until the boot ends with `DONE`,
+or with `ERROR` from whatever failed.
+
+On the campaign's VMs re-timing happens on its own: with `retime = true`
+(`infra/camera-ready.tfvars`), `startup.sh` packs the suites, runs `retime` for
+each of the paper's runs, runs every script it writes, packs the re-time runs and
+uploads them with the rest (`retime/` holds the manifests and scripts). By hand,
+on the VM that ran the campaign (as the bench user, from the repository):
+
+```bash
+for run in camera-ready camera-ready-ablation-1 camera-ready-ablation-2 scenario-v1; do
+  uv run --group baselines treewalker-exp retime $run --out experiments/data/retime
+done
+for script in experiments/data/retime/*-$(uname -m).sh; do
+  SYSTEM_INFO=$HOME/system_info.json sh "$script"   # retime-run: taskset -c 0, --require-pmu
+done
+for run in experiments/data/runs/*-retime-*/; do
+  uv run --group baselines treewalker-exp pack "$run" --remove
+done
+gcloud storage cp -r experiments/data/runs experiments/data/retime gs://BUCKET/results/MACHINE/
+```
+
+Re-time only on the VM that ran the campaign, and keep it up until the re-times
+finish. The analysis accepts an attempt only if it ran the parent's program on the
+parent's protocol and VM: the same executed source and `sweep_bench` binary (by
+hash), Rust toolchain and flags, pinned CPUs, PMU, turbo mode, machine type, image,
+zone and instance (its ID and host name, which the camera-ready runs record),
+native libraries and tl2cgen runtime, resolved run settings other than the rounds,
+and per cell the same key, model, input and oracle hashes and compiled baselines.
+A refused attempt leaves the original reported, marked "re-time refused", and
+`tables` lists every attempt and why it was refused (App. A.4).
 
 ### What to expect from a rerun
 
