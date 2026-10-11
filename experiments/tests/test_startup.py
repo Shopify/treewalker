@@ -200,3 +200,75 @@ def test_nothing_under_the_bench_home_exists_before_the_bench_user():
         i for i, line in top if line.strip() == 'chown $BENCH_USER:$BENCH_USER "$BENCH_HOME"'
     )
     assert useradd < home_chown < retire
+
+
+def block(start: str, end: str) -> str:
+    """The startup.sh text from ``start`` to the first ``end`` after it, as it runs
+    on the VM (the template's $$ escapes undone)."""
+    text = startup()
+    i = text.index(start)
+    return text[i : text.index(end, i) + len(end)].replace("$${", "${")
+
+
+def state_stub() -> str:
+    return (
+        f'run_state() {{ "{sys.executable}" -c "import sys, pathlib; '
+        'from treewalker_exp import pack; print(pack.run_state(pathlib.Path(sys.argv[1])))" '
+        '"$REPO_DIR/experiments/data/runs/$1"; }\n'
+    )
+
+
+def test_every_failure_in_the_runs_phase_is_recorded():
+    text = startup()
+    runs = text[text.index('phase 7 "') : text.index('phase 8 "')]
+    assert "|| log" not in runs  # each failure goes through failed_step
+
+
+def test_the_boot_ends_with_done_only_without_failures(tmp_path):
+    marker = block('if [ -z "$FAILURES" ]; then', "\nfi\n")
+    for failures, expect in (("", "DONE"), ("Run x-aarch64: some cells failed; ", "ERROR")):
+        d = tmp_path / expect
+        d.mkdir()
+        script = f"RESULTS_DIR={d}\nFAILURES='{failures}'\n{marker}"
+        assert subprocess.run(["bash", "-c", script]).returncode == 0
+        assert sorted(p.name for p in d.iterdir()) == [expect]
+    assert "Run x-aarch64: some cells failed" in check_done(tmp_path / "ERROR")
+
+
+def test_an_interrupted_run_is_not_packed_before_it_is_resumed(tmp_path):
+    """The pack loop before the re-time phase packs a run an invocation finished and
+    leaves raw one that an earlier boot cut short (a re-time run among them), so the
+    re-time phase resumes it."""
+    runs = tmp_path / "repo" / "experiments" / "data" / "runs"
+    done, cut = runs / "camera-ready-aarch64", runs / "camera-ready-retime-r8-aarch64"
+    for run in (done, cut):
+        (run / "cells" / "a_cell").mkdir(parents=True)
+    (done / "run.json").write_text('{"invocations": [{"finished": 1}]}')
+    (cut / "run.json").write_text("{}")  # the runner writes an invocation only at its end
+    loop = block('for run in "$REPO_DIR"/experiments/data/runs/*/; do', "\ndone\n")
+    script = (
+        f"REPO_DIR={tmp_path}/repo\n"
+        + state_stub()
+        + f'twx() {{ echo "$*" >> {tmp_path}/calls; }}\nfailed_step() {{ :; }}\n'
+        + loop
+    )
+    assert subprocess.run(["bash", "-c", script]).returncode == 0
+    calls = (tmp_path / "calls").read_text()
+    assert "pack" in calls and str(done) in calls and str(cut) not in calls
+    assert pack.run_state(cut) == "partial"
+
+
+def test_a_claimed_run_not_packed_at_the_end_is_a_failure(tmp_path):
+    runs = tmp_path / "repo" / "experiments" / "data" / "runs"
+    packed(runs / "camera-ready-aarch64")
+    (tmp_path / "claims.txt").write_text("camera-ready-aarch64\nscenario-v1-aarch64\n")
+    check = block("while read -r rid; do", '\ndone < "$CLAIMS"\n')
+    script = (
+        f"REPO_DIR={tmp_path}/repo\nCLAIMS={tmp_path}/claims.txt\nFAILURES=''\n"
+        + state_stub()
+        + 'failed_step() { FAILURES="$FAILURES$*; "; }\n'
+        + check
+        + 'echo "$FAILURES"\n'
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+    assert out.strip() == "Run scenario-v1-aarch64: absent at the end of the boot, not packed;"

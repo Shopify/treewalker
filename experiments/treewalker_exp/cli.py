@@ -589,10 +589,21 @@ def retime_run(
         here = platform.machine().replace("arm64", "aarch64")
         parent = f"{doc['retime']['of']}-{here}"
     from . import pack
+    from . import retime as rt
 
-    if pack.run_state(paths.runs / run_id) not in ("absent", "raw"):
+    if pack.run_state(paths.runs / run_id) not in ("absent", "partial", "raw"):
         raise typer.BadParameter(f"{paths.runs / run_id} is packed: a run is never resumed into")
-    want = fm.read_json(paths.runs / parent / "run.json").get("binary_sha256")
+    parent_info = fm.read_json(paths.runs / parent / "run.json")
+    here = fm.read_json(system_info) if system_info else {}
+    for path in rt.INSTANCE:
+        key = path.split(".", 1)[1]
+        mine, theirs = here.get(key), (parent_info.get("system_info") or {}).get(key)
+        if mine is None or theirs is None or mine != theirs:
+            raise typer.BadParameter(
+                f"{key}: this VM {mine!r}, {parent}'s {theirs!r}: re-times run only on the "
+                "parent run's VM, and the analysis would refuse this attempt"
+            )
+    want = parent_info.get("binary_sha256")
     exe = bench.build(paths, rustflags=rustflags)
     have = fm.sha256_file(exe)
     if have != want:
@@ -610,8 +621,10 @@ def retime_run(
 def run_state_cmd(
     run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
 ) -> None:
-    """Print a run directory's state for a restart: absent, raw (resumable), packed
-    (complete) or mixed (packed tables beside raw cells, or an incomplete pack)."""
+    """Print a run directory's state for a restart: absent, partial (no invocation
+    finished: resume, never pack), raw (an invocation finished: pack or resume),
+    packed (complete) or mixed (packed tables beside raw cells, or an incomplete
+    pack)."""
     from . import pack
 
     print(pack.run_state(run_dir))
@@ -714,7 +727,8 @@ def run(
         raise typer.BadParameter(str(e), param_hint="--set") from None
     from . import pack
 
-    if run_id and len(suite) == 1 and pack.run_state(paths.runs / run_id) not in ("absent", "raw"):
+    state = pack.run_state(paths.runs / run_id) if run_id and len(suite) == 1 else "absent"
+    if state not in ("absent", "partial", "raw"):
         raise typer.BadParameter(f"{paths.runs / run_id} is packed: a run is never resumed into")
     binary = bench.build(paths, rustflags=rustflags)
     failed = False

@@ -4,8 +4,9 @@ Validity gates, which block the data (`gates`; ``check-run`` exits non-zero when
 one fails):
 
 - the run's tables are present (``stages`` from output schema 6);
-- no failed cell: nothing in ``failed/``, every cell of the manifest finished,
-  and every sentinel attempt succeeded;
+- no failed cell: every cell of the manifest finished, and every failed attempt
+  of a cell (``failed/``) or of a sentinel was followed by a successful attempt
+  of the same cell or sentinel; the resolved failures are listed, not gated;
 - every method validated on its timed groups, failing closed: per cell (and per
   sentinel cell), a passing nonempty stage oracle, every required method timed,
   each timed method and mode with a passing check of the interface it timed on
@@ -324,6 +325,37 @@ def _listed(lines: list[str], what: str, bad: dict[str, list[str]]) -> None:
         lines.append(f"       {cell}: {'; '.join(f)}")
 
 
+def open_failures(run: Path, cells: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """The run's failed cells (``failed/<cell>.json``), split into the open ones and
+    those resolved by a later attempt of the same cell that finished (it is in
+    cells.json). Every failed attempt stays in the data; only open ones gate."""
+    open_: list[str] = []
+    resolved: list[str] = []
+    d = run / "failed"
+    for p in sorted(d.glob("*.json")) if d.is_dir() else []:
+        try:
+            cid = fm.read_json(p).get("id")
+        except OSError, ValueError:
+            cid = None
+        (resolved if cid in cells else open_).append(p.name)
+    return open_, resolved
+
+
+def open_sentinel_failures(records: list[dict[str, Any]]) -> tuple[list[Any], list[Any]]:
+    """Sentinel attempts not ok, split into the open ones and those retried with
+    success later (a later record of the same index that is ok)."""
+    open_: list[Any] = []
+    retried: list[Any] = []
+    for i, r in enumerate(records):
+        if r.get("status") == "ok":
+            continue
+        later = any(
+            q.get("index") == r.get("index") and q.get("status") == "ok" for q in records[i + 1 :]
+        )
+        (retried if later else open_).append(r)
+    return open_, retried
+
+
 def gates(run: Path, expect_exact_sums: bool | None = None) -> tuple[list[str], bool]:
     """The validity gates for one packed run: report lines and whether all pass.
     ``expect_exact_sums`` is the setting the run must have; by default off for the
@@ -341,11 +373,11 @@ def gates(run: Path, expect_exact_sums: bool | None = None) -> tuple[list[str], 
         return lines, False
     lines.append(f"  ok   tables present ({', '.join(names)}; output schema {schema})")
     cells = fm.read_json(run / "cells.json")
-    failed = sorted(p.name for p in (run / "failed").glob("*")) if (run / "failed").is_dir() else []
+    failed, resolved = open_failures(run, cells)
     expected = (info.get("manifest") or {}).get("cells")
     missing = 0 if expected is None else expected - len(cells)
     sentinels = (info.get("sentinel") or {}).get("records") or []
-    bad_sentinels = [r for r in sentinels if r.get("status") != "ok"]
+    bad_sentinels, retried = open_sentinel_failures(sentinels)
     if failed or missing > 0 or bad_sentinels or not cells:
         ok = False
         lines.append(
@@ -357,6 +389,12 @@ def gates(run: Path, expect_exact_sums: bool | None = None) -> tuple[list[str], 
             lines.append(f"       sentinel {r.get('index')} ({r.get('role')}): {r.get('status')}")
     else:
         lines.append(f"  ok   no failed cell ({len(cells)} cells, {len(sentinels)} sentinels ok)")
+    if resolved or retried:
+        lines.append(
+            f"       resolved: {len(resolved)} failed cells finished on a later attempt "
+            f"({', '.join(resolved[:5])}{', ...' if len(resolved) > 5 else ''}); "
+            f"{len(retried)} failed sentinel attempts succeeded on a retry"
+        )
     sentinel_cells: dict[str, Any] = {}
     packed = (
         fm.read_json(run / "sentinel" / "cells.json")

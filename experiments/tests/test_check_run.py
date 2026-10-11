@@ -419,3 +419,32 @@ def test_batch_rounds_cover_the_timed_groups_count_and_rows(tmp_path):
         tmp_path, "batch-short", lambda s: to_batch(s).with_columns(n_groups=pl.lit(3)), {"a/c": m}
     )
     assert any("calls cover 3 groups" in f for f in got["a/c"])
+
+
+def test_a_failure_a_later_attempt_resolved_is_listed_not_gated(tmp_path):
+    d = tmp_path / "resolved"
+    d.mkdir()
+    run = write_run(d, {"a/c": cell()})
+    (run / "failed").mkdir()
+    # The cell failed once and finished on a later attempt: it is in cells.json.
+    fm.write_json(run / "failed" / "a_2fc.json", {"id": "a/c", "reason": "oracle"})
+    lines, ok = cr.gates(run)
+    text = "\n".join(lines)
+    assert ok, text
+    assert "resolved: 1 failed cells finished on a later attempt (a_2fc.json)" in text
+    # A failed cell no later attempt finished still gates.
+    fm.write_json(run / "failed" / "b_2fc.json", {"id": "b/c", "reason": "oracle"})
+    lines, ok = cr.gates(run)
+    assert not ok and "FAIL failed cells: 1 in failed/ (b_2fc.json)" in "\n".join(lines)
+
+
+def test_a_sentinel_attempt_retried_with_success_is_resolved():
+    records = [
+        {"index": 0, "role": "warm-up", "status": "ok"},
+        {"index": 1, "role": "measure", "status": "failed: x"},
+        {"index": 1, "role": "measure", "status": "ok"},
+        {"index": 2, "role": "measure", "status": "failed: y"},
+    ]
+    open_, retried = cr.open_sentinel_failures(records)
+    assert [r["status"] for r in open_] == ["failed: y"]
+    assert [r["status"] for r in retried] == ["failed: x"]

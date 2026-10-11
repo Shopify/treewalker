@@ -343,6 +343,11 @@ cat "$SYSTEM_INFO"
 # Phase 7: Preflight and runs, pinned to core 0
 # ---------------------------------------------------------------------------
 phase 7 "Runs: $SUITES"
+# A failure that should not stop the boot (a run's failed cells, a pack or
+# re-time error, a run left unpacked) is recorded: the later runs go on and the
+# results are uploaded, but the boot ends with ERROR instead of DONE.
+FAILURES=""
+failed_step() { log "FAILED: $*"; FAILURES="$FAILURES$*; "; }
 for suite in $SUITE_NAMES; do
   twx preflight --suite "$suite" --require-pmu
 done
@@ -439,7 +444,7 @@ elif [ -n "$GCS_GATE_URI" ]; then
             experiments/artifacts/manifests/$suite.json \
             --output-dir experiments/data/runs/gate-$align-$round-$pos$side-$i-$ARCH_LABEL \
             --cells '$glob' --only treewalker --system-info '$SYSTEM_INFO' --require-pmu" \
-            > /dev/null || log "gate $align $round $pos$side $i: failed"
+            > /dev/null || failed_step "gate $align $round $pos$side $i: failed"
         done
       done
     done
@@ -457,7 +462,7 @@ else
     claim_run "$rid-$ARCH_LABEL" || continue
     twx run --suite "$suite" --run-id "$rid-$ARCH_LABEL" --core 0 \
       --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
-      || log "Run $rid: some cells failed; see runs/$rid-$ARCH_LABEL/failed/"
+      || failed_step "Run $rid: some cells failed; see runs/$rid-$ARCH_LABEL/failed/"
   done
 fi
 kill "$SYNC_PID" 2>/dev/null || true
@@ -467,22 +472,24 @@ if [ "$LAYOUT_CHECK" = "true" ]; then
   if claim_run "layout-default-$ARCH_LABEL"; then
     twx run --suite acceptance --run-id "layout-default-$ARCH_LABEL" --core 0 \
       --only treewalker,treewalker_research --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
-      || log "Layout check (default): some cells failed"
+      || failed_step "Layout check (default): some cells failed"
   fi
   if claim_run "layout-align64-$ARCH_LABEL"; then
     twx run --suite acceptance --run-id "layout-align64-$ARCH_LABEL" --core 0 \
       --only treewalker,treewalker_research --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
       --rustflags "'-C target-cpu=native -C llvm-args=-align-all-functions=6'" \
-      || log "Layout check (align64): some cells failed"
+      || failed_step "Layout check (align64): some cells failed"
   fi
 fi
 # One Parquet file per table per run, verified against the cells, which it then
 # deletes. The bucket keeps the per-cell copies made while the suites ran; a run
 # that fails to pack keeps its cells, and they are uploaded instead.
-# A run an earlier boot packed is skipped, not packed again.
+# A run an earlier boot packed is skipped, not packed again; a run no invocation
+# finished ("partial", an earlier boot cut short) is left raw: a re-time run is
+# resumed below, and anything else still raw at the end is a failure.
 for run in "$REPO_DIR"/experiments/data/runs/*/; do
   [ "$(run_state "$(basename "$run")")" = "raw" ] || continue
-  twx pack "$run" --remove || log "Pack $(basename "$run"): failed; uploading its cells"
+  twx pack "$run" --remove || failed_step "Pack $(basename "$run"): failed; uploading its cells"
 done
 if [ "$RETIME" = "true" ]; then
   # Re-timing: every cell and mode of the paper's runs whose speedup or
@@ -497,20 +504,27 @@ if [ "$RETIME" = "true" ]; then
     rid=$suite
     [ "$entry" = "$suite" ] || rid="$suite-$${entry#*@}"
     [ "$suite" = "acceptance" ] && continue
-    twx retime "$rid" --out "$RETIME_DIR" || log "Retime $rid: no plan; see the log"
+    twx retime "$rid" --out "$RETIME_DIR" || failed_step "Retime $rid: no plan; see the log"
   done
   for script in "$RETIME_DIR"/*-"$ARCH_LABEL".sh; do
     [ -e "$script" ] || continue
     claim_run "$(basename "$script" .sh)" || continue
     as_bench "SYSTEM_INFO='$SYSTEM_INFO' sh '$script'" \
-      || log "Retime $(basename "$script"): some cells failed"
+      || failed_step "Retime $(basename "$script"): some cells failed"
   done
   for run in "$REPO_DIR"/experiments/data/runs/*-retime-*/; do
     [ -d "$run" ] || continue
     [ "$(run_state "$(basename "$run")")" = "raw" ] || continue
-    twx pack "$run" --remove || log "Pack $(basename "$run"): failed; uploading its cells"
+    twx pack "$run" --remove || failed_step "Pack $(basename "$run"): failed; uploading its cells"
   done
 fi
+# Every run this deployment claimed must end packed: one that is missing (its
+# command failed before creating it) or still raw is incomplete.
+while read -r rid; do
+  [ -n "$rid" ] || continue
+  state=$(run_state "$rid" < /dev/null)  # nothing in it may read the claims
+  [ "$state" = "packed" ] || failed_step "Run $rid: $state at the end of the boot, not packed"
+done < "$CLAIMS"
 
 # ---------------------------------------------------------------------------
 # Phase 8: Results
@@ -521,10 +535,19 @@ rm -rf "$RESULTS_DIR/runs" "$RESULTS_DIR/retime"
 cp -r "$REPO_DIR/experiments/data/runs" "$RESULTS_DIR/"
 cp "$SYSTEM_INFO" "$RESULTS_DIR/"
 [ -d "$REPO_DIR/experiments/data/retime" ] && cp -r "$REPO_DIR/experiments/data/retime" "$RESULTS_DIR/"
-# This boot's start retired any earlier marker, and a failure exits through fail(),
-# so reaching here is success.
-echo "$(date -Iseconds)" > "$RESULTS_DIR/DONE"
+# The boot's start retired any earlier marker. DONE only without a recorded
+# failure; otherwise ERROR names them, and the results are uploaded either way.
+if [ -z "$FAILURES" ]; then
+  echo "$(date -Iseconds)" > "$RESULTS_DIR/DONE"
+else
+  rm -f "$RESULTS_DIR/DONE"
+  echo "The runs finished with failures: $FAILURES" > "$RESULTS_DIR/ERROR"
+fi
 chown -R $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
 gcloud storage cp -r "$RESULTS_DIR/*" "$GCS_RESULTS_BASE/"
 log "Results uploaded to $GCS_RESULTS_BASE/"
+if [ -n "$FAILURES" ]; then
+  log "ERROR: $(cat "$RESULTS_DIR/ERROR")"
+  exit 1
+fi
 log "===== ALL PHASES COMPLETE ====="

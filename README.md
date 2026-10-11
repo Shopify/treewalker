@@ -433,7 +433,9 @@ margins, and both orderings' outputs with the cell's GTIL reference
 (`experiments/benchmarks/src/precision.rs`, `docs/treelite-loading.md`).
 
 `check-run` exits non-zero when a validity gate fails, and fails closed: the
-run's tables missing, a failed cell or sentinel attempt, a cell whose stage oracle
+run's tables missing, a failed cell or sentinel attempt that no later attempt of
+the same cell or sentinel resolved (resolved failures stay in the data and are
+listed), a cell whose stage oracle
 did not pass, a required method not timed, a timed interface without a passing
 check on the timed rows, process 0's samples not covering the timed groups in
 every round, or a forest whose `exact_sums` differs from the run's, which the
@@ -459,21 +461,26 @@ wider than ±2% of the ratio. It checks the manifest against the run's record
 (suite, libraries, artifacts, source, settings, cell keys), and writes manifests
 that time those cells again with twice the rounds, with a script per manifest
 that runs it as the campaign does (`treewalker-exp retime-run`: core 0, the PMU
-required, the system facts recorded) into a run of its own, `RUN-retime-rN-ARCH`.
+required, the system facts recorded, and refused on any VM but the parent run's)
+into a run of its own, `RUN-retime-rN-ARCH`.
 The analysis checks each attempt against its parent and reports each cell's
 longer attempt; both stay in the data.
 
 A campaign VM that stops is restarted by hand (`automatic_restart` is off), and
 `startup.sh` then picks up where it was. It records every run it launches in
-`~bench/runs-claimed.txt`; on a restart a claimed run that is still raw resumes by
-run ID, one already packed is skipped (never timed again, no sentinel appended,
-not packed twice), and a packed directory that also holds raw cells, or an
-incomplete pack, stops the boot with nothing deleted (`treewalker-exp run-state`
-names the state). An existing directory this deployment never claimed is refused,
-and `run` and `retime-run` refuse a packed run directory themselves. A new boot
-moves the previous boot's `DONE` or `ERROR` into the results' `MARKER_HISTORY` and
-out of the bucket, so `check_done` reads `RUNNING` until the boot ends with `DONE`,
-or with `ERROR` from whatever failed.
+`~bench/runs-claimed.txt`; on a restart a claimed run resumes by run ID while it
+is raw, whether or not an invocation of the runner on it finished (a run none
+finished, `partial`, is never packed), one already packed is skipped (never timed
+again, no sentinel appended, not packed twice), and a packed directory that also
+holds raw cells, or an incomplete pack, stops the boot with nothing deleted
+(`treewalker-exp run-state` names the state). An existing directory this
+deployment never claimed is refused, and `run` and `retime-run` refuse a packed
+run directory themselves. A new boot moves the previous boot's `DONE` or `ERROR`
+into the results' `MARKER_HISTORY` and out of the bucket, so `check_done` reads
+`RUNNING` until the boot ends. It ends with `DONE` only if nothing failed: a run
+with failed cells, a pack or re-time error, or a claimed run not packed at the end
+is recorded, the later runs still go, the results are uploaded, and the boot ends
+with `ERROR` naming each failure.
 
 On the campaign's VMs re-timing happens on its own: with `retime = true`
 (`infra/camera-ready.tfvars`), `startup.sh` packs the suites, runs `retime` for

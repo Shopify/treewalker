@@ -218,6 +218,9 @@ def test_a_run_directory_state_for_a_restart(tmp_path):
     assert pack.run_state(runs / "nothing") == "absent"
     (runs / "camera-ready-x86_64").mkdir(parents=True)
     run = write_run(runs / "camera-ready-x86_64")
+    # No invocation of the runner finished (run.json records none): resumed, never packed.
+    assert pack.run_state(run) == "partial"
+    fm.write_json(run / "run.json", {"invocations": [{"cells_done": [], "finished": 1}]})
     assert pack.run_state(run) == "raw"
     (run / "sentinel" / "001" / "failed").mkdir(parents=True)  # a failed attempt pack keeps
     (run / "cells" / ".tmp-unfinished").mkdir()  # an unfinished cell pack keeps

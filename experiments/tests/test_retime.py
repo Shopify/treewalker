@@ -408,3 +408,39 @@ def test_dispositions_are_rendered_and_counted(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "warning: re-timing on intel: 1 (cell, mode) pairs refused;" in err
     assert "arm" not in err
+
+
+def test_retime_run_refuses_another_vm_before_timing(tmp_path, monkeypatch):
+    import typer
+
+    from treewalker_exp import bench, cli
+    from treewalker_exp.paths import Paths
+
+    repo = tmp_path / "repo"
+    parent = repo / "experiments" / "data" / "runs" / "camera-ready-x86_64"
+    parent.mkdir(parents=True)
+    vm = {"instance_id": "vm-1", "hostname": "h1"}
+    fm.write_json(parent / "run.json", {"binary_sha256": "b", "system_info": vm})
+    monkeypatch.setattr(cli, "_paths", lambda: Paths(repo))
+
+    def build(*args, **kwargs):
+        raise RuntimeError("built")
+
+    monkeypatch.setattr(bench, "build", build)
+    info = tmp_path / "system_info.json"
+
+    def attempt():
+        cli.retime_run(
+            tmp_path / "m.json",
+            run_id="camera-ready-retime-r8-x86_64",
+            system_info=info,
+            parent="camera-ready-x86_64",
+        )
+
+    for here in ({}, {"instance_id": "vm-2", "hostname": "h2"}):
+        fm.write_json(info, here)
+        with pytest.raises(typer.BadParameter, match="only on the parent run's VM"):
+            attempt()
+    fm.write_json(info, vm)
+    with pytest.raises(RuntimeError, match="built"):  # past the check, to the build
+        attempt()

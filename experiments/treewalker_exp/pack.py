@@ -97,11 +97,14 @@ def is_packed(run_dir: Path) -> bool:
 
 
 def run_state(run_dir: Path) -> str:
-    """A run directory's state on a restart: ``absent``; ``raw``, cells the runner
-    can resume; ``packed``, completely packed (`is_packed`) with no raw cell left;
-    or ``mixed``, packed tables beside raw cells of a later run, or tables without
-    the cells.json that completes a pack. Unfinished cells (names starting with a
-    dot) and failed sentinel attempts, which pack keeps, are not raw."""
+    """A run directory's state on a restart: ``absent``; ``partial``, no invocation
+    of the runner on it has run to its end (``run.json`` records none), so it is
+    resumed and never packed; ``raw``, an invocation finished, so its cells can be
+    packed (or resumed, which retries any failed cell); ``packed``, completely
+    packed (`is_packed`) with no raw cell left; or ``mixed``, packed tables beside
+    raw cells of a later run, or tables without the cells.json that completes a
+    pack. Unfinished cells (names starting with a dot) and failed sentinel
+    attempts, which pack keeps, are not raw cells."""
     if not run_dir.exists():
         return "absent"
 
@@ -116,7 +119,10 @@ def run_state(run_dir: Path) -> str:
         return "packed"
     if is_packed(run_dir) or tables:
         return "mixed"
-    return "raw"
+    info = run_dir / "run.json"
+    # The runner appends an invocation record only when the invocation ends.
+    ended = info.exists() and bool(fm.read_json(info).get("invocations"))
+    return "raw" if ended else "partial"
 
 
 # The first line of a git-lfs pointer file, which a checkout without `git lfs pull`
