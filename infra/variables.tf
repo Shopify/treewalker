@@ -11,9 +11,15 @@ variable "zone" {
 
 variable "git_ref" {
   # No default: the startup script needs experiments/ and treewalker-exp, which
-  # the neurips2026 tag predates. Pass a ref that contains them.
-  description = "Git branch, tag, or SHA to benchmark; it must contain experiments/ and treewalker-exp"
+  # the neurips2026 tag predates. A full commit SHA only: the source archive, the
+  # VMs and the model hand-over are named after it, so a branch that moves would
+  # keep the old source, and a branch name's slash breaks the hand-over marker.
+  description = "Full 40-character commit SHA to benchmark (git rev-parse HEAD); it must contain experiments/ and treewalker-exp"
   type        = string
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.git_ref))
+    error_message = "git_ref must be a full 40-character lowercase commit SHA, e.g. $(git rev-parse HEAD), not a branch or tag."
+  }
 }
 
 variable "suites" {
@@ -53,9 +59,13 @@ variable "diagnostic" {
 }
 
 variable "gate_ref" {
-  description = "A candidate ref for the kernel gate: instead of the suites' runs, time TreeWalker built from git_ref (A) and from this ref (B) in alternating processes, with default and 64-byte function alignment; empty for none"
+  description = "A candidate commit (full 40-character SHA) for the kernel gate: instead of the suites' runs, time TreeWalker built from git_ref (A) and from this commit (B) in alternating processes, with default and 64-byte function alignment; empty for none"
   type        = string
   default     = ""
+  validation {
+    condition     = var.gate_ref == "" || can(regex("^[0-9a-f]{40}$", var.gate_ref))
+    error_message = "gate_ref must be empty or a full 40-character lowercase commit SHA, not a branch or tag."
+  }
 }
 
 variable "compile_only" {

@@ -250,8 +250,8 @@ measurements (the `neurips2026` tag) ran on the same machine types in
 ```bash
 cd infra
 terraform init
-terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var 'suites=["acceptance"]' -var layout_check=true
-terraform apply -var project=YOUR_PROJECT -var git_ref=REF      # factorial and ablation
+terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse HEAD) -var 'suites=["acceptance"]' -var layout_check=true
+terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse HEAD)      # factorial and ablation
 ```
 
 With `-var cache_bucket=NAME`, an existing bucket keeps the prepared models and each
@@ -268,7 +268,9 @@ baselines, stay the same across deployments.
 Suites with Expedia cells need `experiments/data/expedia.parquet` from
 `treewalker-exp fetch-expedia`; Terraform uploads it for the trainer VM, which checks its
 fingerprint before training. Terraform uploads `git archive` of `var.git_ref`
-to a new bucket. The ref has no default: it must contain `experiments/` and
+to a new bucket. `git_ref` is a full 40-character commit SHA, which Terraform
+checks: the archive, the VMs and the model hand-over are named after it, so a
+moving branch would keep the old source. It has no default: it must contain `experiments/` and
 `treewalker-exp`, which the `neurips2026` tag predates. The Intel VM trains the models and shares them, so both machines
 evaluate identical models, checked by hash. Results land in the bucket under
 `results/`.
@@ -405,8 +407,8 @@ run with `--set exact_sums=false`:
 
 ```bash
 cd infra
-terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var 'suites=["acceptance"]' -var layout_check=true -var 'run_settings=["exact_sums=false"]'
-terraform apply -var project=YOUR_PROJECT -var git_ref=REF -var-file=camera-ready.tfvars
+terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse HEAD) -var 'suites=["acceptance"]' -var layout_check=true -var 'run_settings=["exact_sums=false"]'
+terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse HEAD) -var-file=camera-ready.tfvars
 ```
 
 The runs land as `camera-ready-ARCH`, `camera-ready-ablation-1-ARCH`,
