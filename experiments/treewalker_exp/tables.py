@@ -5,9 +5,24 @@
   FLCHAIN, LightGBM, from the ablation's counters.
 - Tables 3 and 10 (`scenario_credit_<machine>.md`): v1's summarize_scenario.py,
   the credit what-if at T=500, L=8, LightGBM, over k and G. Its trace-evaluator
-  columns (trace ratio, the (d_v+1)/(d+1) prediction, d_v) are dropped: the final
-  run records the trace evaluator's counters only in the ablation suite, which has
-  no what-if cell (the user's decision, 2026-10-08).
+  columns (trace ratio, the (d_v+1)/L prediction, d_v) come from the
+  ``disable_varying_precompute`` variant's counters, which the camera-ready
+  scenario-v1 suite records; the final run has them only in the ablation suite,
+  which has no what-if cell, so its tables drop them (the user's decision,
+  2026-10-08).
+- App. A.4 (`retime_<machine>.md`): every re-timed cell and mode, its attempts,
+  the one reported, and why an attempt was refused.
+- `ablation_effects.md`: every switch's effect at the ablation's anchors per
+  machine, framework and ablation run, with the range between the runs.
+- App. D (`quickscorer_filled_<machine>.md`): the QuickScorer head-to-head on
+  expedia-filled, a new comparison on an encoded dataset that replaces the
+  withdrawn Table 9: every eligible cell, QuickScorer timed or why not, and the
+  latencies and speedup where its outputs validated.
+- App. A.5 (`tl2cgen_defect_<machine>.md`): the cells where tl2cgen's f64 aliasing
+  defect (in float64 models its Entry union reads a value whose low 32 bits
+  are all ones as the int missing marker) affects rows, from each cell's
+  validation checks: rows the defect can affect, those that differ, and the
+  largest error. tl2cgen is timed as shipped.
 """
 
 from __future__ import annotations
@@ -19,6 +34,7 @@ from typing import Any
 import polars as pl
 
 from . import figures, results
+from . import formats as fm
 
 HORIZONS = (4, 16, 64, 128)
 
@@ -72,10 +88,11 @@ Figure~\ref{{fig:asymptotic-convergence}} visualizes the same data.}}
 
 def scenario_table(factorial: Any, work: Any, arch: str) -> str:
     """The credit what-if at T=500, L=8 (LightGBM), per k and G: TreeWalker's and
-    the full walk's p50 per group, the speedup with its interval, and the default
-    evaluator's work ratio."""
+    the full walk's latency per group, the speedup with its interval, and the default
+    evaluator's work ratio. ``factorial`` holds the what-if cells: the final run's
+    whatif-v2 on credit, or the camera-ready campaign's scenario-v1 run."""
     sel = (
-        (pl.col("dataset") == "credit")
+        pl.col("dataset").is_in(["credit", "scenario_credit"])
         & (pl.col("framework") == "lightgbm")
         & (pl.col("T") == 500)
         & (pl.col("L") == 8)
@@ -89,20 +106,39 @@ def scenario_table(factorial: Any, work: Any, arch: str) -> str:
         r["cell"]: r
         for r in work.filter(sel & (pl.col("variant") == "all-on")).iter_rows(named=True)
     }
+    trace = {
+        r["cell"]: r
+        for r in work.filter(sel & (pl.col("variant") == "disable_varying_precompute")).iter_rows(
+            named=True
+        )
+    }
     lines = [
         f"# Credit what-if summary ({arch})",
         "",
         "Dataset: UCI Default of Credit Card Clients (OpenML 42477). Model: LightGBM T=500, "
-        "L=8. Each cell: G scenarios for each base row, k perturbed features. Speedup: the "
-        "full walk's time per row over TreeWalker's, row-weighted, with its 95% bootstrap "
-        "interval. Work ratio: TreeWalker's work per group under the default (precompute) "
-        "evaluator over G*T*L (asymptote 1/L). The trace evaluator's columns of v1 are not "
-        "recorded for these cells.",
+        "L=8. Each cell: G scenarios for each base row, k perturbed features. Latency: the "
+        "median over blocks of each block's median time per group. Speedup: the full walk's "
+        "latency over TreeWalker's, with its 95% bootstrap interval (entities and rounds "
+        "resampled, paired). Work ratio: TreeWalker's work per group under the default "
+        "(precompute) evaluator over G*T*L (asymptote 1/L)."
+        + (
+            ""
+            if trace
+            else " The trace evaluator's columns of v1 are not recorded for these cells."
+        ),
         "",
-        "| k | G | TW p50 us/group | full walk p50 us/group | speedup | 95% interval "
-        "| work ratio |",
-        "|---:|---:|---:|---:|---:|---:|---:|",
+        "| k | G | TW latency us/group | full walk latency us/group | speedup | 95% interval "
+        "| work ratio |" + (" trace ratio | predicted (d_v+1)/L | d_v |" if trace else ""),
+        "|---:|---:|---:|---:|---:|---:|---:|" + ("---:|---:|---:|" if trace else ""),
     ]
+    if trace:
+        lines[4:4] = [
+            "Trace ratio: the trace evaluator's work per group (partition row evaluations "
+            "for the predicate work) over G*T*L; predicted: (d_v+1)/L, Corollary 1's trace "
+            "asymptote under the same G*T*L baseline (L = 8); d_v: "
+            "partition row evaluations over G*T per group.",
+            "",
+        ]
     for cell in sorted(tw, key=lambda c: (results.design(c)["k"], results.design(c)["G"])):
         k, g = tw[cell]["k"], tw[cell]["G"]
         f = fw[cell]
@@ -113,21 +149,308 @@ def scenario_table(factorial: Any, work: Any, arch: str) -> str:
                 "groups"
             ] + (c["rows"] / c["groups"]) * 500
             ratio = f"{total / ((c['rows'] / c['groups']) * 500 * 8):.3f}"
+        extra = ""
+        if trace:
+            t = trace.get(cell)
+            extra = " n/a | n/a | n/a |"
+            if t is not None:
+                gt = t["rows"] / t["groups"] * 500
+                work_t = (t["constant_steps"] + t["varying_splits"] + t["partition_row_evals"]) / t[
+                    "groups"
+                ] + gt
+                d_v = t["partition_row_evals"] / (gt * t["groups"])
+                extra = f" {work_t / (gt * 8):.3f} | {(d_v + 1) / 8:.3f} | {d_v:.2f} |"
         lines.append(
-            f"| {k} | {g} | {tw[cell]['p50_us']:.2f} | {f['p50_us']:.2f} | {f['speedup']:.2f}x | "
-            f"[{f['lo']:.2f}, {f['hi']:.2f}] | {ratio} |"
+            f"| {k} | {g} | {tw[cell]['latency_us']:.2f} | {f['latency_us']:.2f} | "
+            f"{f['speedup']:.2f}x | "
+            f"[{f['lo']:.2f}, {f['hi']:.2f}] | {ratio} |{extra}"
         )
     return "\n".join(lines) + "\n"
 
 
-def generate(runs: Path, out: Path) -> None:
+TL2CGEN_DEFECT = "tl2cgen-f64-missing-alias"
+
+
+def tl2cgen_defect(manifests: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per cell whose tl2cgen checks attribute rows to the aliasing defect: the rows
+    it can affect, the rows that differ and the largest error, the most over the
+    cell's checks (interfaces and modes), and the rows validated; by cell ID."""
+    out = []
+    for cell, m in sorted(manifests.items()):
+        hits = [
+            (c["defect"], c["rows"])
+            for c in m.get("validation", {}).get("checks", [])
+            if c.get("method") == "tl2cgen"
+            and (c.get("defect") or {}).get("name", "").startswith(TL2CGEN_DEFECT)
+        ]
+        if not hits or max(d["affected_rows"] for d, _ in hits) == 0:
+            continue
+        out.append(
+            {
+                "cell": cell,
+                "affected_rows": max(d["affected_rows"] for d, _ in hits),
+                "differing_rows": max(d["affected_differ"] for d, _ in hits),
+                "largest_error": max(d["affected_max_abs"] for d, _ in hits),
+                "rows": max(n for _, n in hits),
+            }
+        )
+    return out
+
+
+def paper_cell(cell: str) -> bool:
+    """One of the paper's 544 cells per machine (v1's grid): a survival panel at
+    horizons 1-128 or an Expedia session cell, without seed replicates."""
+    try:
+        d = results.design(cell)
+    except ValueError:
+        return False
+    return d["family"] in ("panel", "sessions") and d["replicate"] is None
+
+
+def tl2cgen_defect_table(manifests: dict[str, Any], arch: str) -> str:
+    """App. A.5's table (`tl2cgen_defect`) as Markdown. The defect exists only in
+    float64 models, so the denominator is the cells whose tl2cgen ran a float64
+    model (LightGBM's); the paper's 544 cells (`paper_cell`) are marked."""
+    rows = tl2cgen_defect(manifests)
+    f64 = [
+        cell
+        for cell, m in manifests.items()
+        if any(
+            x.get("method") == "tl2cgen" and x.get("precision") == "F64"
+            for x in m.get("methods") or []
+        )
+    ]
+    paper_f64 = sum(paper_cell(c) for c in f64)
+    paper_hit = sum(paper_cell(r["cell"]) for r in rows)
+    lines = [
+        f"# tl2cgen's f64 aliasing defect ({arch})",
+        "",
+        "tl2cgen's generated code reads each feature through a union { int missing; double "
+        "fvalue; } and tests missing != -1, so in a float64-threshold model a non-NaN value "
+        "whose low 32 bits are all ones is read as missing and takes the default direction. "
+        "Validation marks the rows holding such a value from their inputs alone (affected "
+        "rows) and compares them apart (differing rows, largest absolute error); every other "
+        "row passes as usual. tl2cgen is timed as shipped.",
+        "",
+        f"{len(rows)} of the {len(f64)} cells where tl2cgen ran a float64 (LightGBM) model hold "
+        f"affected rows; {paper_hit} of them are among the paper's cells ({paper_f64} LightGBM "
+        "cells of its 544 per machine), marked *.",
+        "",
+        "| cell | rows validated | affected rows | differing rows | largest error |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for r in rows:
+        mark = " *" if paper_cell(r["cell"]) else ""
+        lines.append(
+            f"| {r['cell']}{mark} | {r['rows']} | {r['affected_rows']} | {r['differing_rows']} | "
+            f"{r['largest_error']:.3g} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def ablation_effects_table(effects: Any) -> str:
+    """Each switch's effect at every ablation anchor, per machine, framework and
+    ablation run, and the range between the runs (`figures.ablation_spread`), as
+    Markdown: the repeatability the second ablation run measures."""
+    spread = figures.ablation_spread(effects)
+    runs = sorted(set(effects["run"].to_list()))
+    lines = [
+        "# Ablation effects by run",
+        "",
+        "Effect: the research build's latency with the switch over its latency without it "
+        "(monotonic: against the precompute off), minus one, in %, per ablation run (-: the "
+        "run has no such measurement). Between runs: the largest minus the smallest effect "
+        "over the runs that measured the row, in percentage points, only where at least two "
+        "did; it measures run-to-run repeatability and is not pooled with the frameworks' "
+        "spread.",
+        "",
+    ]
+    order = {f: i for i, (f, _, _) in enumerate(figures.FLAGS)}
+    for arch in sorted({x["arch"] for x in spread}):
+        a = [x for x in spread if x["arch"] == arch]
+        ranges = [x["between_runs_pp"] for x in a if x["between_runs_pp"] is not None]
+        head = (
+            f"between-run range up to {max(ranges):.1f} pp"
+            if ranges
+            else "no row with two runs, no between-run range"
+        )
+        lines += [
+            f"## {arch}: {head}",
+            "",
+            "| anchor | switch | framework | " + " | ".join(runs) + " | between runs (pp) |",
+            "|---|---|---|" + "---:|" * (len(runs) + 1),
+        ]
+        for row in sorted(a, key=lambda x: (x["ds"], order[x["flag"]], x["framework"])):
+            vals = " | ".join(
+                f"{100 * (row['by_run'][run] - 1):+.1f}" if run in row["by_run"] else "-"
+                for run in runs
+            )
+            pp = row["between_runs_pp"]
+            lines.append(
+                f"| {row['ds']} | {row['flag']} | {row['framework']} | {vals} | "
+                f"{'-' if pp is None else format(pp, '.1f')} |"
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
+def campaign_runs(c: results.Campaign) -> list[str]:
+    """The run IDs (without the machine) a campaign's numbers read."""
+    return [c.factorial, *c.ablation, *([c.scenario] if c.scenario else [])]
+
+
+def retime_table(runs: Path, c: results.Campaign, arch: str) -> str:
+    """Every re-timed (cell, mode) of the campaign's runs on ``arch``
+    (`retime.dispositions`): the parent and each attempt with its rounds, the
+    attempt selected, and why an attempt was refused, for App. A.4's disclosure;
+    one line per run without any."""
+    from . import retime
+
+    lines = [
+        f"# Re-timed cells ({arch})",
+        "",
+        "A cell and mode whose speedup or ablation-effect interval was wider than ±2% was "
+        "timed once more with twice the rounds, into a run of its own; the longer accepted "
+        "attempt is reported. An attempt that did not run the parent's program and protocol "
+        "on the parent's VM is refused and its parent reported.",
+        "",
+    ]
+    for run in campaign_runs(c):
+        if not results.run_dir(runs, run, arch).exists():
+            continue
+        rows = retime.dispositions(runs, run, arch)
+        lines.append(f"## {run}")
+        lines.append("")
+        if not rows:
+            lines += ["No re-timed cell.", ""]
+            continue
+        lines += [
+            "| cell | mode | parent (rounds) | attempts (rounds, status) | selected | note |",
+            "|---|---|---|---|---|---|",
+        ]
+        for r in rows:
+            tries = "; ".join(f"{a['run']} ({a['rounds']}, {a['status']})" for a in r["attempts"])
+            notes = "; ".join(a["note"] for a in r["attempts"] if a["note"]) or "-"
+            lines.append(
+                f"| {r['cell']} | {r['mode']} | {r['parent'][0]} ({r['parent'][1]}) | {tries} | "
+                f"{r['selected']} | {notes} |"
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
+QS_LABEL = (
+    "A new comparison on an encoded dataset, not a corrected value for the submitted "
+    "Table 9, which is withdrawn: expedia-filled is Expedia with every missing value "
+    "encoded below its column's minimum, which QuickScorer (it sends every missing value "
+    "left) can take; the encoding does not guarantee the same function, so only cells "
+    "whose QuickScorer outputs validated are timed."
+)
+
+
+def quickscorer_filled(df: Any, cells: dict[str, Any], arch: str) -> list[dict[str, Any]]:
+    """The expedia-filled head-to-head on ``arch``: every eligible cell (each
+    expedia-filled cell of the run), its QuickScorer input (``xml``, the converted
+    XGBoost model, or ``direct``), whether QuickScorer was timed or why it was
+    excluded, and where timed, TreeWalker's and QuickScorer's latencies (us per
+    group) and QuickScorer's latency over TreeWalker's with its interval. ``df`` is
+    `results.speedups` of the run, ``cells`` its ``cells.json``."""
+    serving = df.filter((pl.col("arch") == arch) & (pl.col("mode") == "serving"))
+    rows = {
+        (r["cell"], r["method"]): r
+        for r in serving.filter(
+            pl.col("method").is_in(["treewalker", "quickscorer"])
+            & pl.col("variant").is_in(["all-on", "-"])
+        ).iter_rows(named=True)
+    }
+    out = []
+    for cell in sorted(c for c in cells if c.startswith("expedia-filled/")):
+        m, d = cells[cell], results.design(cell)
+        qs = ((m.get("cell") or {}).get("baselines") or {}).get("quickscorer") or {}
+        why = [e["reason"] for e in m.get("excluded", []) if e["method"] == "quickscorer"]
+        tw, q = rows.get((cell, "treewalker")), rows.get((cell, "quickscorer"))
+        out.append(
+            {
+                "cell": cell,
+                "framework": d["framework"],
+                "T": d["T"],
+                "L": d["L"],
+                "input": (qs.get("effective") or {}).get("format", "direct"),
+                "status": "timed" if q is not None else "excluded: " + "; ".join(why or ["-"]),
+                "tw_us": None if tw is None else tw["latency_us"],
+                "qs_us": None if q is None else q["latency_us"],
+                "speedup": None if q is None else q["speedup"],
+                "lo": None if q is None else q["lo"],
+                "hi": None if q is None else q["hi"],
+            }
+        )
+    return out
+
+
+def quickscorer_filled_table(rows: list[dict[str, Any]], arch: str) -> str:
+    """`quickscorer_filled` as Markdown, with its coverage."""
+    timed = [r for r in rows if r["status"] == "timed"]
+
+    def by_fw(rs: list[dict[str, Any]]) -> str:
+        return ", ".join(
+            f"{sum(r['framework'] == fw for r in rs)} {fw}" for fw in ("lightgbm", "xgboost")
+        )
+
+    lines = [
+        f"# QuickScorer head-to-head on expedia-filled ({arch})",
+        "",
+        QS_LABEL,
+        "",
+        f"Eligible: {len(rows)} cells ({by_fw(rows)}); timed: {len(timed)} ({by_fw(timed)}); "
+        f"TreeWalker faster in {sum(r['speedup'] > 1 for r in timed)} of the timed (within "
+        f"±2%: {results.within([r['speedup'] for r in timed])}). Speedup: "
+        "QuickScorer's latency over TreeWalker's (the median over blocks of block medians "
+        "per group), with its 95% paired interval.",
+        "",
+        "| framework | T | L | QuickScorer input | status | TreeWalker us | QuickScorer us "
+        "| speedup | 95% interval |",
+        "|---|---:|---:|---|---|---:|---:|---:|---|",
+    ]
+    for r in sorted(rows, key=lambda x: (x["framework"], x["T"], x["L"])):
+        if r["status"] == "timed":
+            nums = (
+                f"{r['tw_us']:.2f} | {r['qs_us']:.2f} | {r['speedup']:.2f}x | "
+                f"[{r['lo']:.2f}, {r['hi']:.2f}]"
+            )
+        else:
+            nums = "- | - | - | -"
+        lines.append(
+            f"| {r['framework']} | {r['T']} | {r['L']} | {r['input']} | {r['status']} | {nums} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def generate(runs: Path, out: Path, campaign: results.Campaign | None = None) -> None:
+    c = campaign or results.CAMPAIGNS["final"]
     out.mkdir(parents=True, exist_ok=True)
     (out / "decomposition_table.tex").write_text(
-        decomposition_table(results.work(runs, "ablation"))
+        decomposition_table(results.work(runs, c.ablation[0]))
     )
     print("  decomposition_table.tex", file=sys.stderr)
-    factorial = results.speedups(runs, "factorial")
-    work = results.work(runs, "factorial")
+    ablation = pl.concat(
+        [results.speedups(runs, run) for run in c.ablation], how="diagonal_relaxed"
+    )
+    (out / "ablation_effects.md").write_text(
+        ablation_effects_table(figures.ablation_effects(ablation))
+    )
+    print("  ablation_effects.md", file=sys.stderr)
+    main = results.speedups(runs, c.factorial)
+    whatif = c.scenario or c.factorial
+    factorial = main if whatif == c.factorial else results.speedups(runs, whatif)
+    work = results.work(runs, whatif)
     for arch in results.MACHINES:
         (out / f"scenario_credit_{arch}.md").write_text(scenario_table(factorial, work, arch))
         print(f"  scenario_credit_{arch}.md", file=sys.stderr)
+        cells = fm.read_json(results.run_dir(runs, c.factorial, arch) / "cells.json")
+        (out / f"tl2cgen_defect_{arch}.md").write_text(tl2cgen_defect_table(cells, arch))
+        print(f"  tl2cgen_defect_{arch}.md", file=sys.stderr)
+        (out / f"retime_{arch}.md").write_text(retime_table(runs, c, arch))
+        print(f"  retime_{arch}.md", file=sys.stderr)
+        qs = quickscorer_filled(main, cells, arch)
+        (out / f"quickscorer_filled_{arch}.md").write_text(quickscorer_filled_table(qs, arch))
+        print(f"  quickscorer_filled_{arch}.md", file=sys.stderr)

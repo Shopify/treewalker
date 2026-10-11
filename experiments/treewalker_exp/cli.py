@@ -411,17 +411,33 @@ def pack(
             print(line, flush=True)
 
 
+CAMPAIGN = typer.Option(
+    help="The runs to read: final (factorial-, ablation-ARCH) or camera-ready "
+    "(camera-ready-, camera-ready-ablation-1/-2-, scenario-v1-ARCH). Default: camera-ready "
+    "where its runs exist, else final."
+)
+
+
+def _campaign(paths, name: str | None):
+    from . import results
+
+    c = results.campaign(paths.runs, name)
+    print(f"campaign {c.name}", file=sys.stderr)
+    return c
+
+
 @app.command()
 def figures(
     out: Annotated[
         Path | None, typer.Option(help="Output directory (experiments/figures).")
     ] = None,
+    campaign: Annotated[str | None, CAMPAIGN] = None,
 ) -> None:
-    """The paper's figures from the final runs: PNG and PDF, and the heatmap as TikZ."""
+    """The paper's figures from a campaign's runs: PNG and PDF, and the heatmap as TikZ."""
     from . import figures as fg
 
     paths = _paths()
-    fg.generate(paths.runs, out or paths.figures)
+    fg.generate(paths.runs, out or paths.figures, _campaign(paths, campaign))
 
 
 @app.command()
@@ -429,12 +445,13 @@ def tables(
     out: Annotated[
         Path | None, typer.Option(help="Output directory (experiments/figures).")
     ] = None,
+    campaign: Annotated[str | None, CAMPAIGN] = None,
 ) -> None:
-    """The paper's tables from the final runs: Table 1 as TeX, Tables 3 and 10 as Markdown."""
+    """The paper's tables from a campaign's runs: Table 1 as TeX, Tables 3 and 10 as Markdown."""
     from . import tables as tb
 
     paths = _paths()
-    tb.generate(paths.runs, out or paths.figures)
+    tb.generate(paths.runs, out or paths.figures, _campaign(paths, campaign))
 
 
 @app.command()
@@ -442,12 +459,13 @@ def numbers(
     out: Annotated[
         Path | None, typer.Option(help="Output directory (experiments/figures).")
     ] = None,
+    campaign: Annotated[str | None, CAMPAIGN] = None,
 ) -> None:
-    """The paper's in-text numbers from the final runs, with their paper locations."""
+    """The paper's in-text numbers from a campaign's runs, with their paper locations."""
     from . import numbers as nb
 
     paths = _paths()
-    print("\n".join(nb.generate(paths.runs, out or paths.figures)))
+    print("\n".join(nb.generate(paths.runs, out or paths.figures, _campaign(paths, campaign))))
 
 
 @app.command("audit-f32")
@@ -458,22 +476,25 @@ def audit_f32(
     out: Annotated[
         Path | None, typer.Option(help="Output directory (experiments/figures).")
     ] = None,
+    suite: Annotated[
+        str, typer.Option(help="The suite whose cells and runs ({suite}-{arch}) to audit.")
+    ] = "factorial",
 ) -> None:
-    """App. A.3: native XGBoost's raw margins against the correctly rounded reference
-    (the stage oracle), one factorial cell per model; TreeWalker's side is the final
-    run's bit-for-bit oracle check."""
+    """App. A.3: TreeWalker's and native XGBoost's raw margins against the same f64
+    reference (the stage oracle), one cell per XGBoost model of the suite; TreeWalker's
+    are the runs' stages tables, native's are computed here."""
     from . import audit, grids
 
     paths = _paths()
     doc = grids.load(paths.grids)
     if list_missing:
-        print("\n".join(str(p) for p in audit.missing(paths.artifacts, doc)))
+        print("\n".join(str(p) for p in audit.missing(paths.artifacts, doc, suite)))
         return
-    lines = audit.report(paths.runs, paths.artifacts, doc)
+    lines = audit.report(paths.runs, paths.artifacts, doc, suite)
     target = out or paths.figures
     target.mkdir(parents=True, exist_ok=True)
     (target / "audit_f32.md").write_text("\n".join(lines) + "\n")
-    print("\n".join(lines[:9]))
+    print("\n".join(line for line in lines if not line.startswith("|")))
 
 
 @app.command()
@@ -482,10 +503,148 @@ def summarize(
     reference: Annotated[str, typer.Option(help="The method speedups are against.")] = "treewalker",
     boot: Annotated[int, typer.Option(help="Bootstrap replicates.")] = 1000,
 ) -> None:
-    """Per-group p50/p99, row-weighted speedups and one bootstrap interval each."""
+    """Per method and cell: the latency (median over blocks of block medians), its
+    p5-p95 over blocks, the speedup with its interval, and the row-weighted sensitivity."""
     from . import analysis
 
     print("\n".join(analysis.summarize(run_dir, reference, boot)))
+
+
+@app.command()
+def retime(
+    run: Annotated[str, typer.Argument(help="Run ID without the machine, e.g. camera-ready.")],
+    arch: Annotated[
+        str | None, typer.Option(help="intel or arm (default: this machine's).")
+    ] = None,
+    manifest: Annotated[
+        Path | None,
+        typer.Option(
+            help="The manifest this machine's run executed: <artifacts>/manifests/SUITE.json."
+        ),
+    ] = None,
+    threshold: Annotated[
+        float, typer.Option(help="Interval half-width, % of the ratio, above which to re-time.")
+    ] = 2.0,
+    out: Annotated[
+        Path | None, typer.Option(help="Where to write the manifests (experiments/data/retime).")
+    ] = None,
+) -> None:
+    """List every cell and mode of one machine's run whose speedup or ablation-effect
+    interval is wider than the threshold, and write manifests and scripts that re-time
+    them with twice the rounds, as the campaign runs, into runs of their own."""
+    import platform
+
+    from . import formats as fm
+    from . import results
+    from . import retime as rt
+
+    paths = _paths()
+    if arch is None:
+        here = platform.machine().replace("arm64", "aarch64")
+        arch = next((a for a, m in results.MACHINES.items() if m == here), None)
+    if arch not in results.MACHINES:
+        raise typer.BadParameter(f"--arch: one of {', '.join(results.MACHINES)}")
+    run_dir = results.run_dir(paths.runs, run, arch)
+    if not run_dir.exists():
+        raise typer.BadParameter(f"no run {run_dir}")
+    if manifest is None:
+        manifest = paths.manifests / f"{fm.read_json(run_dir / 'run.json')['suite']}.json"
+    target = out or paths.data / "retime"
+    try:
+        lines = rt.plan(paths.runs, run, arch, manifest, target, threshold)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
+    print("\n".join(lines))
+
+
+@app.command("retime-run")
+def retime_run(
+    manifest: Annotated[Path, typer.Argument(help="A re-time manifest from retime.")],
+    run_id: Annotated[str, typer.Option(help="Run directory name: RUN-retime-rN-ARCH.")],
+    core: Annotated[int | None, typer.Option(help="Pin to this core (taskset).")] = 0,
+    system_info: Annotated[
+        Path | None, typer.Option(help="JSON of host facts for run.json (image, turbo mode).")
+    ] = None,
+    require_pmu: Annotated[bool, typer.Option(help="Fail without hardware counters.")] = True,
+    rustflags: Annotated[str, typer.Option(help="RUSTFLAGS for sweep_bench.")] = (
+        "-C target-cpu=native"
+    ),
+    parent: Annotated[
+        str | None,
+        typer.Option(help="The run it re-times, RUN-ARCH (default: from the manifest)."),
+    ] = None,
+) -> None:
+    """Run a re-time manifest the way run runs a suite: pinned to core 0, the PMU
+    required, the system facts recorded, on the parent run's VM. The binary built
+    for the host must be the parent run's, by hash."""
+    import platform
+    import subprocess
+
+    from . import bench
+    from . import formats as fm
+
+    paths = _paths()
+    if parent is None:
+        doc = fm.read_json(manifest)
+        here = platform.machine().replace("arm64", "aarch64")
+        parent = f"{doc['retime']['of']}-{here}"
+    from . import pack
+
+    if pack.run_state(paths.runs / run_id) not in ("absent", "raw"):
+        raise typer.BadParameter(f"{paths.runs / run_id} is packed: a run is never resumed into")
+    want = fm.read_json(paths.runs / parent / "run.json").get("binary_sha256")
+    exe = bench.build(paths, rustflags=rustflags)
+    have = fm.sha256_file(exe)
+    if have != want:
+        raise typer.BadParameter(
+            f"{exe} has SHA-256 {have}, not {parent}'s {want}: the attempt would not run the "
+            "parent's program"
+        )
+    cmd = [str(exe), "run", str(manifest), "--output-dir", str(paths.runs / run_id)]
+    cmd += ["--system-info", str(system_info)] if system_info else []
+    cmd += ["--require-pmu"] if require_pmu else []
+    raise typer.Exit(subprocess.run(bench.pinned(cmd, core), check=False).returncode)
+
+
+@app.command("run-state")
+def run_state_cmd(
+    run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
+) -> None:
+    """Print a run directory's state for a restart: absent, raw (resumable), packed
+    (complete) or mixed (packed tables beside raw cells, or an incomplete pack)."""
+    from . import pack
+
+    print(pack.run_state(run_dir))
+
+
+@app.command("check-run")
+def check_run(
+    run_dirs: Annotated[
+        list[Path], typer.Argument(help="Packed runs: experiments/data/runs/<run_id>")
+    ],
+    released_e1: Annotated[
+        Path | None,
+        typer.Option(help="E1's released Intel CSV (default: from git, the neurips2026 tag)."),
+    ] = None,
+    exact_sums: Annotated[
+        str | None,
+        typer.Option(
+            help="The exact_sums every run must have, off or on (default: off for the "
+            "camera-ready suites, any elsewhere; the campaign's acceptance and layout runs "
+            "need --exact-sums off)."
+        ),
+    ] = None,
+) -> None:
+    """The checks before reading any result: validity gates, which exit non-zero
+    when one fails, and warnings, which only print."""
+    from . import check_run as cr
+
+    expect = {"off": False, "on": True, None: None}.get(exact_sums)
+    if exact_sums is not None and exact_sums not in ("off", "on"):
+        raise typer.BadParameter("--exact-sums: off or on")
+    lines, ok = cr.check(run_dirs, _paths().repo, released_e1, expect)
+    print("\n".join(lines))
+    raise typer.Exit(0 if ok else 1)
 
 
 def _run_id(suite: str) -> str:
@@ -553,6 +712,10 @@ def run(
         grids.run_config(doc, overrides)
     except ValueError as e:
         raise typer.BadParameter(str(e), param_hint="--set") from None
+    from . import pack
+
+    if run_id and len(suite) == 1 and pack.run_state(paths.runs / run_id) not in ("absent", "raw"):
+        raise typer.BadParameter(f"{paths.runs / run_id} is packed: a run is never resumed into")
     binary = bench.build(paths, rustflags=rustflags)
     failed = False
     for name in suite:

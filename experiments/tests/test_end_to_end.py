@@ -46,6 +46,7 @@ def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS) -> None:
     ).with_columns(
         pl.col("ticks").cast(pl.UInt64),
         rows=pl.lit(1, pl.UInt32),
+        n_groups=pl.lit(1, pl.UInt32),
         position=pl.lit(0, pl.UInt32),
     ).write_parquet(d / "samples.parquet")
     pl.DataFrame(
@@ -53,9 +54,9 @@ def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS) -> None:
         schema=["cell", "method", "variant", "mode", "process", "block", "instructions", "status"],
         orient="row",
     ).with_columns(pl.col("instructions").cast(pl.UInt64)).write_parquet(d / "hw.parquet")
-    pl.DataFrame({"cell": [cell] * 8, "group": range(8), "entity": range(8)}).write_parquet(
-        d / "groups.parquet"
-    )
+    pl.DataFrame(
+        {"cell": [cell] * 8, "group": range(8), "entity": range(8), "rows": 1, "timed": True}
+    ).write_parquet(d / "groups.parquet")
     pl.DataFrame({"cell": [cell] * 8, "group": range(8)}).write_parquet(d / "counters.parquet")
     stop = {"rounds": rounds, "blocks_per_round": BATCHES, "reason": "precision"}
     procs = [{"process": p, "mode": "serving", "status": "ok"} for p in range(CHILDREN + 1)]
@@ -72,6 +73,10 @@ def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS) -> None:
             "xgboost_processes": {"count": CHILDREN, "processes": procs},
             "seconds": 1.0,
             "model": {"trees": 50},
+            "methods": [
+                {"method": "treewalker", "variant": "all-on"},
+                {"method": "xgboost_native", "variant": "-"},
+            ],
             "cell": {"max_depth": 4},
         },
     )

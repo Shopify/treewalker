@@ -4,29 +4,37 @@ The runner writes each cell's tables under ``cells/<cell>/``: a cell is renamed 
 place when complete, and a resumed run skips the finished ones. Nothing needs that
 layout once the run is over. ``pack_run`` writes, beside ``run.json``:
 
-    samples.parquet  groups.parquet  counters.parquet  hw.parquet
+    samples.parquet  groups.parquet  counters.parquet  hw.parquet  stages.parquet
     cells.json                 every cell's manifest, by cell ID
     sentinel/<table>.parquet   the sentinel's cells, with a leading `sentinel` column
     sentinel/cells.json        their manifests, by attempt and cell ID
 
 Cells keep their directory order and rows their original order. Every packed table
 is read back, cast to the runner's types and compared with its cells before anything
-moves into place; ``remove`` then deletes the per-cell directories. The readers
-(summarize, validation-readout, budget) read packed runs only.
+moves into place. ``remove`` then deletes exactly the finished cell directories it
+packed, and each ``cells/`` or sentinel attempt directory left empty; anything else
+stays: an unfinished cell (``.tmp-*``), ``failed/`` diagnostics, a failed sentinel
+attempt. The readers (summarize, validation-readout, budget) read packed runs only.
 
 Types follow what a column can hold, not the largest value seen: strings are
 dictionary-typed (polars reads them as Categorical); small structural indices are
 uint16; indices and counts bounded by a cell's groups or a dataset's rows are
 uint32; ticks, hardware events and TreeWalker's counters stay uint64, since they can
 pass 2**32 (the final run's ticks reached 3.0e9); ``timed`` is a bool and ``entity``
-keeps the source's int64. Columns not named keep the runner's type. Narrowing casts
-are checked, so a value that does not fit fails the pack.
+keeps the source's int64; ``stages``' values stay float64. Columns not named keep
+the runner's type. Narrowing casts are checked, so a value that does not fit fails
+the pack.
+
+``stages`` (TreeWalker's tree sum, raw margin and output on each cell's stage-oracle
+rows) arrived with output schema 6 (``run.json``'s ``output_schema``). From schema 6
+on every cell, sentinel cells included, must hold it; a run from an older runner, or
+whose run.json records no schema, packs without it when none of its cells has one.
 
 Encodings, from a 10% sample of the final factorial: dictionary for strings and small
 categorical integers, DELTA_BINARY_PACKED for indices that increase within a cell,
-BYTE_STREAM_SPLIT for every other integer, zstd level 9 (level 15 saves about 5% more
-on samples). Against the runner's per-cell files (zstd 3, dictionary everywhere) the
-final run packed to 0.38x on both machines.
+BYTE_STREAM_SPLIT for every other integer and every float, zstd level 9 (level 15
+saves about 5% more on samples). Against the runner's per-cell files (zstd 3,
+dictionary everywhere) the final run packed to 0.38x on both machines.
 """
 
 from __future__ import annotations
@@ -39,7 +47,9 @@ from typing import Any
 
 from . import formats as fm
 
-TABLES = ("samples", "groups", "counters", "hw")
+TABLES = ("samples", "groups", "counters", "hw", "stages")
+# Tables an older output schema lacks, by the schema that introduced them.
+OPTIONAL = {"stages": 6}
 CELLS = "cells.json"
 SENTINEL = "sentinel"
 LEVEL = 9
@@ -68,6 +78,7 @@ TYPES: dict[str, dict[str, str]] = {
     },
     "counters": {"sentinel": "uint32", "group": "uint32", "counters_version": "uint32"},
     "hw": {**_SMALL, "sentinel": "uint32"},
+    "stages": {"sentinel": "uint32", "group": "uint32", "row": "uint32"},
 }
 NOT_NULL = frozenset({"sentinel"})
 DELTA = {
@@ -75,6 +86,7 @@ DELTA = {
     "groups": {"group", "first_row"},
     "counters": {"group"},
     "hw": set(),
+    "stages": {"group", "row"},
 }
 DICTIONARY_INTS = frozenset({*_SMALL, "n_groups", "counters_version", "sentinel"})
 
@@ -82,6 +94,29 @@ DICTIONARY_INTS = frozenset({*_SMALL, "n_groups", "counters_version", "sentinel"
 def is_packed(run_dir: Path) -> bool:
     """cells.json moves into place last, so it marks a complete pack."""
     return (run_dir / CELLS).exists()
+
+
+def run_state(run_dir: Path) -> str:
+    """A run directory's state on a restart: ``absent``; ``raw``, cells the runner
+    can resume; ``packed``, completely packed (`is_packed`) with no raw cell left;
+    or ``mixed``, packed tables beside raw cells of a later run, or tables without
+    the cells.json that completes a pack. Unfinished cells (names starting with a
+    dot) and failed sentinel attempts, which pack keeps, are not raw."""
+    if not run_dir.exists():
+        return "absent"
+
+    def finished(root: Path) -> bool:
+        d = root / "cells"
+        return d.is_dir() and any(p.is_dir() and not p.name.startswith(".") for p in d.iterdir())
+
+    attempts = [a for a in (run_dir / "sentinel").glob("[0-9]*") if a.is_dir()]
+    raw = finished(run_dir) or any(finished(a) for a in attempts)
+    tables = any((run_dir / f"{t}.parquet").exists() for t in TABLES)
+    if is_packed(run_dir) and not raw:
+        return "packed"
+    if is_packed(run_dir) or tables:
+        return "mixed"
+    return "raw"
 
 
 # The first line of a git-lfs pointer file, which a checkout without `git lfs pull`
@@ -124,7 +159,9 @@ def writer_options(schema: Any, table: str) -> dict[str, Any]:
     for f in schema:
         if pa.types.is_boolean(f.type):
             continue  # Parquet bit-packs booleans
-        if not pa.types.is_integer(f.type) or f.name in DICTIONARY_INTS:
+        if pa.types.is_floating(f.type):
+            encoding[f.name] = "BYTE_STREAM_SPLIT"
+        elif not pa.types.is_integer(f.type) or f.name in DICTIONARY_INTS:
             dictionary.append(f.name)
         elif f.name in DELTA[table]:
             encoding[f.name] = "DELTA_BINARY_PACKED"
@@ -140,11 +177,54 @@ def _cells(root: Path) -> list[Path]:
         return []
     cells = sorted(p for p in d.iterdir() if p.is_dir() and not p.name.startswith("."))
     for c in cells:
-        names = ("manifest.json", *(f"{t}.parquet" for t in TABLES))
+        names = ("manifest.json", *(f"{t}.parquet" for t in TABLES if t not in OPTIONAL))
         missing = [n for n in names if not (c / n).exists()]
         if missing:
             raise ValueError(f"{c} is not a finished cell: no {', '.join(missing)}")
     return cells
+
+
+def output_schema(run_dir: Path) -> int | None:
+    """The output schema ``run.json`` records, if any."""
+    path = Path(run_dir) / "run.json"
+    schema = fm.read_json(path).get("output_schema") if path.exists() else None
+    return int(schema) if schema is not None else None
+
+
+def _tables(sources: list[tuple[int | None, Path]], schema: int | None) -> list[str]:
+    """The tables to pack from ``sources``: every table the schema requires; an
+    optional one from before its schema only when every cell holds it. A missing
+    required table fails, and so does one that only some cells hold."""
+    out = []
+    for table in TABLES:
+        have = [(c / f"{table}.parquet").exists() for _, c in sources]
+        legacy = table in OPTIONAL and (schema is None or schema < OPTIONAL[table])
+        if legacy and not any(have):
+            continue
+        if not all(have):
+            lacking = [c for (_, c), h in zip(sources, have, strict=True) if not h]
+            why = "other cells do" if legacy else f"output schema {schema} requires it"
+            raise ValueError(f"{lacking[0]} has no {table}.parquet, {why}")
+        out.append(table)
+    return out
+
+
+def _remove(run_dir: Path, done: list[Path], attempts: list[Path]) -> str:
+    """Delete the packed cell directories ``done``, then ``cells/`` and each sentinel
+    attempt's ``cells/`` and directory when left empty; report what stays."""
+    for c in done:
+        shutil.rmtree(c)
+    roots = [run_dir / "cells", *attempts]
+    for d in [run_dir / "cells", *(a / "cells" for a in attempts), *attempts]:
+        if d.is_dir() and not any(d.iterdir()):
+            d.rmdir()
+    kept = [str(p.relative_to(run_dir)) for r in roots if r.is_dir() for p in sorted(r.rglob("*"))]
+    kept = [k for k in kept if not Path(run_dir, k).is_dir() or not any(Path(run_dir, k).iterdir())]
+    line = f"{run_dir.name}: removed {len(done)} packed cell directories"
+    if kept:
+        shown = ", ".join(kept[:10]) + (f", ... ({len(kept) - 10} more)" if len(kept) > 10 else "")
+        line += f"; kept {len(kept)} other files: {shown}"
+    return line
 
 
 def _attempts(run_dir: Path) -> list[Path]:
@@ -241,6 +321,7 @@ def pack_run(run_dir: Path, remove: bool = False, level: int = LEVEL) -> list[st
         raise ValueError(f"{run_dir} has no finished cells")
     groups: dict[str, list[tuple[int | None, Path]]] = {"": [(None, c) for c in cells]}
     groups[SENTINEL] = [(int(a.name), c) for a in attempts for c in _cells(a)]
+    schema = output_schema(run_dir)
 
     tmp = run_dir / _TMP
     shutil.rmtree(tmp, ignore_errors=True)  # an interrupted pack's
@@ -250,7 +331,7 @@ def pack_run(run_dir: Path, remove: bool = False, level: int = LEVEL) -> list[st
             if not sources:
                 continue
             (tmp / sub).mkdir(parents=True, exist_ok=True)
-            for table in TABLES:
+            for table in _tables(sources, schema):
                 t0 = time.monotonic()
                 dst = tmp / sub / f"{table}.parquet"
                 rows = _write(sources, table, dst, level)
@@ -285,10 +366,6 @@ def pack_run(run_dir: Path, remove: bool = False, level: int = LEVEL) -> list[st
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     if remove:
-        shutil.rmtree(run_dir / "cells")
-        for a in attempts:
-            shutil.rmtree(a)
-        lines.append(
-            f"{run_dir.name}: removed {len(cells)} cell and {len(attempts)} sentinel directories"
-        )
+        done = [c for sources in groups.values() for _, c in sources]
+        lines.append(_remove(run_dir, done, attempts))
     return lines

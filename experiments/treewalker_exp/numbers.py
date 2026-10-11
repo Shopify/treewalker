@@ -1,22 +1,29 @@
-"""The paper's in-text numbers, regenerated from the final runs (`results`).
+"""The paper's in-text numbers, regenerated from a campaign's runs (`results`).
 
 The same items as v1's paper_numbers.py (at the neurips2026 tag), in its order and
 with its paper locations, computed from the new runs and printed as new values only
-(the user's decision, 2026-10-08). The definitions follow the new estimands:
+(the user's decision, 2026-10-08). The definitions follow the camera-ready estimand
+(`estimand`):
 
-- an "algorithmic speedup" is the full walk's time over TreeWalker's, and a
-  baseline's speedup its time over TreeWalker's, row-weighted over the same groups
-  (v1: ratios of median latencies); XGBoost native is its headline (the faster
-  mode where it shows two). Each cell runs in a fresh process, so no method is
+- a latency is the median over blocks of each block's median time per group
+  (nearest rank, process 0); an "algorithmic speedup" is the full walk's latency
+  over TreeWalker's, and a baseline's speedup its latency over TreeWalker's (v1:
+  ratios of median latencies). XGBoost native is process 0, like every method; its
+  faster mode across the extra processes is a sensitivity item, as is the
+  row-weighted ratio. Each cell runs in a fresh process, so no method is
   corrected for drift; App. A.6 reports the sentinel's drift as a check;
-- a latency is the p50 per group;
 - "v1's cells" are the 544 per machine v1's grid had: survival panels at horizons
   1 to 128 and Expedia's sessions, T in {50, 500, 1000, 2000}, L in {2, 4, 8, 16}.
   Counts the paper gives over its grid (QuickScorer's coverage, §6's boundary
-  cases) are reported over v1's cells and over the whole factorial (1,134 cells);
-- Table 3's trace-evaluator columns are dropped (`tables`); Table 11 compares the
+  cases) are reported over v1's cells and over the whole factorial suite;
+- Table 3's trace-evaluator columns come from scenario-v1's trace variant in the
+  camera-ready campaign and are absent from the final run's (`tables`); Table 11 compares the
   128-row chunks with whole groups at G = 256, 512 and 1024; App. A.6 reports the
-  stopping rules and the intervals' half-widths instead of v1's CV estimate.
+  stopping rules and the intervals' half-widths instead of v1's CV estimate;
+- the campaign (`results.CAMPAIGNS`) picks the runs: the final run's factorial,
+  ablation and what-if (whatif-v2) cells, or the camera-ready rerun's suite, its
+  two ablation runs (effects with their spread between the runs) and E1's
+  released scenario cells (scenario-v1).
 """
 
 from __future__ import annotations
@@ -31,7 +38,7 @@ from typing import Any
 
 import polars as pl
 
-from . import analysis, figures, results
+from . import analysis, figures, results, tables
 from . import formats as fm
 
 SURV, DS, FW = ("support", "flchain"), ("support", "flchain", "expedia"), ("lightgbm", "xgboost")
@@ -60,14 +67,14 @@ def ref_cell(ds: str, fw: str, t: int = 500, depth: int = 8, h: int = 16) -> str
 
 class Grid:
     """Speedups by (machine, cell): per method, the row of `results.speedups`
-    (XGBoost native's headline; its process-0 row as ``xgboost_native_p0``)."""
+    (XGBoost native's process-0 row; its faster-mode row as ``xgboost_native_fm``)."""
 
     def __init__(self, df: Any) -> None:
         self.rows: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
         for row in df.filter(pl.col("mode") == "serving").iter_rows(named=True):
             m = row["method"]
             if m == "xgboost_native":
-                m = "xgboost_native" if row["variant"] == "headline" else "xgboost_native_p0"
+                m = "xgboost_native_fm" if row["variant"] == "faster-mode" else "xgboost_native"
             elif m == "treewalker" and row["variant"] != "all-on":
                 continue
             self.rows.setdefault((row["arch"], row["cell"]), {})[m] = row
@@ -104,18 +111,184 @@ def alg(methods: dict[str, dict[str, Any]]) -> float:
     return float(methods["treewalker_fullwalk"]["speedup"])
 
 
+within = results.within
+
+
 def g_label(cell: str) -> str:
     g = results.design(cell)["G"]
     return "sessions" if g is None else str(g)
 
 
-def collect(runs: Path) -> list[tuple[str, str, str]]:
+def ablation_repeatability(effects: Any) -> list[tuple[str, str]]:
+    """Per machine and switch at the SUPPORT reference, each ablation run's effect per
+    framework (%), and the largest between-run range over the frameworks and anchors
+    (`figures.ablation_spread`, percentage points); one run has no range."""
+    spread = figures.ablation_spread(effects)
+    runs = sorted(set(effects["run"].to_list()))
+    out = []
+    for arch in sorted({x["arch"] for x in spread}):
+        a = [x for x in spread if x["arch"] == arch]
+        parts = []
+        for flag, _, _ in figures.FLAGS:
+            rows = sorted(
+                (x for x in a if x["ds"] == "SUPPORT" and x["flag"] == flag),
+                key=lambda x: x["framework"],
+            )
+            if not rows:
+                continue
+            by_fw = {x["framework"]: x["by_run"] for x in rows}
+            per_run = [
+                "/".join(
+                    r(100 * (by_fw[fw][run] - 1), 1) if run in by_fw.get(fw, {}) else "-"
+                    for fw in FW
+                )
+                for run in runs
+            ]
+            ranges = [
+                x["between_runs_pp"]
+                for x in a
+                if x["flag"] == flag and x["between_runs_pp"] is not None
+            ]
+            parts.append(
+                f"{flag} {' | '.join(per_run)}"
+                + (f" (between runs up to {r(max(ranges), 1)} pp)" if ranges else "")
+            )
+        out.append(
+            (
+                f"switch effects at the SUPPORT reference, {arch}, % per run ({', '.join(runs)}; "
+                "LightGBM/XGBoost, -: not measured; between-run range over every anchor and "
+                "framework measured by two runs)",
+                "; ".join(parts),
+            )
+        )
+    return out
+
+
+def retime_counts(runs: Path, c: results.Campaign) -> list[tuple[str, str]]:
+    """Per machine, over the campaign's runs: the cells the re-time plans flagged,
+    the (cell, mode) pairs re-timed, those whose attempt is reported, those with a
+    refused attempt; a refusal is also a warning on stderr, for App. A.4."""
+    import sys
+
+    from . import retime
+
+    out = []
+    for arch in results.MACHINES:
+        flagged: int | None = None
+        rows = []
+        for run in tables.campaign_runs(c):
+            if not results.run_dir(runs, run, arch).exists():
+                continue
+            rows += retime.dispositions(runs, run, arch)
+            n = retime.planned(runs.parent / "retime", run, arch)
+            flagged = n if flagged is None else flagged + (n or 0)
+        tries = [a for r in rows for a in r["attempts"]]
+        refused = sum(any(a["status"] == "refused" for a in r["attempts"]) for r in rows)
+        selected = sum(r["selected"] != r["parent"][0] for r in rows)
+        if refused:
+            print(
+                f"warning: re-timing on {arch}: {refused} (cell, mode) pairs refused; see "
+                f"retime_{arch}.md and disclose in App. A.4",
+                file=sys.stderr,
+            )
+        out.append(
+            (
+                f"re-timing, {arch} (cells flagged; (cell, mode) re-timed; attempt reported; "
+                "refused)",
+                f"{'unknown' if flagged is None else flagged}; {len(rows)}; {selected}; {refused}"
+                + ("" if tries else " (no re-time run)"),
+            )
+        )
+    return out
+
+
+def exact_sums_effect(ablation: Any) -> list[tuple[str, str]]:
+    """The released default's exact-sums effect, which the README states: per
+    machine, the research build's latency with exact sums off
+    (``disable_exact_sums``) over its all-on, serving, T=500, L=8, the range over
+    datasets and frameworks per G and for Expedia's sessions. Read from the final
+    run's ablation suite (2026-10-09/10): the camera-ready ablation has no
+    disable_exact_sums variant."""
+    d = ablation.filter(
+        (pl.col("method") == "treewalker_research")
+        & (pl.col("mode") == "serving")
+        & (pl.col("T") == 500)
+        & (pl.col("L") == 8)
+        & pl.col("variant").is_in(["all-on", "disable_exact_sums"])
+    )
+    t = {
+        (row["arch"], row["cell"], row["variant"]): row["latency_us"]
+        for row in d.iter_rows(named=True)
+    }
+    out = []
+    for arch in sorted({k[0] for k in t}):
+        by: dict[str, list[float]] = {}
+        for (a, cell, v), lat in t.items():
+            base = t.get((a, cell, "all-on"))
+            if a != arch or v != "disable_exact_sums" or base is None:
+                continue
+            g = results.design(cell)["G"]
+            by.setdefault("Expedia sessions" if g is None else f"G={g}", []).append(lat / base)
+        keys = sorted(
+            by, key=lambda k: (k.startswith("Expedia"), int(k[2:]) if k[2:].isdigit() else 0)
+        )
+        out.append(
+            (
+                f"exact sums off over the released default (on), research build, serving, "
+                f"T=500, L=8, final run's ablation, {arch} (range over datasets and frameworks)",
+                "; ".join(f"{k} {rng(min(by[k]), max(by[k]), 2)}x" for k in keys) or "none",
+            )
+        )
+    return out
+
+
+def unsplit(work: Any) -> list[tuple[str, str]]:
+    """The unsplit counts at the ablation's anchors (T=500, L=8, both frameworks): U,
+    the varying splits the default evaluator skips as unsplit (one side's rows
+    empty), per group and as a share of its varying splits V, and the ablated path's
+    extra calls: ``disable_unsplit`` recurses where the default skips, so its
+    recursive calls exceed the default's B by E, and E - U are the calls beyond U
+    (splits reached only below an unsplit node). Asserts U = V - B, the counters'
+    identity, on every cell and variant of ``work`` (`results.work`)."""
+    bad = work.filter(
+        pl.col("unsplit_skips") != pl.col("varying_splits") - pl.col("recursive_calls")
+    )
+    if bad.height:
+        raise ValueError(
+            f"unsplit skips differ from varying splits minus recursive calls in {bad.height} "
+            f"(cell, variant) pairs, e.g. {bad.row(0, named=True)['cell']}"
+        )
+    out = []
+    for label, ds, h in figures.ANCHORS:
+        a = figures._anchor(work, ds, h)
+        t = {(r["framework"], r["variant"]): r for r in a.iter_rows(named=True)}
+        for fw in FW:
+            d, ab = t.get((fw, "all-on")), t.get((fw, "disable_unsplit"))
+            if d is None or ab is None:
+                continue
+            u, v = d["unsplit_skips"], d["varying_splits"]
+            extra = ab["recursive_calls"] - d["recursive_calls"]
+            beyond = (extra - u) / u if u else float("nan")
+            per = r(extra / d["groups"], 1)
+            out.append(
+                (
+                    f"U at the {label} anchor, {fw} (per group, share of V; disable_unsplit's "
+                    "extra calls E per group, share beyond U = (E - U) / U)",
+                    f"{r(u / d['groups'], 1)} ({r(100 * u / v, 1)}% of V); E {per}, "
+                    f"{r(100 * beyond, 2)}% beyond U",
+                )
+            )
+    return out
+
+
+def collect(runs: Path, campaign: results.Campaign | None = None) -> list[tuple[str, str, str]]:
     out: list[tuple[str, str, str]] = []
+    c = campaign or results.CAMPAIGNS["final"]
 
     def say(where: str, what: str, value: str) -> None:
         out.append((where, what, value))
 
-    factorial = results.speedups(runs, "factorial")
+    factorial = results.speedups(runs, c.factorial)
     grid = Grid(factorial)
     v1 = {a: grid.v1(a) for a in results.MACHINES}
     intel, arm = v1["intel"], v1["arm"]
@@ -148,7 +321,12 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
         g128 = [alg(cells[cid(ds, fw, 500, 8, 128)]) for ds in SURV for fw in FW]
         say("abstract/5.5/7", f"{arch} survival speedup at G=128", rng(min(g128), max(g128), 1))
     heat = figures.heatmap_cells(factorial)
-    say("5.3", "heatmap cells above 1x", f"{sum(v > 1 for v in heat.values())}/{len(heat)}")
+    say(
+        "5.3",
+        "heatmap cells above 1x",
+        f"{sum(v > 1 for v in heat.values())}/{len(heat)}; "
+        f"within ±2%: {within(list(heat.values()))}",
+    )
     hk = max(heat, key=heat.get)  # type: ignore[arg-type]
     say("5.3", "heatmap maximum", f"{r(heat[hk], 1)} at {hk}")
     top = max(intel, key=lambda c: alg(intel[c]))
@@ -172,17 +350,17 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
     for m, g in (("tl2cgen", 16), ("lleaves", 16), ("lleaves", 128)):
         v = [intel[cid(ds, "lightgbm", 500, 8, g)][m]["speedup"] for ds in SURV]
         say("5.4", f"{m} / TreeWalker, LightGBM survival, G={g}", rng(min(v), max(v), 1))
-    c = intel[cid("support", "lightgbm", 2000, 8, 128)]
+    c_ = intel[cid("support", "lightgbm", 2000, 8, 128)]
     say(
         "5.4",
         "LightGBM-native system speedup at SUPPORT T=2000 L=8 G=128",
-        r(c["lightgbm_native"]["speedup"], 0),
+        r(c_["lightgbm_native"]["speedup"], 0),
     )
     say(
         "5.4",
-        "  its latencies, p50 per group (ms)",
-        f"{r(c['lightgbm_native']['p50_us'] / 1000, 0)} vs "
-        f"{r(c['treewalker']['p50_us'] / 1000, 2)}",
+        "  its latencies, median over blocks of the block medians per group (ms)",
+        f"{r(c_['lightgbm_native']['latency_us'] / 1000, 0)} vs "
+        f"{r(c_['treewalker']['latency_us'] / 1000, 2)}",
     )
     lg = {
         cell: m["lightgbm_native"]["speedup"] for cell, m in intel.items() if "lightgbm_native" in m
@@ -192,22 +370,31 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
     e = intel[ref_cell("expedia", "xgboost")]
     say(
         "5.4",
-        "Expedia/XGBoost: TreeWalker vs native (p50 per group)",
-        f"{r(e['xgboost_native']['speedup'], 1)} ({r(e['treewalker']['p50_us'], 0)} vs "
-        f"{r(e['xgboost_native_p0']['p50_us'], 0)} us)",
+        "Expedia/XGBoost: TreeWalker vs native (latency per group)",
+        f"{r(e['xgboost_native']['speedup'], 1)} ({r(e['treewalker']['latency_us'], 0)} vs "
+        f"{r(e['xgboost_native']['latency_us'], 0)} us)",
     )
     say(
         "5.4",
         "Expedia/XGBoost: TreeWalker's time over tl2cgen's",
-        f"{r(1 / e['tl2cgen']['speedup'], 2)} ({r(e['tl2cgen']['p50_us'], 0)} us)",
+        f"{r(1 / e['tl2cgen']['speedup'], 2)} ({r(e['tl2cgen']['latency_us'], 0)} us)",
     )
+    # Sensitivity: XGBoost's faster mode over its extra processes, row-weighted.
+    for ds in DS:
+        x = intel[ref_cell(ds, "xgboost")].get("xgboost_native_fm")
+        say(
+            "5.4/A.2",
+            f"sensitivity: TreeWalker vs XGBoost native's faster mode, {ds} reference "
+            "(row-weighted)",
+            "no mode analysis" if x is None else f"{r(x['speedup_rw'], 1)} ({x['note']})",
+        )
 
     # --- QuickScorer (5.4, App. D) -----------------------------------------------
     # QuickScorer loads neither categorical splits (SUPPORT, FLCHAIN) nor missing
     # values (Expedia), so v1's cells hold almost none of its valid cells; the
     # factorial's are mostly credit's what-if models.
     reasons: Counter[str] = Counter()
-    for m in fm.read_json(results.run_dir(runs, "factorial", "intel") / "cells.json").values():
+    for m in fm.read_json(results.run_dir(runs, c.factorial, "intel") / "cells.json").values():
         for e in m["excluded"]:
             if e["method"] == "quickscorer":
                 reasons[f"{m['id'].split('/')[0]}: {_qs_reason(e['reason'])}"] += 1
@@ -224,7 +411,8 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
             say(
                 "5.4/D",
                 f"QuickScorer coverage in {scope}, {arch}",
-                f"{len(qs)} cells, faster in {len(fast)}",
+                f"{len(qs)} cells, faster in {len(fast)}; within ±2%: "
+                f"{within([pool[c]['quickscorer']['speedup'] for c in qs])}",
             )
     qs_all = [cell for cell, m in every["intel"].items() if "quickscorer" in m]
     say(
@@ -234,22 +422,37 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
     )
     adv = [1 / every["intel"][c]["quickscorer"]["speedup"] for c in qs_all]
     say("D", "largest QuickScorer advantage (factorial, Intel)", r(max(adv), 1) if adv else "none")
+    # Table 9, the submitted head-to-head on the original datasets, is withdrawn: its
+    # cells cannot be validated. Its replacement is the expedia-filled comparison.
     for ds in DS:
         for lv in (2, 4):
-            mi, ma = (
-                intel[ref_cell(ds, "lightgbm", 500, lv)],
-                arm[ref_cell(ds, "lightgbm", 500, lv)],
-            )
-            if "quickscorer" not in mi:
-                say("D", f"Table 9 {ds} L={lv}", "QuickScorer cannot load the model")
-                continue
             say(
                 "D",
-                f"Table 9 {ds} L={lv} (QS us, TW us p50 per group, TW/QS Intel, TW/QS Arm)",
-                f"{r(mi['quickscorer']['p50_us'], 1)}, {r(mi['treewalker']['p50_us'], 1)}, "
-                f"{r(1 / mi['quickscorer']['speedup'], 2)}, "
-                f"{r(1 / ma['quickscorer']['speedup'], 2)}",
+                f"Table 9 {ds} L={lv}",
+                "withdrawn; see the expedia-filled comparison (quickscorer_filled_<arch>.md)",
             )
+    for arch in results.MACHINES:
+        cells = fm.read_json(results.run_dir(runs, c.factorial, arch) / "cells.json")
+        filled = tables.quickscorer_filled(factorial, cells, arch)
+        qs_timed = [x for x in filled if x["status"] == "timed"]
+        excluded = Counter(_qs_reason(x["status"]) for x in filled if x["status"] != "timed")
+        say(
+            "D",
+            f"QuickScorer on expedia-filled, a new comparison on an encoded dataset, {arch} "
+            "(eligible; timed LightGBM/XGBoost; TreeWalker faster of timed; speedup range; "
+            "exclusions)",
+            f"{len(filled)}; {sum(x['framework'] == 'lightgbm' for x in qs_timed)}/"
+            f"{sum(x['framework'] == 'xgboost' for x in qs_timed)}; "
+            f"{sum(x['speedup'] > 1 for x in qs_timed)} of {len(qs_timed)} (within ±2%: "
+            f"{within([x['speedup'] for x in qs_timed])}); "
+            + (
+                rng(min(x["speedup"] for x in qs_timed), max(x["speedup"] for x in qs_timed), 2)
+                if qs_timed
+                else "none"
+            )
+            + "; "
+            + (", ".join(f"{k} {v}" for k, v in sorted(excluded.items())) or "none"),
+        )
 
     # --- Section 5.5: sensitivity (Intel, survival, T=500) ------------------------
     for lv in (2, 16):
@@ -276,7 +479,12 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
         else:
             by = Counter((results.design(c)["family"], results.design(c)["G"]) for c in slow)
             where = ", ".join(f"{fam} G={g} {n}" for (fam, g), n in sorted(by.items(), key=str))
-        say("6", f"cells slower than own full walk, {tag}", f"{len(slow)}/{len(cells)}: {where}")
+        near = within([alg(m) for m in cells.values()])
+        say(
+            "6",
+            f"cells slower than own full walk, {tag}",
+            f"{len(slow)}/{len(cells)}: {where}; within ±2%: {near}",
+        )
         if slow:
             say("6", f"  worst case, {tag}", r(max(1 / alg(cells[c]) for c in slow), 2))
         lgv = [
@@ -285,7 +493,7 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
         say(
             "6",
             f"LightGBM native beaten, {tag} (cells, minimum)",
-            f"{sum(x > 1 for x in lgv)}/{len(lgv)}, {r(min(lgv), 2)}",
+            f"{sum(x > 1 for x in lgv)}/{len(lgv)}, {r(min(lgv), 2)}; within ±2%: {within(lgv)}",
         )
         xg = {
             cell: m["xgboost_native"]["speedup"]
@@ -299,7 +507,7 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
             "6",
             f"XGBoost native faster, {tag} (cells, its best time over TreeWalker's, where)",
             f"{len(faster)}/{len(xg)}, {r(1 / xg[wk], 2)}, ({d['dataset']!r}, {d['T']}, {d['L']}, "
-            f"{d['workload']}, G={d['G']})",
+            f"{d['workload']}, G={d['G']}); within ±2%: {within(list(xg.values()))}",
         )
         say(
             "6",
@@ -308,18 +516,28 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
         )
         f = [cell for cell, m in cells.items() if "tl2cgen" in m and m["tl2cgen"]["speedup"] < 1]
         small = sum(1 for c in f if results.design(c)["G"] in (1, 2, 4))
-        say("6", f"tl2cgen faster, {tag}", f"{len(f)}/{len(cells)}, {small} at G<=4")
+        tl = [m["tl2cgen"]["speedup"] for m in cells.values() if "tl2cgen" in m]
+        say(
+            "6",
+            f"tl2cgen faster, {tag}",
+            f"{len(f)}/{len(cells)}, {small} at G<=4; within ±2%: {within(tl)}",
+        )
         f = [cell for cell, m in cells.items() if "lleaves" in m and m["lleaves"]["speedup"] < 1]
         small = sum(1 for c in f if results.design(c)["G"] in (1, 2, 4, 8))
         n_lgb = sum(1 for c in cells if results.design(c)["framework"] == "lightgbm")
-        say("6", f"lleaves faster, {tag}", f"{len(f)}/{n_lgb}, {small} at G<=8")
+        ll = [m["lleaves"]["speedup"] for m in cells.values() if "lleaves" in m]
+        say(
+            "6",
+            f"lleaves faster, {tag}",
+            f"{len(f)}/{n_lgb}, {small} at G<=8; within ±2%: {within(ll)}",
+        )
 
     for arch in results.MACHINES:
         boundary(arch, v1[arch], "v1's cells")
         boundary(arch, grid.cells(arch), "the factorial")
 
     # --- Section 4.4 / Table 1: work decomposition ---------------------------------
-    w, asym = figures.decomposition(results.work(runs, "ablation"))
+    w, asym = figures.decomposition(results.work(runs, c.ablation[0]))
     val = {
         (row["dataset"], row["framework"], row["evaluator"], row["horizon"]): row["per_row_ratio"]
         for row in w.filter(pl.col("dataset").is_in(list(SURV))).iter_rows(named=True)
@@ -357,26 +575,39 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
         )
 
     # --- Section 5.7: ablation at Figure 9's anchors (Intel) -----------------------
-    research = results.speedups(runs, "ablation").filter(
-        (pl.col("arch") == "intel")
-        & (pl.col("method") == "treewalker_research")
-        & (pl.col("mode") == "serving")
-    )
+    # Effects are ratios of latencies; with two ablation runs, each run's value and
+    # their spread between the runs.
+    research = [
+        results.speedups(runs, run).filter(
+            (pl.col("arch") == "intel")
+            & (pl.col("method") == "treewalker_research")
+            & (pl.col("mode") == "serving")
+        )
+        for run in c.ablation
+    ]
 
     def effect(ds: str, h: int | None, variant: str, against: str = "all-on") -> list[float]:
-        a = figures._anchor(research, ds, h)
-        t = {
-            (row["framework"], row["variant"]): row["us_per_row"] for row in a.iter_rows(named=True)
-        }
-        return [100 * (t[(fw, variant)] / t[(fw, against)] - 1) for fw in FW if (fw, variant) in t]
+        """The effect per framework and ablation run, in %."""
+        out = []
+        for run in research:
+            a = figures._anchor(run, ds, h)
+            t = {
+                (row["framework"], row["variant"]): row["latency_us"]
+                for row in a.iter_rows(named=True)
+            }
+            out += [
+                100 * (t[(fw, variant)] / t[(fw, against)] - 1) for fw in FW if (fw, variant) in t
+            ]
+        return out
 
+    over = "frameworks" if len(c.ablation) == 1 else "frameworks and both ablation runs"
     anchors = {"support": 16, "flchain": 4, "expedia": None}
     for flag in ("|disable_tree_ordering", "|disable_prefix_grouping"):
         for ds, h in anchors.items():
             v = effect(ds, h, flag)
             say(
                 "5.7",
-                f"{flag.strip('|')[8:]} effect, {ds} (% range over frameworks)",
+                f"{flag.strip('|')[8:]} effect, {ds} (% range over {over})",
                 rng(min(v), max(v), 0),
             )
     single = {
@@ -389,10 +620,30 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
         f"{worst} +{r(max(single[worst]), 0)}% "
         f"(all within 3%: {all(max(v) < 3 for v in single.values() if v)})",
     )
+    # Repeatability: each run's effect per framework and the range between the runs,
+    # on every machine, never pooled with the framework spread.
+    ablation = pl.concat(
+        [results.speedups(runs, run) for run in c.ablation], how="diagonal_relaxed"
+    )
+    for line in ablation_repeatability(figures.ablation_effects(ablation)):
+        say("5.7", *line)
+
+    # --- README: the released default's exact-sums effect ---------------------------
+    final = results.CAMPAIGNS["final"].ablation[0]
+    if all(results.run_dir(runs, final, a).exists() for a in results.MACHINES):
+        for line in exact_sums_effect(results.speedups(runs, final)):
+            say("README", *line)
+
+    # --- Section 5.7: unsplit, from the default evaluator's counters -----------------
+    for line in unsplit(results.work(runs, c.ablation[0])):
+        say("5.7", *line)
 
     # --- Section 5.6 / Tables 3 and 10: the credit what-if --------------------------
+    # The final run's factorial holds whatif-v2 on credit's models; the camera-ready
+    # campaign times E1's released scenario cells (scenario-v1) as a run of its own.
+    whatif = factorial if c.scenario is None else results.speedups(runs, c.scenario)
     sel = (
-        (pl.col("dataset") == "credit")
+        pl.col("dataset").is_in(["credit", "scenario_credit"])
         & (pl.col("framework") == "lightgbm")
         & (pl.col("T") == 500)
         & (pl.col("L") == 8)
@@ -403,7 +654,7 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
         arch: {
             (row["k"], row["G"]): row["speedup"]
             for row in results.rows(
-                factorial.filter(sel & (pl.col("arch") == arch)), "treewalker_fullwalk"
+                whatif.filter(sel & (pl.col("arch") == arch)), "treewalker_fullwalk"
             ).iter_rows(named=True)
         }
         for arch in results.MACHINES
@@ -412,7 +663,8 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
         say(
             "5.6",
             f"what-if cells faster than full walk, {arch}",
-            f"{sum(v > 1 for v in sc[arch].values())}/{len(sc[arch])}",
+            f"{sum(v > 1 for v in sc[arch].values())}/{len(sc[arch])}; within ±2%: "
+            f"{within(list(sc[arch].values()))}",
         )
     for arch, kv in (("arm", 1), ("arm", 8), ("intel", 1), ("intel", 8)):
         v = [sc[arch][(kv, g)] for g in (4, 16, 64, 128)]
@@ -421,7 +673,9 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
             f"what-if speedup range, {arch}, k={kv}",
             f"{r(min(v), 2 if min(v) < 2 else 1)}-{r(max(v), 1)}",
         )
-    work = results.work(runs, "factorial").filter(sel & (pl.col("variant") == "all-on"))
+    work = results.work(runs, c.scenario or c.factorial).filter(
+        sel & (pl.col("variant") == "all-on")
+    )
     pc: dict[tuple[int, int], float] = {}
     for row in work.iter_rows(named=True):
         g = row["rows"] / row["groups"]
@@ -447,11 +701,11 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
     for arch in ("arm", "intel"):
         d = factorial.filter((pl.col("arch") == arch) & (pl.col("mode") == "serving"))
         ch = {
-            row["cell"]: row["us_per_row"]
+            row["cell"]: row["latency_us"]
             for row in results.rows(d, "treewalker_chunked128").iter_rows(named=True)
         }
         tw = {
-            row["cell"]: row["us_per_row"]
+            row["cell"]: row["latency_us"]
             for row in results.rows(d, "treewalker", "all-on").iter_rows(named=True)
         }
         by_g: dict[int, list[float]] = {}
@@ -459,10 +713,14 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
             by_g.setdefault(results.design(cell)["G"], []).append(t / tw[cell])
         say(
             "Table 11",
-            f"128-row chunks over whole groups, per-row time, median over cells, {arch} "
+            f"128-row chunks over whole groups, latency, median over cells, {arch} "
             "(G=256 512 1024)",
             " ".join(r(st.median(by_g[g]), 3) for g in sorted(by_g)),
         )
+
+    # --- App. A.4: re-timing dispositions ----------------------------------------------
+    for line in retime_counts(runs, c):
+        say("A.4", *line)
 
     # --- App. A.6: measurement variability --------------------------------------------
     for arch in ("intel", "arm"):
@@ -493,10 +751,31 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
             f"interval half-width, % of the speedup (median, 95th percentile, max), {arch}",
             f"{r(st.median(q), 2)}, {r(q[int(0.95 * len(q))], 2)}, {r(q[-1], 1)}",
         )
+        # Sensitivity: the row-weighted ratio against the nested-median ratio.
+        rw = (
+            d.filter(
+                (pl.col("mode") == "serving")
+                & pl.col("speedup_rw").is_not_null()
+                & (pl.col("method") != "treewalker")
+                & (pl.col("variant") != "faster-mode")
+            )
+            .group_by("family")
+            .agg(ratio=pl.col("speedup_rw") / pl.col("speedup"))
+            .sort("family")
+        )
+        say(
+            "A.6",
+            f"sensitivity: row-weighted speedup over the latency ratio by family "
+            f"(median, min-max), {arch}",
+            "; ".join(
+                f"{fam} {r(st.median(v), 3)} ({rng(min(v), max(v), 2)})"
+                for fam, v in rw.iter_rows()
+            ),
+        )
     # The sentinel, a check on the machine: each method's largest drift from the
     # run's first measured sentinel, and how many sentinels exceed the run's flag.
     for arch in ("intel", "arm"):
-        run = json.loads((results.run_dir(runs, "factorial", arch) / "run.json").read_text())
+        run = json.loads((results.run_dir(runs, c.factorial, arch) / "run.json").read_text())
         pct = float((run.get("run") or {}).get("sentinel_drift_pct", 3.0))
         table, _ = analysis.sentinel_table(run.get("sentinel") or {}, pct)
         worst = (
@@ -521,8 +800,8 @@ def collect(runs: Path) -> list[tuple[str, str, str]]:
     return out
 
 
-def generate(runs: Path, out: Path) -> list[str]:
-    lines = [f"[{where}] {what}: {value}" for where, what, value in collect(runs)]
+def generate(runs: Path, out: Path, campaign: results.Campaign | None = None) -> list[str]:
+    lines = [f"[{where}] {what}: {value}" for where, what, value in collect(runs, campaign)]
     out.mkdir(parents=True, exist_ok=True)
     (out / "paper_numbers.txt").write_text("\n".join(lines) + "\n")
     return lines

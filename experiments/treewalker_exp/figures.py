@@ -4,12 +4,14 @@ The same figures as the v1 scripts (`plot.py`, `gen_heatmap_tex.py` and the
 convergence plot of `decomposition_validation.py`, at the neurips2026 tag), with
 the same cells, axes and encodings, from the new suites:
 
-- speedups are row-weighted ratios over the same groups, and the ribbons are their
-  95% bootstrap intervals (v1 drew the range over repeats);
-- latencies are p50 per group, with p5 to p95 as error bars;
+- latencies are the camera-ready estimand (`estimand`): the median over blocks of
+  each block's median time per group, with p5 to p95 over blocks as error bars
+  (dispersion); speedups are ratios of latencies, and the ribbons are their 95%
+  bootstrap intervals over entities and rounds (v1 drew the range over repeats);
 - the Expedia size curve is the fixed-model cohort of sizes 4 to 32 (v1: Grid 4's
   group-size distributions);
-- the ablation reads the research build's variants against its own all-on;
+- the ablation reads the research build's variants against its own all-on, the
+  mean over frameworks and, in the camera-ready campaign, over both ablation runs;
   monotonic scans act only without the precompute, so their effect is
   disable_monotonic+disable_varying_precompute over disable_varying_precompute; the
   node visits' "all disabled" is every switch but monotonic, which changes no node
@@ -258,12 +260,12 @@ def fig_method_comparison(factorial: Any, out: Path) -> None:
 
     d = reference_cells(factorial.filter(pl.col("arch") == "intel"))
     d = d.filter((pl.col("T") == REF_T) & (pl.col("L") == REF_L) & (pl.col("mode") == "serving"))
-    keep = (pl.col("method").is_in(list(METHOD_LABELS)) & (pl.col("variant") != "headline")) & (
+    keep = (pl.col("method").is_in(list(METHOD_LABELS)) & (pl.col("variant") != "faster-mode")) & (
         pl.col("method") != "quickscorer"
     )
     pdf = (
         d.filter(keep)
-        .select("dataset", "framework", "method", "p5_us", "p50_us", "p95_us")
+        .select("dataset", "framework", "method", "p5_us", "latency_us", "p95_us")
         .to_pandas()
     )
     pdf["method_label"] = pdf["method"].map(METHOD_LABELS)
@@ -276,14 +278,14 @@ def fig_method_comparison(factorial: Any, out: Path) -> None:
     order = ["Native", "tl2cgen", "lleaves", "TreeWalker (full walk)", "TreeWalker"]
     pdf["method_label"] = pd.Categorical(pdf["method_label"], categories=order, ordered=True)
     p = (
-        ggplot(pdf, aes(x="method_label", y="p50_us", fill="method_label"))
+        ggplot(pdf, aes(x="method_label", y="latency_us", fill="method_label"))
         + geom_bar(stat="identity")
         + geom_errorbar(aes(ymin="p5_us", ymax="p95_us"), width=0.3)
         + facet_grid("fw_cat~ds_cat")
         + scale_y_log10()
         + coord_flip()
         + scale_fill_manual(values=METHOD_COLORS, guide=None)
-        + labs(x="", y="Latency (\u00b5s per group, p50, log scale)")
+        + labs(x="", y="Latency (\u00b5s per group, median over blocks, log scale)")
         + theme_paper(figure_size=(5.5, 2.4), axis_text_y=element_text(size=7))
     )
     # Bars start at zero on the log axis, as in v1: numpy warns on log10(0).
@@ -336,27 +338,85 @@ def _anchor(df: Any, dataset: str, horizon: int | None) -> Any:
     return df.filter(sel)
 
 
-def ablation_slowdowns(ablation: Any, arch: str = "intel", mode: str = "serving") -> Any:
-    """Each switch's slowdown at the ablation's anchors: the research build's time with
-    the switch over its time without it, the mean over frameworks."""
+def ablation_effects(ablation: Any, mode: str = "serving") -> Any:
+    """Each switch's effect at the ablation's anchors, per machine, ablation run
+    (``run``), anchor and framework: the research build's latency with the switch
+    over its latency without it (`FLAGS`' denominators), as ``ratio``."""
     research = ablation.filter(
-        (pl.col("arch") == arch)
-        & (pl.col("method") == "treewalker_research")
-        & (pl.col("mode") == mode)
+        (pl.col("method") == "treewalker_research") & (pl.col("mode") == mode)
     )
+    if "run" not in research.columns:
+        research = research.with_columns(run=pl.lit("-"))
     out = []
     for label, ds, h in ANCHORS:
         a = _anchor(research, ds, h)
-        t = {(r["framework"], r["variant"]): r["us_per_row"] for r in a.iter_rows(named=True)}
-        for flag, variant, against in FLAGS:
-            ratios = [
-                t[(fw, variant)] / t[(fw, against)]
-                for fw in ("lightgbm", "xgboost")
-                if (fw, variant) in t and (fw, against) in t
-            ]
-            if ratios:
-                out.append({"ds": label, "flag": flag, "slowdown": sum(ratios) / len(ratios)})
-    return pl.DataFrame(out)
+        t = {
+            (r["arch"], r["run"], r["framework"], r["variant"]): r["latency_us"]
+            for r in a.iter_rows(named=True)
+        }
+        for arch, run, fw in sorted({k[:3] for k in t}):
+            for flag, variant, against in FLAGS:
+                num, den = t.get((arch, run, fw, variant)), t.get((arch, run, fw, against))
+                if num is not None and den is not None:
+                    out.append(
+                        {"arch": arch, "run": run, "ds": label, "framework": fw}
+                        | {"flag": flag, "ratio": num / den}
+                    )
+    schema = {"arch": pl.String, "run": pl.String, "ds": pl.String, "framework": pl.String}
+    return pl.DataFrame(out, schema=schema | {"flag": pl.String, "ratio": pl.Float64})
+
+
+def ablation_spread(effects: Any) -> Any:
+    """`ablation_effects` with each (machine, anchor, switch, framework)'s runs side
+    by side, keyed by run ID: ``by_run`` maps each run that measured the row to its
+    ratio (a run whose variant is missing has no entry), ``n_runs`` counts them, and
+    ``between_runs_pp`` is the largest minus the smallest effect over them in
+    percentage points, null below two runs: the repeatability the second ablation
+    run measures, never pooled with the framework spread."""
+    rows = []
+    for (arch, ds, flag, fw), g in (
+        effects.sort("run")
+        .partition_by("arch", "ds", "flag", "framework", as_dict=True, maintain_order=True)
+        .items()
+    ):
+        by_run = dict(zip(g["run"].to_list(), g["ratio"].to_list(), strict=True))
+        vals = list(by_run.values())
+        rows.append(
+            {"arch": arch, "ds": ds, "flag": flag, "framework": fw, "by_run": by_run}
+            | {"n_runs": len(vals)}
+            | {"between_runs_pp": 100 * (max(vals) - min(vals)) if len(vals) > 1 else None}
+        )
+    return sorted(rows, key=lambda x: (x["arch"], x["ds"], x["flag"], x["framework"]))
+
+
+def ablation_slowdowns(ablation: Any, arch: str = "intel", mode: str = "serving") -> Any:
+    """Each switch's slowdown at the ablation's anchors on ``arch``, point and range
+    from one population: the frameworks every ablation run measured. ``slowdown``
+    is the mean of their ratios over the runs, ``lo`` and ``hi`` the smallest and
+    largest over the runs of each run's mean over them. Where fewer than two runs
+    measured the switch, or no framework is in every run, there is no range (null),
+    and the point is the mean of every ratio observed. With complete data the
+    populations are all of it."""
+    e = ablation_effects(ablation, mode).filter(pl.col("arch") == arch)
+    out = []
+    for (ds, flag), g in e.partition_by("ds", "flag", as_dict=True, maintain_order=True).items():
+        runs = set(g["run"].to_list())
+        fws = [
+            fw
+            for fw in sorted(set(g["framework"].to_list()))
+            if set(g.filter(pl.col("framework") == fw)["run"].to_list()) == runs
+        ]
+        if len(runs) > 1 and fws:
+            c = g.filter(pl.col("framework").is_in(fws))
+            per_run = c.group_by("run").agg(pl.col("ratio").mean())["ratio"]
+            row = {"slowdown": c["ratio"].mean(), "lo": per_run.min(), "hi": per_run.max()}
+        else:
+            row = {"slowdown": g["ratio"].mean(), "lo": None, "hi": None}
+        out.append({"ds": ds, "flag": flag, **row})
+    schema = {"ds": pl.String, "flag": pl.String, "slowdown": pl.Float64}
+    return pl.DataFrame(out, schema=schema | {"lo": pl.Float64, "hi": pl.Float64}).sort(
+        "ds", "flag"
+    )
 
 
 def fig_ablation_waterfall(ablation: Any, out: Path) -> None:
@@ -364,6 +424,7 @@ def fig_ablation_waterfall(ablation: Any, out: Path) -> None:
     from plotnine import (
         aes,
         element_text,
+        geom_errorbar,
         geom_hline,
         geom_line,
         geom_point,
@@ -381,6 +442,9 @@ def fig_ablation_waterfall(ablation: Any, out: Path) -> None:
         ggplot(pdf, aes(x="flag", y="slowdown", color="ds", linetype="ds", shape="ds", group="ds"))
         + geom_line(size=1.2)
         + geom_point(size=3)
+        + geom_errorbar(
+            aes(ymin="lo", ymax="hi"), data=pdf.dropna(subset=["lo"]), width=0.25, linetype="solid"
+        )
         + geom_hline(yintercept=1.0, linetype="dashed", color="gray", alpha=0.4)
         + scale_color_manual(values=DS_COLORS)
         + scale_linetype_manual(values=DS_LINETYPES)
@@ -388,6 +452,9 @@ def fig_ablation_waterfall(ablation: Any, out: Path) -> None:
         + labs(
             x="Disabled optimisation",
             y="Slowdown (disabled / baseline)",
+            caption="Bars: range over the ablation runs"
+            + ("" if pdf["lo"].notna().all() else "; none where a switch has no repeated run")
+            + ".",
             color="",
             linetype="",
             shape="",
@@ -737,11 +804,14 @@ def heatmap_tex(cells: dict[tuple[str, int, int], float]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def generate(runs: Path, out: Path) -> None:
-    """Every figure, from the factorial and ablation runs."""
-    factorial = results.speedups(runs, "factorial")
-    ablation = results.speedups(runs, "ablation")
-    work = results.work(runs, "ablation")
+def generate(runs: Path, out: Path, campaign: results.Campaign | None = None) -> None:
+    """Every figure, from the campaign's factorial and ablation runs."""
+    c = campaign or results.CAMPAIGNS["final"]
+    factorial = results.speedups(runs, c.factorial)
+    ablation = pl.concat(
+        [results.speedups(runs, run) for run in c.ablation], how="diagonal_relaxed"
+    )
+    work = results.work(runs, c.ablation[0])
     fig_horizon_amortization(factorial, out)
     fig_speedup_heatmap(factorial, out)
     fig_method_comparison(factorial, out)

@@ -1,9 +1,10 @@
-"""A first look at a run: per-group p50/p99, the row-weighted speedup, and one
-bootstrap interval per comparison.
+"""A run's estimates: the camera-ready estimand and the sensitivity checks beside it.
 
-PR 4's ``figures`` and ``tables`` replace this with the full estimators. This
-module checks the run's schema and the estimators on real data before any suite
-is timed:
+The main estimand is `estimand`'s: a method's latency is
+the median over blocks of each block's median time per group, process 0; a
+speedup is a ratio of latencies, with a crossed entity and round bootstrap of the
+nested medians. `estimates` puts beside it the earlier estimators, kept as
+sensitivity checks:
 
 - Serving p50/p99 are quantiles of per-group samples (one call per group), in
   microseconds. Batch mode is amortized, never tail latency.
@@ -11,16 +12,16 @@ is timed:
   row, row-weighted, over the same groups: total ticks over total rows.
 - The interval resamples entities and rounds as crossed clusters: every method
   times every entity once a round, so a round is shared, and methods stay
-  matched on (block, group). The intervals are preliminary: PR 4 adds the
-  group sample's design and, for XGBoost, processes as a level.
+  matched on (block, group).
 - XGBoost's speed has two modes per process on Intel (its AVX2 block walk runs
   only when a heap buffer is 32-byte aligned). Each XGBoost cell also times it
   in extra processes, and the mode can also switch within a process, so the
   modes are told apart inside each batch, by instructions per row
-  (`xgboost_faster_mode`). The headline is the faster cluster of each batch
-  holding both modes, row-weighted, against TreeWalker over the same batches,
-  with the expected time over processes alongside; a cell with no second mode
-  visible headlines process 0's time. The rest of the table is process 0.
+  (`xgboost_faster_mode`). Its sensitivity row is the faster cluster of each
+  batch holding both modes, row-weighted, against TreeWalker over the same
+  batches, with the expected time over processes alongside; a cell with no
+  second mode visible shows process 0's time. XGBoost's main number, like every
+  method's, is process 0's.
 """
 
 from pathlib import Path
@@ -386,6 +387,12 @@ def xgboost_line(mode: str, r: dict[str, Any], us: float) -> str:
     )
 
 
+# The faster-mode row is a sensitivity check beside process 0's main number.
+FASTER_MODE_NOTE = (
+    "the extra processes validate only their first 32 groups (driver.rs CHECK_GROUPS)"
+)
+
+
 # The pairing key packs (cell, block, group) into one integer; these bound the parts.
 _BLOCK_BITS = _GROUP_BITS = 20
 
@@ -471,6 +478,25 @@ def serving_intervals(
     return out
 
 
+def refuse_untimed(samples: Any, manifests: dict[str, Any]) -> None:
+    """Raise if any process's samples belong to a method a cell excludes or does not
+    list as timed: such samples must never reach a published number."""
+    import polars as pl
+
+    present = samples.select(pl.col("cell", "method", "variant").cast(pl.String)).unique()
+    bad = []
+    for cell, method, variant in present.iter_rows():
+        m = manifests.get(cell) or {}
+        timed = {(x["method"], x["variant"]) for x in m.get("methods") or []}
+        excluded = {(e["method"], e["variant"]) for e in m.get("excluded") or []}
+        if (method, variant) not in timed or (method, variant) in excluded:
+            bad.append(f"{cell} {method}/{variant}")
+    if bad:
+        raise ValueError(
+            f"samples of methods the cell does not time ({len(bad)}): " + ", ".join(bad[:5])
+        )
+
+
 SAMPLE_COLUMNS = [
     "cell",
     "method",
@@ -480,6 +506,7 @@ SAMPLE_COLUMNS = [
     "block",
     "batch",
     "group",
+    "n_groups",
     "repetition",
     "rows",
     "ticks",
@@ -492,15 +519,22 @@ def estimates(
     """Every cell's estimates, for summarize and the paper's figures and tables.
 
     ``by_cell[cell]`` lists, per method, variant and mode (in mode order, then
-    us/row), p5, p50, p95 and p99 per group in us, us/row, and the ratio to ``reference``
-    (variant all-on): in serving mode the paired bootstrap ratio with its interval
+    latency), the camera-ready estimand (`estimand.block_estimates`): ``latency``,
+    the median over blocks of each block's median per group, in us, ``bp5`` and
+    ``bp95`` over blocks (dispersion), ``blocks``, and ``ratio`` to ``reference``
+    (variant all-on), a ratio of latencies, with ``lo`` and ``hi`` (the crossed,
+    paired bootstrap of the nested medians) in serving mode. Beside it, the
+    sensitivity estimates: p5, p50, p95 and p99 of the pooled per-group samples in
+    us, us/row (row-weighted), and ``ratio_rw`` with ``lo_rw`` and ``hi_rw``: in
+    serving mode the paired row-weighted ratio and its interval
     (`serving_intervals`), in batch mode the ratio of us/row; NaN without a
     reference. ``xgboost[(cell, mode)]`` is `xgboost_faster_mode`'s result, with
     ``tw``, the reference's ticks per row over the same batches and weights, where
-    it has a headline. ``d`` is `load`'s, with at least `SAMPLE_COLUMNS`."""
+    it has one. ``d`` is `load`'s, with at least `SAMPLE_COLUMNS`."""
     import polars as pl
 
     hz = float(d["run"]["timer"]["calibration"]["hz"])
+    refuse_untimed(d["samples"], d["manifests"])
     s = d["samples"].with_columns(us=pl.col("ticks") / hz * 1e6)
     if "process" in s.columns:
         s = s.filter(pl.col("process") == 0)
@@ -520,6 +554,10 @@ def estimates(
         .iter_rows()
     }
     intervals = serving_intervals(s, d["groups"], reference, n_boot)
+    from . import estimand
+
+    blocks_est = estimand.block_estimates(s, d["groups"], d["manifests"], reference, n_boot)
+    us = 1e6 / hz
     by_cell: dict[str, list[dict[str, Any]]] = {}
     for (cell,), g in (
         stats.sort("cell", "mode", "per_row")
@@ -536,8 +574,27 @@ def estimates(
                     ratio, lo, hi = hit
             elif ref is not None:
                 ratio = row["per_row"] / ref
-            rows.append({**row, "ratio": ratio, "lo": lo, "hi": hi})
-        by_cell[cell] = rows
+            be = blocks_est[(cell, row["method"], row["variant"], row["mode"])]
+            rows.append(
+                {
+                    **row,
+                    "ratio_rw": ratio,
+                    "lo_rw": lo,
+                    "hi_rw": hi,
+                    "latency": be["latency"] * us,
+                    "bp5": be["p5"] * us,
+                    "bp95": be["p95"] * us,
+                    "blocks": be["blocks"],
+                    "ratio": be["ratio"],
+                    "lo": be["lo"],
+                    "hi": be["hi"],
+                    "effect": be.get("effect"),
+                    "effect_lo": be.get("effect_lo"),
+                    "effect_hi": be.get("effect_hi"),
+                    "effect_against": be.get("effect_against"),
+                }
+            )
+        by_cell[cell] = sorted(rows, key=lambda x: (x["mode"], x["latency"]))
     blocks = {
         (cell, mode): g.drop("cell", "mode")
         for (cell, mode), g in xgboost_block_table(d["samples"], d["hw"])
@@ -623,16 +680,20 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
             if "weights" in r:
                 fasters[mode] = r
         lines.append(
-            f"  {'method':<24}{'variant':<34}{'mode':<8}{'p50 us':>10}{'p99 us':>10}"
-            f"{'us/row':>10}{'speedup':>9}  95% interval (preliminary)"
+            f"  {'method':<24}{'variant':<34}{'mode':<8}{'latency':>10}{'p5-p95 blocks':>20}"
+            f"{'speedup':>9}  {'95% interval':<17}{'p99 us':>10}{'us/row':>10}{'row-wtd':>9}"
+            "  95% interval"
         )
         for row in est["by_cell"].get(cell, []):
             interval = "" if row["lo"] is None else f"[{row['lo']:.3f}, {row['hi']:.3f}]"
+            rw = "" if row["lo_rw"] is None else f"[{row['lo_rw']:.3f}, {row['hi_rw']:.3f}]"
             p99 = f"{row['p99']:>10.2f}" if row["mode"] == "serving" else f"{'-':>10}"
+            spread = f"{row['bp5']:.2f}-{row['bp95']:.2f}"
             variant = "[process 0]" if row["method"] == "xgboost_native" else row["variant"]
             lines.append(
                 f"  {row['method']:<24}{variant[:33]:<34}{row['mode']:<8}"
-                f"{row['p50']:>10.2f}{p99}{row['per_row']:>10.4f}{row['ratio']:>9.3f}  {interval}"
+                f"{row['latency']:>10.2f}{spread:>20}{row['ratio']:>9.3f}  {interval:<17}"
+                f"{p99}{row['per_row']:>10.4f}{row['ratio_rw']:>9.3f}  {rw}"
             )
         # XGBoost's faster mode against TreeWalker over the same batches and weights.
         for mode, r in fasters.items():
@@ -644,9 +705,9 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
                 else "[no second mode visible]"
             )
             lines.append(
-                f"  {'xgboost_native':<24}{label:<34}{mode:<8}"
-                f"{'-':>10}{'-':>10}{r['faster'] / hz * 1e6:>10.4f}{r['faster'] / r['tw']:>9.3f}"
-                "  no interval until PR 4"
+                f"  {'xgboost_native':<24}{label:<34}{mode:<8}{'-':>10}{'-':>20}{'-':>9}  "
+                f"{'':<17}{'-':>10}{r['faster'] / hz * 1e6:>10.4f}{r['faster'] / r['tw']:>9.3f}"
+                f"  sensitivity: {FASTER_MODE_NOTE}"
             )
     return lines
 
