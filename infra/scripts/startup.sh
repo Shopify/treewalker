@@ -111,10 +111,14 @@ cache_pull() {
     chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
   fi
 }
+# cache_push PREFIX EXCLUDE [required]: best effort, unless required (compile
+# only, whose sole product is the cache), where a failed push fails the boot.
 cache_push() {
   [ -n "$GCS_CACHE_URI" ] || return 0
   gcloud storage rsync --no-user-output-enabled -r --exclude="$2" "$REPO_DIR/experiments/artifacts/" "$GCS_CACHE_URI/$1/" \
-    || log "Cache: pushing $1 failed"
+    && return 0
+  [ "$${3:-}" != required ] || fail "Cache: pushing $1 failed, and compile only exists to fill the cache"
+  log "Cache: pushing $1 failed"
 }
 
 metadata() {
@@ -133,6 +137,10 @@ if ! id $BENCH_USER &>/dev/null; then
 fi
 mkdir -p "$RESULTS_DIR"
 chown $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
+# Compile only exists to fill the cache: without a bucket its compiles would be
+# lost with the VM, so it stops before preparing anything.
+[ "$COMPILE_ONLY" != "true" ] || [ -n "$GCS_CACHE_URI" ] \
+  || fail "compile_only needs cache_bucket: the compiled baselines would be lost with the VM"
 
 # ---------------------------------------------------------------------------
 # Phase 1: System packages: a C/C++ compiler, CMake, git and curl. No LLVM:
@@ -244,7 +252,11 @@ COMPILED_OK=true
 for suite in $SUITES; do
   twx compile-baselines --suite "$suite" --threads "$TL2CGEN_THREADS" || COMPILED_OK=false
 done
-cache_push "compiled/$CACHE_MACHINE" "$ONLY_COMPILED_RE"
+if [ "$COMPILE_ONLY" = "true" ]; then
+  cache_push "compiled/$CACHE_MACHINE" "$ONLY_COMPILED_RE" required
+else
+  cache_push "compiled/$CACHE_MACHINE" "$ONLY_COMPILED_RE"
+fi
 $COMPILED_OK || fail "Compiling the baselines failed"
 if [ "$COMPILE_ONLY" = "true" ]; then
   log "Compile only: the baselines for $SUITES are in $GCS_CACHE_URI/compiled/$CACHE_MACHINE"

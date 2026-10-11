@@ -47,7 +47,7 @@ variable "gate_ref" {
 }
 
 variable "compile_only" {
-  description = "Prepare and compile the suites' baselines into the cache, then stop: no timing. With machines whose cache_as names the benchmark machine types, a larger VM of the same CPU fills their caches."
+  description = "Prepare and compile the suites' baselines into the cache, then stop: no timing. Needs cache_bucket, and fails if the push to it fails. With machines whose cache_as names the benchmark machine types, a larger VM of the same CPU fills their caches."
   type        = bool
   default     = false
 }
