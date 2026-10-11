@@ -439,8 +439,8 @@ margins, and both orderings' outputs with the cell's GTIL reference
 
 `check-run` exits non-zero when a validity gate fails, and fails closed: the
 run's tables missing, a failed cell or sentinel attempt that no later attempt of
-the same cell or sentinel resolved (resolved failures stay in the data and are
-listed), a cell whose stage oracle
+the same cell, or of the sentinel's role, resolved (resolved failures stay in the
+data and are listed), a cell whose stage oracle
 did not pass, a required method not timed, a timed interface without a passing
 check on the timed rows, process 0's samples not covering the timed groups in
 every round, or a forest whose `exact_sums` differs from the run's, which the
@@ -483,9 +483,12 @@ deployment never claimed is refused, and `run` and `retime-run` refuse a packed
 run directory themselves. A new boot moves the previous boot's `DONE` or `ERROR`
 into the results' `MARKER_HISTORY` and out of the bucket, so `check_done` reads
 `RUNNING` until the boot ends. It ends with `DONE` only if nothing failed: a run
-with failed cells, a pack or re-time error, or a claimed run not packed at the end
+with failed cells, a pack or re-time error, or a claimed run that is not complete
+at the end (`treewalker-exp run-complete`: packed, every cell of its manifest
+finished, no failed cell or sentinel attempt unresolved, whichever boot ran it)
 is recorded, the later runs still go, the results are uploaded, and the boot ends
-with `ERROR` naming each failure.
+with `ERROR` naming each failure. Re-time runs are packed only after the re-time
+phase has resumed them.
 
 On the campaign's VMs re-timing happens on its own: with `retime = true`
 (`infra/camera-ready.tfvars`), `startup.sh` packs the suites, runs `retime` for

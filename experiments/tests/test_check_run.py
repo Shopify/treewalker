@@ -439,12 +439,35 @@ def test_a_failure_a_later_attempt_resolved_is_listed_not_gated(tmp_path):
 
 
 def test_a_sentinel_attempt_retried_with_success_is_resolved():
+    # The runner numbers every attempt anew; a retry is a later attempt of the role.
     records = [
-        {"index": 0, "role": "warm-up", "status": "ok"},
-        {"index": 1, "role": "measure", "status": "failed: x"},
-        {"index": 1, "role": "measure", "status": "ok"},
-        {"index": 2, "role": "measure", "status": "failed: y"},
+        {"index": 0, "role": "warm-up", "status": "failed: x"},
+        {"index": 1, "role": "measure", "status": "failed: y"},
+        {"index": 2, "role": "measure", "status": "ok"},
+        {"index": 3, "role": "measure", "status": "failed: z"},
     ]
     open_, retried = cr.open_sentinel_failures(records)
-    assert [r["status"] for r in open_] == ["failed: y"]
-    assert [r["status"] for r in retried] == ["failed: x"]
+    assert [r["index"] for r in open_] == [0, 3]  # no later ok warm-up; nothing after 3
+    assert [r["index"] for r in retried] == [1]
+
+
+def test_completeness_is_the_no_failed_cell_rule(tmp_path):
+    d = tmp_path / "r"
+    d.mkdir()
+    run = write_run(d, {"a/c": cell()})
+    assert cr.completeness(run) == []
+    (run / "failed").mkdir()
+    fm.write_json(run / "failed" / "a_2fc.json", {"id": "a/c"})  # resolved: a/c finished
+    assert cr.completeness(run) == []
+    fm.write_json(run / "failed" / "b_2fc.json", {"id": "b/c"})  # unresolved
+    assert cr.completeness(run) == ["failed cell b_2fc.json"]
+    (run / "failed" / "b_2fc.json").unlink()
+    info = fm.read_json(run / "run.json")
+    info["manifest"]["cells"] = 2
+    info["sentinel"] = {"records": [{"index": 4, "role": "measure", "status": "failed: q"}]}
+    fm.write_json(run / "run.json", info)
+    assert cr.completeness(run) == [
+        "1 of 2 cells missing",
+        "sentinel attempt 4 (measure) failed: q",
+    ]
+    assert cr.completeness(tmp_path / "absent") == ["absent, not packed"]

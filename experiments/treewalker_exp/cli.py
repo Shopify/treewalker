@@ -630,6 +630,20 @@ def run_state_cmd(
     print(pack.run_state(run_dir))
 
 
+@app.command("run-complete")
+def run_complete(
+    run_dir: Annotated[Path, typer.Argument(help="experiments/data/runs/<run_id>")],
+) -> None:
+    """Exit 0 if the run is packed, every cell of its manifest finished and no failed
+    cell or sentinel attempt is unresolved; else print why and exit 1."""
+    from . import check_run as cr
+
+    problems = cr.completeness(run_dir)
+    if problems:
+        print("; ".join(problems))
+    raise typer.Exit(1 if problems else 0)
+
+
 @app.command("check-run")
 def check_run(
     run_dirs: Annotated[

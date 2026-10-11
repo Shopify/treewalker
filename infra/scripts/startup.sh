@@ -365,6 +365,7 @@ CLAIMS=$BENCH_HOME/runs-claimed.txt
 touch "$CLAIMS"
 chown $BENCH_USER:$BENCH_USER "$CLAIMS"
 run_state() { twx run-state "experiments/data/runs/$1"; }
+run_complete() { twx run-complete "experiments/data/runs/$1"; }
 # claim_run ID: whether to launch run ID. A run this deployment claimed in
 # an earlier boot resumes while raw, is skipped once packed (never timed again,
 # no sentinel appended), and fails if packed tables sit beside raw cells; an
@@ -484,10 +485,12 @@ fi
 # One Parquet file per table per run, verified against the cells, which it then
 # deletes. The bucket keeps the per-cell copies made while the suites ran; a run
 # that fails to pack keeps its cells, and they are uploaded instead.
-# A run an earlier boot packed is skipped, not packed again; a run no invocation
-# finished ("partial", an earlier boot cut short) is left raw: a re-time run is
-# resumed below, and anything else still raw at the end is a failure.
+# A run an earlier boot packed is skipped, not packed again, and a run no
+# invocation finished ("partial", an earlier boot cut short) is left raw. Re-time
+# runs wait for the re-time phase, which resumes them first: one an earlier boot
+# cut short can look finished from an older invocation.
 for run in "$REPO_DIR"/experiments/data/runs/*/; do
+  case "$(basename "$run")" in *-retime-*) continue ;; esac
   [ "$(run_state "$(basename "$run")")" = "raw" ] || continue
   twx pack "$run" --remove || failed_step "Pack $(basename "$run"): failed; uploading its cells"
 done
@@ -518,12 +521,15 @@ if [ "$RETIME" = "true" ]; then
     twx pack "$run" --remove || failed_step "Pack $(basename "$run"): failed; uploading its cells"
   done
 fi
-# Every run this deployment claimed must end packed: one that is missing (its
-# command failed before creating it) or still raw is incomplete.
+# Every run this deployment claimed, in this boot or an earlier one, must end
+# complete (treewalker-exp run-complete): packed, every cell finished, and no
+# failed cell or sentinel attempt unresolved. A restart therefore cannot end in
+# DONE over an earlier boot's failure, nor a run whose sentinel failed (the runner
+# exits 0 then) or whose command failed before creating it.
 while read -r rid; do
   [ -n "$rid" ] || continue
-  state=$(run_state "$rid" < /dev/null)  # nothing in it may read the claims
-  [ "$state" = "packed" ] || failed_step "Run $rid: $state at the end of the boot, not packed"
+  why=$(run_complete "$rid" < /dev/null 2>&1) \
+    || failed_step "Run $rid: incomplete: $(echo "$why" | tr '\n' ' ')"
 done < "$CLAIMS"
 
 # ---------------------------------------------------------------------------

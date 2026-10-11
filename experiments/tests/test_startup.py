@@ -236,15 +236,19 @@ def test_the_boot_ends_with_done_only_without_failures(tmp_path):
 
 
 def test_an_interrupted_run_is_not_packed_before_it_is_resumed(tmp_path):
-    """The pack loop before the re-time phase packs a run an invocation finished and
-    leaves raw one that an earlier boot cut short (a re-time run among them), so the
-    re-time phase resumes it."""
+    """The pack loop before the re-time phase packs a run an invocation finished,
+    leaves raw one that an earlier boot cut short, and leaves every re-time run to
+    the re-time phase, which resumes it first: an older invocation of a re-time
+    run that was cut short on its retry would otherwise read as finished."""
     runs = tmp_path / "repo" / "experiments" / "data" / "runs"
-    done, cut = runs / "camera-ready-aarch64", runs / "camera-ready-retime-r8-aarch64"
-    for run in (done, cut):
+    done = runs / "camera-ready-aarch64"
+    cut = runs / "camera-ready-ablation-1-aarch64"
+    retime = runs / "camera-ready-retime-r8-aarch64"
+    for run in (done, cut, retime):
         (run / "cells" / "a_cell").mkdir(parents=True)
     (done / "run.json").write_text('{"invocations": [{"finished": 1}]}')
     (cut / "run.json").write_text("{}")  # the runner writes an invocation only at its end
+    (retime / "run.json").write_text('{"invocations": [{"finished": 1}]}')  # an older one
     loop = block('for run in "$REPO_DIR"/experiments/data/runs/*/; do', "\ndone\n")
     script = (
         f"REPO_DIR={tmp_path}/repo\n"
@@ -254,21 +258,39 @@ def test_an_interrupted_run_is_not_packed_before_it_is_resumed(tmp_path):
     )
     assert subprocess.run(["bash", "-c", script]).returncode == 0
     calls = (tmp_path / "calls").read_text()
-    assert "pack" in calls and str(done) in calls and str(cut) not in calls
-    assert pack.run_state(cut) == "partial"
+    assert str(done) in calls and str(cut) not in calls and str(retime) not in calls
+    assert pack.run_state(cut) == "partial" and pack.run_state(retime) == "raw"
 
 
-def test_a_claimed_run_not_packed_at_the_end_is_a_failure(tmp_path):
+def test_a_claimed_run_not_complete_at_the_end_is_a_failure(tmp_path):
+    """A restart that skips an earlier boot's packed run must still see its
+    unresolved failure: every claimed run is checked with run-complete."""
     runs = tmp_path / "repo" / "experiments" / "data" / "runs"
-    packed(runs / "camera-ready-aarch64")
-    (tmp_path / "claims.txt").write_text("camera-ready-aarch64\nscenario-v1-aarch64\n")
+    ok, failing = runs / "camera-ready-aarch64", runs / "camera-ready-ablation-1-aarch64"
+    for run in (ok, failing):
+        packed(run)
+        (run / "cells.json").write_text('{"c0": {}}')
+        (run / "run.json").write_text('{"manifest": {"cells": 1}}')
+    (failing / "failed").mkdir()
+    (failing / "failed" / "c.json").write_text('{"id": "c"}')  # never finished
+    claims = "camera-ready-aarch64\ncamera-ready-ablation-1-aarch64\nscenario-v1-aarch64\n"
+    (tmp_path / "claims.txt").write_text(claims)
     check = block("while read -r rid; do", '\ndone < "$CLAIMS"\n')
+    complete = (
+        f'run_complete() {{ "{sys.executable}" -c "import sys, pathlib; '
+        "from treewalker_exp import check_run as cr; "
+        "p = cr.completeness(pathlib.Path(sys.argv[1])); print('; '.join(p)); "
+        'sys.exit(1 if p else 0)" "$REPO_DIR/experiments/data/runs/$1"; }\n'
+    )
     script = (
         f"REPO_DIR={tmp_path}/repo\nCLAIMS={tmp_path}/claims.txt\nFAILURES=''\n"
-        + state_stub()
+        + complete
         + 'failed_step() { FAILURES="$FAILURES$*; "; }\n'
         + check
         + 'echo "$FAILURES"\n'
     )
-    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
-    assert out.strip() == "Run scenario-v1-aarch64: absent at the end of the boot, not packed;"
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.strip()
+    assert out == (
+        "Run camera-ready-ablation-1-aarch64: incomplete: failed cell c.json ; "
+        "Run scenario-v1-aarch64: incomplete: absent, not packed ;"
+    )

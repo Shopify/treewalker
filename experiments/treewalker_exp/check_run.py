@@ -342,18 +342,44 @@ def open_failures(run: Path, cells: dict[str, Any]) -> tuple[list[str], list[str
 
 
 def open_sentinel_failures(records: list[dict[str, Any]]) -> tuple[list[Any], list[Any]]:
-    """Sentinel attempts not ok, split into the open ones and those retried with
-    success later (a later record of the same index that is ok)."""
+    """Sentinel attempts not ok, split into the open ones and those a later attempt
+    of the same role (warm-up or measure) retried with success. Every attempt of a
+    run's sentinel times the same sentinel cells, and the runner numbers each new
+    attempt, so the role, not the index, identifies a retry."""
     open_: list[Any] = []
     retried: list[Any] = []
     for i, r in enumerate(records):
         if r.get("status") == "ok":
             continue
         later = any(
-            q.get("index") == r.get("index") and q.get("status") == "ok" for q in records[i + 1 :]
+            q.get("role") == r.get("role") and q.get("status") == "ok" for q in records[i + 1 :]
         )
         (retried if later else open_).append(r)
     return open_, retried
+
+
+def completeness(run: Path) -> list[str]:
+    """Why a run is not complete, empty when it is: it must be packed, with every
+    cell of its manifest finished and no failed cell or sentinel attempt that a
+    later attempt did not resolve (the "no failed cell" gate of `gates`). The
+    campaign's startup checks every run it claimed with this at the end of a boot,
+    so a restart cannot end in DONE over an earlier boot's unresolved failure."""
+    from . import pack
+
+    state = pack.run_state(run)
+    if state != "packed":
+        return [f"{state}, not packed"]
+    info = fm.read_json(run / "run.json")
+    cells = fm.read_json(run / "cells.json")
+    failed, _ = open_failures(run, cells)
+    expected = (info.get("manifest") or {}).get("cells")
+    missing = 0 if expected is None else expected - len(cells)
+    bad, _ = open_sentinel_failures((info.get("sentinel") or {}).get("records") or [])
+    out = [f"failed cell {f}" for f in failed]
+    out += [f"{missing} of {expected} cells missing"] if missing > 0 else []
+    out += [f"sentinel attempt {r.get('index')} ({r.get('role')}) {r.get('status')}" for r in bad]
+    out += [] if cells else ["no finished cell"]
+    return out
 
 
 def gates(run: Path, expect_exact_sums: bool | None = None) -> tuple[list[str], bool]:
