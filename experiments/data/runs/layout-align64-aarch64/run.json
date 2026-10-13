@@ -1,5 +1,5 @@
 {
-  "binary_sha256": "1ff23671c891304b0747c0649246dc2cc4139498d6e4317729a702e4c9f49199",
+  "binary_sha256": "855ac668e161f9c56bd2f6b78493776188741298f3edb03a2f032b9e43531208",
   "events": {
     "events": [
       {
@@ -84,86 +84,86 @@
       "cells_done": [
         {
           "id": "support/nt500_md4_h16/lightgbm/panel",
-          "seconds": 0.449178411
+          "seconds": 0.633407936
         },
         {
           "id": "support/nt500_md4_h16/xgboost/panel",
-          "seconds": 0.451862777
+          "seconds": 0.656696536
         },
         {
           "id": "credit/nt500_md4/lightgbm/whatif-v2-k4-G16",
-          "seconds": 0.859240424
+          "seconds": 0.990725255
         },
         {
           "id": "credit/nt500_md4/xgboost/whatif-v2-k4-G16",
-          "seconds": 0.845319989
+          "seconds": 1.017030604
         },
         {
           "id": "fixtures/sigmoid_f64/treelite/import",
-          "seconds": 0.004249636
+          "seconds": 0.004540819
         },
         {
           "id": "fixtures/sigmoid_f32/treelite/import",
-          "seconds": 0.004293026
+          "seconds": 0.002867395
         },
         {
           "id": "fixtures/sigmoid_alpha/treelite/import",
-          "seconds": 0.004240459
+          "seconds": 0.004535698
         },
         {
           "id": "fixtures/identity/treelite/import",
-          "seconds": 0.002212448
+          "seconds": 0.003235169
         },
         {
           "id": "fixtures/ranking/treelite/import",
-          "seconds": 0.002512926
+          "seconds": 0.003590451
         },
         {
           "id": "fixtures/average_base/treelite/import",
-          "seconds": 0.004112595
+          "seconds": 0.00434418
         },
         {
           "id": "fixtures/categories_left/treelite/import",
-          "seconds": 0.004091145
+          "seconds": 0.004099666
         },
         {
           "id": "fixtures/categories_right/treelite/import",
-          "seconds": 0.004103033
+          "seconds": 0.003005709
         },
         {
           "id": "fixtures/categories_f32/treelite/import",
-          "seconds": 0.004089229
+          "seconds": 0.002451197
         },
         {
           "id": "fixtures/lt_zero/treelite/import",
-          "seconds": 0.002285994
+          "seconds": 0.002505743
         },
         {
           "id": "fixtures/positive_infinity/treelite/import",
-          "seconds": 0.002286957
+          "seconds": 0.002565166
         },
         {
           "id": "fixtures/negative_infinity/treelite/import",
-          "seconds": 0.004243319
+          "seconds": 0.002513327
         },
         {
           "id": "fixtures/random_forest/treelite/import",
-          "seconds": 0.004281072
+          "seconds": 0.004572741
         }
       ],
       "cells_failed": [],
       "cells_skipped": [],
-      "finished": 1791635013,
-      "peak_rss_bytes": 49606656,
-      "started": 1791635009
+      "finished": 1791805130,
+      "peak_rss_bytes": 49790976,
+      "started": 1791805125
     }
   ],
   "manifest": {
     "artifacts_dir": "/home/bench/treewalker/experiments/artifacts",
     "cells": 17,
-    "grids_sha256": "e43d3bf51e80fa6ca11a1933b59f7bbcb5d998387c736bcafd56a5217b33d5af",
+    "grids_sha256": "7ca400b8a22ea567e90319e7e171f4c56288ced78b7f5cde42c963e34031b522",
     "source": {
-      "commit": "913fd70e7c936b617445462f983d4ff04ffe970c",
+      "commit": "e721bb8a9cc0bbd02b315578be972a201123fd97",
       "dirty": false,
       "from": "experiments/SOURCE_COMMIT"
     },
@@ -257,9 +257,10 @@
       "version": "3.4.1"
     }
   },
-  "output_schema": 5,
+  "output_schema": 6,
   "run": {
     "batch_rows": 1024,
+    "exact_sums": false,
     "fresh_process": true,
     "hardware_counters": true,
     "max_rounds": 10,
@@ -294,11 +295,11 @@
         "status": "ok",
         "totals": {
           "treewalker/all-on/serving": [
-            64823188,
+            83543567,
             85152
           ]
         },
-        "unix_time": 1791635010
+        "unix_time": 1791805125
       },
       {
         "cells_done": 0,
@@ -307,19 +308,19 @@
         "status": "ok",
         "totals": {
           "treewalker/all-on/serving": [
-            64841205,
+            83530447,
             85152
           ]
         },
-        "unix_time": 1791635010
+        "unix_time": 1791805126
       }
     ]
   },
   "source": {
-    "commit": "913fd70e7c936b617445462f983d4ff04ffe970c",
+    "commit": "e721bb8a9cc0bbd02b315578be972a201123fd97",
     "from": "experiments/SOURCE_COMMIT (git archive)"
   },
-  "started": 1791635009,
+  "started": 1791805125,
   "suite": "acceptance",
   "system_info": {
     "apt_snapshot": "20261005T111000Z",
@@ -327,9 +328,11 @@
     "cmake": "cmake version 4.2.3",
     "cxx": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
     "git": "git version 2.53.0",
-    "git_ref": "913fd70",
+    "git_ref": "e721bb8a9cc0bbd02b315578be972a201123fd97",
+    "hostname": "treewalker-bench-arm-24921e",
     "image": "projects/ubuntu-os-cloud/global/images/ubuntu-2604-resolute-arm64-v20260918",
     "image_requested": "ubuntu-os-cloud/ubuntu-2604-resolute-arm64-v20260918",
+    "instance_id": "8761771971637047384",
     "kernel_cmdline": "BOOT_IMAGE=/vmlinuz-7.0.0-1011-gcp root=PARTUUID=d49ff458-7f9a-45d1-bcb4-17111d7e7726 ro console=ttyS0,115200 panic=-1",
     "machine_type": "c4a-highmem-16",
     "os_release": "Ubuntu 26.04.1 LTS",
@@ -344,33 +347,33 @@
   },
   "timer": {
     "amortized_check": {
-      "amortized_mean": 54.7194,
+      "amortized_mean": 54.73945,
       "calls": 20000,
-      "difference": 23.3538,
+      "difference": 24.089149999999997,
       "overhead_p50": 21,
-      "per_call_mean": 78.0732
+      "per_call_mean": 78.8286
     },
     "calibration": {
       "check_ms": 200,
       "counter": "cntvct_el0",
       "hz": 1000000000.0,
-      "measured_hz": 1000000004.9975209,
+      "measured_hz": 1000000000.0,
       "overhead": {
-        "max": 6144,
-        "mean": 21.02794,
+        "max": 3983,
+        "mean": 20.96904,
         "min": 10,
         "n": 100000,
         "p50": 21,
         "p90": 21,
         "p99": 21
       },
-      "relative_difference": -4.99752095262096e-9,
+      "relative_difference": 0.0,
       "resolution_ticks": 20,
       "source": "cntfrq_el0"
     }
   },
   "tl2cgen_runtime": {
     "path": "/home/bench/treewalker/.venv/lib/python3.14/site-packages/tl2cgen/lib/libtl2cgen.so",
-    "sha256": "d784d6bb9cb7cd31eb5e3954f165b902c75f8fabef418c090b2040686673efc9"
+    "sha256": "8414926a711d561002b37c4194a1bff2358620b1fe82d08757ab55036512d886"
   }
 }

@@ -1,0 +1,562 @@
+{
+  "scenario_credit/lightgbm/whatif-v1-k8-G128": {
+    "ablations": {
+      "all-on": {
+        "flags": {},
+        "load": [],
+        "totals": "const=5187682, varying=5734896, unsplit=4186418, recurse=1548478, leaf=2548478, leaf_adds=128000000, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=2048000, sort_compares=12527027, sweep_compares=3907775, mask_writes=3634000"
+      },
+      "disable_varying_precompute": {
+        "flags": {
+          "disable_varying_precompute": "active"
+        },
+        "load": [],
+        "totals": "const=5187682, varying=5734896, unsplit=4186418, recurse=1548478, leaf=2548478, leaf_adds=128000000, row_evals=487099114, scan_rows=487099114, scan_compares=487099114, scan_missing=487099114, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+      }
+    },
+    "cell": {
+      "baselines": {},
+      "content_key": "49a301139b8b9729feba89d58fb637ff7ab8f98a230a42bfca4dd7c4d0af9ac0",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "551322de316625ec7282eef8b421201dc1989fc4f29c1cd976b568b8c9f5d29e",
+        "group_offsets": "5fb16da775988cc8ba5ba60bc0a4c96c328c35e0b6cea8dbd65cb496caa7ef91",
+        "test_data": "9ca79cae29e8f5685da87ade21d9be2935a9fea8c84f801a36b5fbc9a7d353d1",
+        "walker_config": "1a915e0dc5df064aa7eb8688c50ea68071d02fdd312bef52e2ac48956cf77d6b"
+      },
+      "dataset": "credit",
+      "feature_order": [
+        "x1",
+        "x2",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "x8",
+        "x9",
+        "x10",
+        "x11",
+        "x12",
+        "x13",
+        "x14",
+        "x15",
+        "x16",
+        "x17",
+        "x18",
+        "x19",
+        "x20",
+        "x21",
+        "x22",
+        "x23"
+      ],
+      "features": {
+        "mono_dec": [],
+        "mono_inc": [],
+        "realized_varying": [
+          "x1",
+          "x12",
+          "x18",
+          "x19",
+          "x20",
+          "x21",
+          "x22",
+          "x23"
+        ],
+        "varying": [
+          "x1",
+          "x12",
+          "x18",
+          "x19",
+          "x20",
+          "x21",
+          "x22",
+          "x23"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "entities.npy",
+          "sha256": "551322de316625ec7282eef8b421201dc1989fc4f29c1cd976b568b8c9f5d29e"
+        },
+        "group_offsets": {
+          "path": "group_offsets.bin",
+          "sha256": "5fb16da775988cc8ba5ba60bc0a4c96c328c35e0b6cea8dbd65cb496caa7ef91"
+        },
+        "model_native": {
+          "path": "../../lightgbm/model_native.txt",
+          "sha256": "deb0c25ad70c7b5454a7a40382d745e713e358ef7cf864eeeb0136c56f5f8bc3"
+        },
+        "model_treelite_bin": {
+          "path": "../../lightgbm/model_treelite.bin",
+          "sha256": "9c227fab5f635197974ecff73f645236ca3c31d2b1ace0c8c3b01f92b2f12626"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "859268a1a5387cef6398d651c81d3a56616a4ca54098c72877c0e20a67d6a987"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "86168e6e3ea7f627cf5bebf145b5c1c591e091926f28cd67e3ad11566ab55ea8"
+        },
+        "reference": {
+          "path": "reference.bin",
+          "sha256": "2b70c207654b028e73146b3db592c75673d6652db87a54a390b6797b688ece47"
+        },
+        "test_data": {
+          "path": "test_data.bin",
+          "sha256": "9ca79cae29e8f5685da87ade21d9be2935a9fea8c84f801a36b5fbc9a7d353d1"
+        },
+        "walker_config": {
+          "path": "walker_config.json",
+          "sha256": "1a915e0dc5df064aa7eb8688c50ea68071d02fdd312bef52e2ac48956cf77d6b"
+        }
+      },
+      "framework": "lightgbm",
+      "generator": "whatif-v1",
+      "grouping": {
+        "G": 128,
+        "kind": "whatif",
+        "n_groups": 2000,
+        "rows": 256000,
+        "size_max": 128,
+        "size_mean": 128.0,
+        "size_min": 128
+      },
+      "horizon": null,
+      "id": "scenario_credit/lightgbm/whatif-v1-k8-G128",
+      "k": {
+        "realized_varying_columns": 8,
+        "requested": 8,
+        "selected": 8
+      },
+      "key": "9507526e9b2d0d9cad25f833f86d0b5f3b0bc84963b93c8cdbc55a410f8bbe33",
+      "libraries": {
+        "lightgbm": "4.7.0",
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2"
+      },
+      "limits": [],
+      "max_depth": 8,
+      "model": {
+        "dir": "../../lightgbm",
+        "key": "881ecfec1b7455580eeac5a9f718c5d4d9452a72dd8ef3530a02b1fd3e567ca9",
+        "structure": {
+          "max_tree_nodes": 325,
+          "total_nodes": 74594,
+          "trees": 500
+        },
+        "varying_predicates_upper_bound": 1817
+      },
+      "model_key": "881ecfec1b7455580eeac5a9f718c5d4d9452a72dd8ef3530a02b1fd3e567ca9",
+      "n_trees": 500,
+      "oracle": {
+        "base_score": 0.0,
+        "divisor": 1.0,
+        "groups": [
+          232,
+          411,
+          1033,
+          1185
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {
+        "G": 128,
+        "k": 8
+      },
+      "perturbation": {
+        "any_zero_group_fraction": 0.4715,
+        "feature_names": [
+          "x1",
+          "x12",
+          "x18",
+          "x19",
+          "x20",
+          "x21",
+          "x22",
+          "x23"
+        ],
+        "features": [
+          0,
+          11,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22
+        ],
+        "pool": [
+          "x1",
+          "x12",
+          "x13",
+          "x14",
+          "x15",
+          "x16",
+          "x17",
+          "x18",
+          "x19",
+          "x20",
+          "x21",
+          "x22",
+          "x23"
+        ],
+        "ranking": "LightGBM gain importance",
+        "shock": "multiplicative 2**Uniform(-1, 1)"
+      },
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "generator": 42,
+        "split": 42
+      },
+      "split": {
+        "seed": 42,
+        "test_frac": 0.2,
+        "unit": "row"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 500,
+        "params": {
+          "learning_rate": 0.05,
+          "max_depth": 8,
+          "metric": "binary_logloss",
+          "num_leaves": 255,
+          "objective": "binary",
+          "seed": 42,
+          "verbose": -1
+        }
+      },
+      "warnings": [],
+      "workload": "whatif-v1"
+    },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
+    "excluded": [],
+    "groups": 2000,
+    "id": "scenario_credit/lightgbm/whatif-v1-k8-G128",
+    "load_seconds": {
+      "exact_sums_off": 0.005852099
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_full_walk"
+        ],
+        "interface_one_row": "predict_full_walk",
+        "interfaces": {
+          "serving": "predict_full_walk"
+        },
+        "method": "treewalker_fullwalk",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_full_walk"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker_research",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "disable_varying_precompute"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": false,
+      "nodes": 74594,
+      "threshold_type": "F64",
+      "trees": 500
+    },
+    "model_bytes": 6211337,
+    "required_methods": [
+      "treewalker",
+      "treewalker_fullwalk"
+    ],
+    "resume_key": "a90160c39e465d2015c6613f03dc9d662d76b29f53bf548de4b6b68e6e24c34d",
+    "rows": 256000,
+    "run": {
+      "batch_rows": 1024,
+      "exact_sums": false,
+      "fresh_process": true,
+      "hardware_counters": true,
+      "max_rounds": 8,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 8,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 2.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": {
+      "cap": 65536,
+      "expected_rows": 65536.0,
+      "fraction": 0.256,
+      "groups_sha256": "f3934796b6c6dea59c44ebc43f335b366e4c292eec0a2998d5edd582ad564569",
+      "min_groups": 200,
+      "overshoot": 0.0,
+      "pool_groups": 2000,
+      "pool_rows": 256000,
+      "rows": 65536,
+      "seed": 13543484768474657514,
+      "strata": [
+        {
+          "max_size": 255,
+          "min_size": 128,
+          "pool": 2000,
+          "pool_rows": 256000,
+          "sampled": 512,
+          "sampled_rows": 65536,
+          "weight": 3.90625
+        }
+      ]
+    },
+    "seconds": 14.882235275,
+    "stop": {
+      "serving": {
+        "blocks": 96,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 8,
+        "rse_pct": {
+          "treewalker/all-on": 0.033596259517922465,
+          "treewalker_fullwalk/-": 0.011790387690383477,
+          "treewalker_research/all-on": 0.04417426953220179,
+          "treewalker_research/disable_varying_precompute": 0.024329625227917116
+        },
+        "seconds": 10.695405946,
+        "totals": {
+          "treewalker/all-on": [
+            1411363170,
+            524288
+          ],
+          "treewalker_fullwalk/-": [
+            11572459938,
+            524288
+          ],
+          "treewalker_research/all-on": [
+            1454157440,
+            524288
+          ],
+          "treewalker_research/disable_varying_precompute": [
+            8195391304,
+            524288
+          ]
+        }
+      }
+    },
+    "suite": "scenario-v1",
+    "timed_groups": 512,
+    "validation": {
+      "checks": [
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65536,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65536,
+          "tolerance": 5.583486128153889e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65536,
+          "tolerance": 0.0,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65536,
+          "tolerance": 5.583486128153889e-12,
+          "variant": "-"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65536,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65536,
+          "tolerance": 5.583486128153889e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65536,
+          "tolerance": 0.0,
+          "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65536,
+          "tolerance": 5.583486128153889e-12,
+          "variant": "disable_varying_precompute"
+        }
+      ],
+      "groups": 512,
+      "oracle": {
+        "exact_sums": false,
+        "groups": 4,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": false,
+          "max_abs": 4.884981308350689e-15,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": false,
+          "max_abs": 4.884981308350689e-15,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 1.1102230246251565e-15,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 65536
+      }
+    },
+    "xgboost_processes": null
+  }
+}

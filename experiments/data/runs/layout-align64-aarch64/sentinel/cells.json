@@ -301,11 +301,21 @@
         "warnings": [],
         "workload": "panel"
       },
+      "exact_sums": {
+        "forests": {
+          "exact_sums_off": {
+            "exact_sums": false,
+            "load": [],
+            "max_group_width": 16
+          }
+        },
+        "setting": false
+      },
       "excluded": [],
       "groups": 1774,
       "id": "support/nt500_md4_h16/lightgbm/panel",
       "load_seconds": {
-        "": 0.001038647
+        "exact_sums_off": 0.001050053
       },
       "methods": [
         {
@@ -328,7 +338,7 @@
       ],
       "model": {
         "bitset_bytes": 0,
-        "exact_sums": true,
+        "exact_sums": false,
         "nodes": 13152,
         "threshold_type": "F64",
         "trees": 500
@@ -337,10 +347,11 @@
       "required_methods": [
         "treewalker"
       ],
-      "resume_key": "b3607abcd688b623fea3b193846e8e7d94730e1f2d65b249b2a635753e7ebe53",
+      "resume_key": "5e2ee6c1375d7b96c7496f5bdd329f61794b6ca157ed8e47105fe7bad6f9bee8",
       "rows": 28384,
       "run": {
         "batch_rows": 1024,
+        "exact_sums": false,
         "fresh_process": true,
         "hardware_counters": true,
         "max_rounds": 10,
@@ -360,7 +371,7 @@
         "xgboost_processes": 6
       },
       "sample": null,
-      "seconds": 0.16613604,
+      "seconds": 0.295303281,
       "stop": {
         "serving": {
           "blocks": 36,
@@ -373,12 +384,12 @@
           "reason": "precision",
           "rounds": 3,
           "rse_pct": {
-            "treewalker/all-on": 0.1410612369929852
+            "treewalker/all-on": 0.1612526516065298
           },
-          "seconds": 0.073437847,
+          "seconds": 0.094034885,
           "totals": {
             "treewalker/all-on": [
-              64823188,
+              83543567,
               85152
             ]
           }
@@ -389,7 +400,7 @@
       "validation": {
         "checks": [
           {
-            "against": "predict",
+            "against": "full walk exact_sums_off",
             "bitwise": true,
             "interface": "predict_group",
             "max_abs": 0.0,
@@ -400,30 +411,43 @@
             "rows": 28384,
             "tolerance": 0.0,
             "variant": "all-on"
+          },
+          {
+            "against": "predict",
+            "bitwise": false,
+            "interface": "predict_group",
+            "max_abs": 0.0,
+            "method": "treewalker",
+            "mismatches": 0,
+            "mode": "serving",
+            "passed": true,
+            "rows": 28384,
+            "tolerance": 6.297044173582672e-12,
+            "variant": "all-on"
           }
         ],
         "groups": 1774,
         "oracle": {
-          "exact_sums": true,
+          "exact_sums": false,
           "groups": 32,
           "output_vs_predict": {
             "mismatches": 0
           },
           "raw_margin": {
-            "bitwise": true,
-            "max_abs": 0.0,
+            "bitwise": false,
+            "max_abs": 1.7763568394002505e-15,
             "mismatches": 0
           },
           "rows": 512,
           "status": "pass",
           "tree_sum": {
-            "bitwise": true,
-            "max_abs": 0.0,
+            "bitwise": false,
+            "max_abs": 1.7763568394002505e-15,
             "mismatches": 0
           }
         },
         "reference": {
-          "max_abs_vs_predict": 1.0547118733938987e-15,
+          "max_abs_vs_predict": 1.0824674490095276e-15,
           "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
           "rows": 28384
         }
@@ -733,11 +757,21 @@
         "warnings": [],
         "workload": "panel"
       },
+      "exact_sums": {
+        "forests": {
+          "exact_sums_off": {
+            "exact_sums": false,
+            "load": [],
+            "max_group_width": 16
+          }
+        },
+        "setting": false
+      },
       "excluded": [],
       "groups": 1774,
       "id": "support/nt500_md4_h16/lightgbm/panel",
       "load_seconds": {
-        "": 0.001021152
+        "exact_sums_off": 0.001046909
       },
       "methods": [
         {
@@ -760,7 +794,7 @@
       ],
       "model": {
         "bitset_bytes": 0,
-        "exact_sums": true,
+        "exact_sums": false,
         "nodes": 13152,
         "threshold_type": "F64",
         "trees": 500
@@ -769,10 +803,11 @@
       "required_methods": [
         "treewalker"
       ],
-      "resume_key": "b3607abcd688b623fea3b193846e8e7d94730e1f2d65b249b2a635753e7ebe53",
+      "resume_key": "5e2ee6c1375d7b96c7496f5bdd329f61794b6ca157ed8e47105fe7bad6f9bee8",
       "rows": 28384,
       "run": {
         "batch_rows": 1024,
+        "exact_sums": false,
         "fresh_process": true,
         "hardware_counters": true,
         "max_rounds": 10,
@@ -792,7 +827,7 @@
         "xgboost_processes": 6
       },
       "sample": null,
-      "seconds": 0.166410409,
+      "seconds": 0.295604817,
       "stop": {
         "serving": {
           "blocks": 36,
@@ -805,12 +840,12 @@
           "reason": "precision",
           "rounds": 3,
           "rse_pct": {
-            "treewalker/all-on": 0.11743700316041766
+            "treewalker/all-on": 0.3494659513228079
           },
-          "seconds": 0.073507387,
+          "seconds": 0.094034985,
           "totals": {
             "treewalker/all-on": [
-              64841205,
+              83530447,
               85152
             ]
           }
@@ -821,7 +856,7 @@
       "validation": {
         "checks": [
           {
-            "against": "predict",
+            "against": "full walk exact_sums_off",
             "bitwise": true,
             "interface": "predict_group",
             "max_abs": 0.0,
@@ -832,30 +867,43 @@
             "rows": 28384,
             "tolerance": 0.0,
             "variant": "all-on"
+          },
+          {
+            "against": "predict",
+            "bitwise": false,
+            "interface": "predict_group",
+            "max_abs": 0.0,
+            "method": "treewalker",
+            "mismatches": 0,
+            "mode": "serving",
+            "passed": true,
+            "rows": 28384,
+            "tolerance": 6.297044173582672e-12,
+            "variant": "all-on"
           }
         ],
         "groups": 1774,
         "oracle": {
-          "exact_sums": true,
+          "exact_sums": false,
           "groups": 32,
           "output_vs_predict": {
             "mismatches": 0
           },
           "raw_margin": {
-            "bitwise": true,
-            "max_abs": 0.0,
+            "bitwise": false,
+            "max_abs": 1.7763568394002505e-15,
             "mismatches": 0
           },
           "rows": 512,
           "status": "pass",
           "tree_sum": {
-            "bitwise": true,
-            "max_abs": 0.0,
+            "bitwise": false,
+            "max_abs": 1.7763568394002505e-15,
             "mismatches": 0
           }
         },
         "reference": {
-          "max_abs_vs_predict": 1.0547118733938987e-15,
+          "max_abs_vs_predict": 1.0824674490095276e-15,
           "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
           "rows": 28384
         }

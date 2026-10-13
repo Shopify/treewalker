@@ -1,0 +1,728 @@
+{
+  "support/nt1000_md16_h8/lightgbm/panel": {
+    "ablations": {},
+    "cell": {
+      "baselines": {
+        "lleaves": {
+          "effective": {
+            "cc": "/usr/bin/aarch64-linux-gnu-gcc-15",
+            "cc_version": "unknown",
+            "codegen": {
+              "codemodel": "default",
+              "cpu": "neoverse-v2",
+              "features": "+aes,+crc,+fp-armv8,+lse,+neon,+rand,+sha2,+sha3,+sm4,+sve,+sve-aes,+sve-sha3,+sve-sm4,+sve2",
+              "fp_contract": "on (TargetOptions default, FPOpFusion::Standard)",
+              "ir_optimization": "none",
+              "llvm": "22.1.0",
+              "opt": 3,
+              "reloc": "pic",
+              "triple": "aarch64-unknown-linux-gnu"
+            },
+            "fblocksize": 34,
+            "fp_contract": "on",
+            "link_command": [
+              "/usr/bin/aarch64-linux-gnu-gcc-15",
+              "-shared",
+              "-o",
+              "/home/bench/treewalker/experiments/artifacts/support/nt1000_md16_h8/lightgbm/lleaves.so",
+              "<objects>"
+            ],
+            "lleaves": "1.4.1",
+            "llvmlite": "0.50.0",
+            "model": "/home/bench/treewalker/experiments/artifacts/support/nt1000_md16_h8/lightgbm/model_native.txt",
+            "n_jobs": 4,
+            "opt_level": "3",
+            "output": "/home/bench/treewalker/experiments/artifacts/support/nt1000_md16_h8/lightgbm/lleaves.so",
+            "relocation_model": "pic",
+            "target_cpu": "native",
+            "target_triple": "aarch64-unknown-linux-gnu",
+            "use_fp64": true
+          },
+          "identity": {
+            "baseline": "lleaves",
+            "cc": {
+              "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+              "target": "aarch64-linux-gnu",
+              "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "compile_lock_sha256": "761d1326ad45f3bdea0bc145b92f10c107e3958f1c99e16990faef4ff27a917a",
+            "compile_py_sha256": "fbf03429f403a7e43f9d59801dac7e946c57d2ad8637db4709f90ca9083ab543",
+            "host_cpu": "unknown",
+            "model_sha256": "83162ee25037e4d91a881ecffde4a562bbd451a6fd15b1f20b5b77ed27571fce",
+            "schema_version": 2,
+            "settings": {
+              "cc": "/usr/bin/aarch64-linux-gnu-gcc-15",
+              "fblocksize": 34,
+              "fp_contract": "on",
+              "n_jobs": 4,
+              "opt_level": "3",
+              "relocation_model": "pic",
+              "target_cpu": "native",
+              "use_fp64": true
+            }
+          },
+          "key": "06903af7482be020c3451a16fc5b060955727bcbf9447fa0d755dfce05429e48",
+          "library": "lleaves.so",
+          "sha256": "5a7a37fd122089dfbd32907bcdb4febd15c8145e082b0daf13bb7391d499cd43",
+          "status": "ready"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 8,
+            "source_files": 150
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/aarch64-linux-gnu-gcc-15",
+              "target": "aarch64-linux-gnu",
+              "version": "aarch64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "unknown",
+            "model_sha256": "f026a9108169d6d6af8bfa7e1c02da83f7f5b7e9967e0e6020ea9f0e25cd0dff",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 150
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "21951e476843cb5fa2ba923c67313942d45f9eb9c249bcc34a42f1d908894f6c",
+          "library": "tl2cgen.so",
+          "sha256": "ceafa69ac000f0b183b29db48ec8b8ef784e4368c1fbe16d83cbaa1c7027543e",
+          "status": "ready"
+        }
+      },
+      "content_key": "e3b2043ffbb1f55eb6fdc97a694342b7b2603ba5ab766b76d341155ea01f3d94",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370",
+        "test_data": "81ea6826d970985c48ce715f8a1065e1e8ef5e4160ac4f9efbc21a4020d62211",
+        "walker_config": "05efd8b04aa18c5d8e4a39ea25fe97b3ab8836f178c39dffeeb31fa081973665"
+      },
+      "dataset": "support",
+      "feature_order": [
+        "x0",
+        "x1",
+        "x2",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "x8",
+        "x9",
+        "x10",
+        "x11",
+        "x12",
+        "x13",
+        "time_step",
+        "time_step_sq",
+        "remaining_steps",
+        "remaining_frac_sq",
+        "interaction_x0_t",
+        "hazard_bump"
+      ],
+      "features": {
+        "mono_dec": [
+          "remaining_steps",
+          "remaining_frac_sq"
+        ],
+        "mono_inc": [
+          "time_step",
+          "time_step_sq",
+          "interaction_x0_t"
+        ],
+        "realized_varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ],
+        "varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "../../../entities.npy",
+          "sha256": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370"
+        },
+        "model_native": {
+          "path": "../../model_native.txt",
+          "sha256": "83162ee25037e4d91a881ecffde4a562bbd451a6fd15b1f20b5b77ed27571fce"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "f026a9108169d6d6af8bfa7e1c02da83f7f5b7e9967e0e6020ea9f0e25cd0dff"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "b04531e127003986f964a53df0fb243c3fc386f6673fc9fc9ddc20477ce12723"
+        },
+        "predictions": {
+          "path": "../../predictions.npy",
+          "sha256": "957776ed8469d8f8c48d9a829857412b499e52eee7925bafc9ba2acc262aa887"
+        },
+        "test_data": {
+          "path": "../../../test_data.bin",
+          "sha256": "81ea6826d970985c48ce715f8a1065e1e8ef5e4160ac4f9efbc21a4020d62211"
+        },
+        "walker_config": {
+          "path": "../../../walker_config.json",
+          "sha256": "05efd8b04aa18c5d8e4a39ea25fe97b3ab8836f178c39dffeeb31fa081973665"
+        }
+      },
+      "framework": "lightgbm",
+      "generator": "panel-v2",
+      "grouping": {
+        "kind": "panel",
+        "n_groups": 1774,
+        "rows": 14192,
+        "size_max": 8,
+        "size_mean": 8.0,
+        "size_min": 8,
+        "width": 8
+      },
+      "horizon": {
+        "realized": 8,
+        "requested": 8
+      },
+      "id": "support/nt1000_md16_h8/lightgbm/panel",
+      "k": null,
+      "key": "6ce920bc33695ed4727bc2967f242757f38abbc4271f78c6efe29c0d3eae8c85",
+      "libraries": {
+        "lightgbm": "4.7.0",
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2"
+      },
+      "limits": [],
+      "max_depth": 16,
+      "model": {
+        "dir": "../..",
+        "key": "53b9baf78f7049da6c6b95ce9ceef347f0330815c9a52216d31edbd86cb9c9f5",
+        "structure": {
+          "max_tree_nodes": 2285,
+          "total_nodes": 1199918,
+          "trees": 1000
+        },
+        "varying_predicates_upper_bound": 272
+      },
+      "model_key": "53b9baf78f7049da6c6b95ce9ceef347f0330815c9a52216d31edbd86cb9c9f5",
+      "n_trees": 1000,
+      "oracle": {
+        "base_score": 0.0,
+        "divisor": 1.0,
+        "groups": [
+          26,
+          59,
+          86,
+          150,
+          174,
+          186,
+          283,
+          300,
+          384,
+          396,
+          421,
+          429,
+          463,
+          479,
+          492,
+          500,
+          511,
+          513,
+          521,
+          559,
+          566,
+          583,
+          587,
+          703,
+          724,
+          731,
+          795,
+          805,
+          816,
+          829,
+          844,
+          915,
+          955,
+          968,
+          985,
+          1000,
+          1001,
+          1031,
+          1042,
+          1061,
+          1097,
+          1126,
+          1143,
+          1146,
+          1179,
+          1212,
+          1241,
+          1254,
+          1303,
+          1313,
+          1358,
+          1374,
+          1390,
+          1408,
+          1442,
+          1618,
+          1626,
+          1647,
+          1649,
+          1741,
+          1746,
+          1747,
+          1752,
+          1762
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {},
+      "perturbation": null,
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "split": 1886352030
+      },
+      "split": {
+        "seed": 1886352030,
+        "test_frac": 0.2,
+        "unit": "patient"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 1000,
+        "params": {
+          "learning_rate": 0.05,
+          "max_depth": 16,
+          "metric": "binary_logloss",
+          "num_leaves": 65535,
+          "objective": "binary",
+          "seed": 42,
+          "verbose": -1
+        }
+      },
+      "warnings": [],
+      "workload": "panel"
+    },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 8
+        }
+      },
+      "setting": false
+    },
+    "excluded": [
+      {
+        "method": "quickscorer",
+        "reason": "unsupported: categorical splits",
+        "variant": "-"
+      }
+    ],
+    "groups": 1774,
+    "id": "support/nt1000_md16_h8/lightgbm/panel",
+    "load_seconds": {
+      "exact_sums_off": 0.064371184
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_full_walk"
+        ],
+        "interface_one_row": "predict_full_walk",
+        "interfaces": {
+          "serving": "predict_full_walk"
+        },
+        "method": "treewalker_fullwalk",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_full_walk"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "interface_one_row": "predict",
+        "interfaces": {
+          "serving": "predict loop"
+        },
+        "method": "tl2cgen",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "forest_root"
+        ],
+        "interface_one_row": "forest_root",
+        "interfaces": {
+          "serving": "forest_root"
+        },
+        "method": "lleaves",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "forest_root"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "PredictForMat",
+          "PredictForMatSingleRowFast loop"
+        ],
+        "interface_one_row": "PredictForMatSingleRowFast",
+        "interfaces": {
+          "serving": "PredictForMatSingleRowFast loop"
+        },
+        "method": "lightgbm_native",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "PredictForMat",
+          "PredictForMatSingleRowFast loop"
+        ],
+        "variant": "-"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": false,
+      "nodes": 1199918,
+      "threshold_type": "F64",
+      "trees": 1000
+    },
+    "model_bytes": 98637013,
+    "required_methods": [
+      "treewalker",
+      "treewalker_fullwalk",
+      "lightgbm_native"
+    ],
+    "resume_key": "31837b0d7a5d4ac68e6c1899b4fdf31b05ba70f09ae28c03b1ac915a2eb1ea6d",
+    "rows": 14192,
+    "run": {
+      "batch_rows": 1024,
+      "exact_sums": false,
+      "fresh_process": true,
+      "hardware_counters": true,
+      "max_rounds": 16,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 16,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 2.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 248.39266252,
+    "stop": {
+      "serving": {
+        "blocks": 192,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "DMatrixCreateFromMat+PredictBatch",
+                "ticks": 931867103
+              },
+              {
+                "interface": "predict loop",
+                "ticks": 925082394
+              }
+            ],
+            "chosen": "predict loop",
+            "margin_pct": 0.7334167252565749,
+            "method": "tl2cgen",
+            "rows": 1176,
+            "variant": "-"
+          },
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "PredictForMat",
+                "ticks": 630144170
+              },
+              {
+                "interface": "PredictForMatSingleRowFast loop",
+                "ticks": 620567179
+              }
+            ],
+            "chosen": "PredictForMatSingleRowFast loop",
+            "margin_pct": 1.5432641822006543,
+            "method": "lightgbm_native",
+            "rows": 1176,
+            "variant": "-"
+          }
+        ],
+        "reason": "precision",
+        "rounds": 16,
+        "rse_pct": {
+          "lightgbm_native/-": 0.07517420006811663,
+          "lleaves/-": 0.27974010129157695,
+          "tl2cgen/-": 0.18705703749692673,
+          "treewalker/all-on": 0.19944439275361747,
+          "treewalker_fullwalk/-": 0.21779833294267803
+        },
+        "seconds": 223.887849575,
+        "totals": {
+          "lightgbm_native/-": [
+            60445114463,
+            227072
+          ],
+          "lleaves/-": [
+            26293186373,
+            227072
+          ],
+          "tl2cgen/-": [
+            89671672171,
+            227072
+          ],
+          "treewalker/all-on": [
+            10686486373,
+            227072
+          ],
+          "treewalker_fullwalk/-": [
+            14981173078,
+            227072
+          ]
+        }
+      }
+    },
+    "suite": "camera-ready",
+    "timed_groups": 1774,
+    "validation": {
+      "checks": [
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.4500795991161968e-11,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 0.0,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.4500795991161968e-11,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "defect": {
+            "affected_differ": 0,
+            "affected_max_abs": 0.0,
+            "affected_rows": 0,
+            "name": "tl2cgen-f64-missing-alias: Entry union int missing vs double fvalue"
+          },
+          "interface": "DMatrixCreateFromMat+PredictBatch",
+          "max_abs": 1.5265566588595902e-15,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.4500795991161968e-11,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "defect": {
+            "affected_differ": 0,
+            "affected_max_abs": 0.0,
+            "affected_rows": 0,
+            "name": "tl2cgen-f64-missing-alias: Entry union int missing vs double fvalue"
+          },
+          "interface": "predict loop",
+          "max_abs": 1.5265566588595902e-15,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.4500795991161968e-11,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "forest_root",
+          "max_abs": 1.4432899320127035e-15,
+          "method": "lleaves",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.4500795991161968e-11,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictForMat",
+          "max_abs": 1.5265566588595902e-15,
+          "method": "lightgbm_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.4500795991161968e-11,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictForMatSingleRowFast loop",
+          "max_abs": 1.5265566588595902e-15,
+          "method": "lightgbm_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.4500795991161968e-11,
+          "variant": "-"
+        }
+      ],
+      "groups": 1774,
+      "oracle": {
+        "exact_sums": false,
+        "groups": 64,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": false,
+          "max_abs": 2.1316282072803006e-14,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": false,
+          "max_abs": 2.1316282072803006e-14,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 1.5265566588595902e-15,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 14192
+      }
+    },
+    "xgboost_processes": null
+  }
+}

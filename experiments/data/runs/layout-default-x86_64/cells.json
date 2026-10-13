@@ -4,14 +4,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=2826578, varying=1367028, unsplit=556489, recurse=810539, leaf=1810539, leaf_adds=8757784, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=128000, sort_compares=568939, sweep_compares=888069, mask_writes=860000"
+        "totals": "const=2826578, varying=1367028, unsplit=556489, recurse=810539, leaf=1810539, leaf_adds=16000000, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=128000, sort_compares=568939, sweep_compares=888069, mask_writes=860000"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=2826578, varying=1367028, unsplit=556489, recurse=810539, leaf=1810539, leaf_adds=8757784, row_evals=17236448, scan_rows=17236448, scan_compares=17236448, scan_missing=17236448, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=2826578, varying=1367028, unsplit=556489, recurse=810539, leaf=1810539, leaf_adds=16000000, row_evals=17236448, scan_rows=17236448, scan_compares=17236448, scan_missing=17236448, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -374,11 +374,21 @@
       "warnings": [],
       "workload": "whatif-credit-core"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 16
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 2000,
     "id": "credit/nt500_md4/lightgbm/whatif-v2-k4-G16",
     "load_seconds": {
-      "": 0.00116116
+      "exact_sums_off": 0.001163359
     },
     "methods": [
       {
@@ -435,7 +445,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 12850,
       "threshold_type": "F64",
       "trees": 500
@@ -444,10 +454,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "1ac265ed7bcab97dc849d49d9aa77a4a32ff44e1cf9a3eb84e8b3eb83b0a93c9",
+    "resume_key": "60e2e0e38fdfa7d911a61f6cbd05141679c884d71aefff32813a0118992c4475",
     "rows": 32000,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -467,7 +478,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 1.353968558,
+    "seconds": 1.5678623040000002,
     "stop": {
       "serving": {
         "blocks": 36,
@@ -480,22 +491,22 @@
         "reason": "precision",
         "rounds": 3,
         "rse_pct": {
-          "treewalker/all-on": 0.0538351899351673,
-          "treewalker_research/all-on": 0.03265558030165084,
-          "treewalker_research/disable_varying_precompute": 0.02563843450287307
+          "treewalker/all-on": 0.08234859280614332,
+          "treewalker_research/all-on": 0.01978136403089165,
+          "treewalker_research/disable_varying_precompute": 0.11946637066366339
         },
-        "seconds": 0.823017965,
+        "seconds": 0.813300999,
         "totals": {
           "treewalker/all-on": [
-            447206942,
+            457564960,
             96000
           ],
           "treewalker_research/all-on": [
-            483071434,
+            460532456,
             96000
           ],
           "treewalker_research/disable_varying_precompute": [
-            796272872,
+            787147644,
             96000
           ]
         }
@@ -506,7 +517,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -520,6 +531,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 4.4017734674551105e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -533,6 +557,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 4.4017734674551105e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -543,30 +580,43 @@
           "rows": 32000,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 4.4017734674551105e-12,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 2000,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 32,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
-          "max_abs": 0.0,
+          "bitwise": false,
+          "max_abs": 5.773159728050814e-15,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
-          "max_abs": 0.0,
+          "bitwise": false,
+          "max_abs": 5.773159728050814e-15,
           "mismatches": 0
         }
       },
       "reference": {
-        "max_abs_vs_predict": 8.881784197001252e-16,
+        "max_abs_vs_predict": 1.0547118733938987e-15,
         "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
         "rows": 32000
       }
@@ -578,14 +628,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=2967607, varying=1251408, unsplit=496021, recurse=755387, leaf=1755387, leaf_adds=8420600, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=128000, sort_compares=567687, sweep_compares=875335, mask_writes=836000"
+        "totals": "const=2967607, varying=1251408, unsplit=496021, recurse=755387, leaf=1755387, leaf_adds=16000000, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=128000, sort_compares=567687, sweep_compares=875335, mask_writes=836000"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=2967607, varying=1251408, unsplit=496021, recurse=755387, leaf=1755387, leaf_adds=8420600, row_evals=15785754, scan_rows=15785754, scan_compares=15785754, scan_missing=15785754, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=2967607, varying=1251408, unsplit=496021, recurse=755387, leaf=1755387, leaf_adds=16000000, row_evals=15785754, scan_rows=15785754, scan_compares=15785754, scan_missing=15785754, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -899,11 +949,21 @@
       "warnings": [],
       "workload": "whatif-credit-core"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 16
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 2000,
     "id": "credit/nt500_md4/xgboost/whatif-v2-k4-G16",
     "load_seconds": {
-      "": 0.001209802
+      "exact_sums_off": 0.001194381
     },
     "methods": [
       {
@@ -960,7 +1020,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 13784,
       "threshold_type": "F32",
       "trees": 500
@@ -969,10 +1029,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "ba4589afedd8deaa93e5043469ff550a39c1c9d20f462ad713cb5621b0d9b8cd",
+    "resume_key": "f66ad644abe273d7757b3ddcc507e1ed1c12249008486f020268527aba311ed2",
     "rows": 32000,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -992,7 +1053,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 1.200773883,
+    "seconds": 1.470968768,
     "stop": {
       "serving": {
         "blocks": 36,
@@ -1005,22 +1066,22 @@
         "reason": "precision",
         "rounds": 3,
         "rse_pct": {
-          "treewalker/all-on": 0.0279668371019834,
-          "treewalker_research/all-on": 0.12215524853672248,
-          "treewalker_research/disable_varying_precompute": 0.02586202348568697
+          "treewalker/all-on": 0.03962813529416313,
+          "treewalker_research/all-on": 0.025904529578313913,
+          "treewalker_research/disable_varying_precompute": 0.03979655011671816
         },
-        "seconds": 0.697549463,
+        "seconds": 0.720182895,
         "totals": {
           "treewalker/all-on": [
-            439411728,
+            477785852,
             96000
           ],
           "treewalker_research/all-on": [
-            445380634,
+            459569166,
             96000
           ],
           "treewalker_research/disable_varying_precompute": [
-            574910078,
+            571365654,
             96000
           ]
         }
@@ -1031,7 +1092,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1045,6 +1106,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 3.803698328848435e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1058,6 +1132,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 3.803698328848435e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1068,24 +1155,37 @@
           "rows": 32000,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 32000,
+          "tolerance": 3.803698328848435e-12,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 2000,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 32,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -1103,14 +1203,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -1193,11 +1293,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/average_base/treelite/import",
     "load_seconds": {
-      "": 6.2278e-05
+      "exact_sums_off": 6.2404e-05
     },
     "methods": [
       {
@@ -1254,7 +1364,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -1263,10 +1373,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "a8a9ad9f691e73656bf82e78a3805475f5e3a74080896d61a12ec3912d360098",
+    "resume_key": "8c0da3a205e88c16b8879a0c959d399f918165957ab68ffaef124f1d0bc78e7a",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -1286,10 +1397,10 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003175714,
+    "seconds": 0.002954031,
     "stop": {
       "serving": {
-        "blocks": 63,
+        "blocks": 35,
         "blocks_per_round": 7,
         "conversion": [],
         "cycle": 2,
@@ -1297,25 +1408,25 @@
         "incomplete_reads": 0,
         "probes": [],
         "reason": "precision",
-        "rounds": 9,
+        "rounds": 5,
         "rse_pct": {
-          "treewalker/all-on": 0.42985975499890905,
-          "treewalker_research/all-on": 0.3461573868240857,
-          "treewalker_research/disable_varying_precompute": 0.9858388356583826
+          "treewalker/all-on": 0.6174344491998811,
+          "treewalker_research/all-on": 0.9321073683847745,
+          "treewalker_research/disable_varying_precompute": 0.7588509063812736
         },
-        "seconds": 0.000908838,
+        "seconds": 0.000473642,
         "totals": {
           "treewalker/all-on": [
-            304954,
-            8064
+            145484,
+            4480
           ],
           "treewalker_research/all-on": [
-            296566,
-            8064
+            150104,
+            4480
           ],
           "treewalker_research/disable_varying_precompute": [
-            125206,
-            8064
+            49002,
+            4480
           ]
         }
       }
@@ -1325,7 +1436,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1339,6 +1450,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1352,6 +1476,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1362,24 +1499,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -1397,14 +1547,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=336, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=336, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -1487,11 +1637,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/categories_f32/treelite/import",
     "load_seconds": {
-      "": 6.4208e-05
+      "exact_sums_off": 6.2701e-05
     },
     "methods": [
       {
@@ -1548,7 +1708,7 @@
     ],
     "model": {
       "bitset_bytes": 8,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F32",
       "trees": 2
@@ -1557,10 +1717,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "bcd731e6988b36ba6ed4c2310c17a1e7e9bf5b34d9671b641420aa8f095b738c",
+    "resume_key": "24fbb66cae1713cb0edc95e28efd2dca06de2b65508c536444c90bdf8b8dac1d",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -1580,7 +1741,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003304854,
+    "seconds": 0.003534855,
     "stop": {
       "serving": {
         "blocks": 70,
@@ -1593,22 +1754,22 @@
         "reason": "block_cap",
         "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 4.00246732705045,
-          "treewalker_research/all-on": 4.466642253703013,
-          "treewalker_research/disable_varying_precompute": 4.56945096022421
+          "treewalker/all-on": 7.471656657673156,
+          "treewalker_research/all-on": 4.050610480025178,
+          "treewalker_research/disable_varying_precompute": 4.393738925463223
         },
-        "seconds": 0.000975859,
+        "seconds": 0.000923605,
         "totals": {
           "treewalker/all-on": [
-            253576,
+            217864,
             8960
           ],
           "treewalker_research/all-on": [
-            247136,
+            234248,
             8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            245292,
+            212024,
             8960
           ]
         }
@@ -1619,7 +1780,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1633,6 +1794,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1646,6 +1820,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1656,24 +1843,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -1691,14 +1891,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=476, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=476, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -1781,11 +1981,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/categories_left/treelite/import",
     "load_seconds": {
-      "": 6.6429e-05
+      "exact_sums_off": 6.8828e-05
     },
     "methods": [
       {
@@ -1842,7 +2052,7 @@
     ],
     "model": {
       "bitset_bytes": 8,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -1851,10 +2061,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "2766b87467508fcd11a4fd1ea444d09dba137c3319a2c1fe0030127c6d5562ec",
+    "resume_key": "30960e3284685941921112692269ce4cf782e9975a706a8847924136607e1d99",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -1874,7 +2085,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003332457,
+    "seconds": 0.003389198,
     "stop": {
       "serving": {
         "blocks": 70,
@@ -1887,22 +2098,22 @@
         "reason": "block_cap",
         "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 3.769391955935956,
-          "treewalker_research/all-on": 6.1299819528290636,
-          "treewalker_research/disable_varying_precompute": 4.7131222833327255
+          "treewalker/all-on": 4.3948210524603475,
+          "treewalker_research/all-on": 4.633483473857787,
+          "treewalker_research/disable_varying_precompute": 4.721244768815324
         },
-        "seconds": 0.001032578,
+        "seconds": 0.0008985,
         "totals": {
           "treewalker/all-on": [
-            292354,
+            209048,
             8960
           ],
           "treewalker_research/all-on": [
-            300324,
+            211956,
             8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            277522,
+            204392,
             8960
           ]
         }
@@ -1913,7 +2124,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1927,6 +2138,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1940,6 +2164,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -1950,24 +2187,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -1985,14 +2235,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=336, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=0, sweep_compares=0, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=336, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -2075,11 +2325,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/categories_right/treelite/import",
     "load_seconds": {
-      "": 7.7211e-05
+      "exact_sums_off": 6.336e-05
     },
     "methods": [
       {
@@ -2136,7 +2396,7 @@
     ],
     "model": {
       "bitset_bytes": 8,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -2145,10 +2405,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "f7908c735811aef4321060f2c86c4d740a0da0bf3379cb9ab680fe02c0bbacb4",
+    "resume_key": "ace7deb9b1a408a3a0853126f2c40ba8f359ca313cf0a1548ce716f9fa0d700e",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -2168,36 +2429,36 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003215126,
+    "seconds": 0.002599694,
     "stop": {
       "serving": {
-        "blocks": 70,
+        "blocks": 21,
         "blocks_per_round": 7,
         "conversion": [],
         "cycle": 2,
         "failures": [],
         "incomplete_reads": 0,
         "probes": [],
-        "reason": "block_cap",
-        "rounds": 10,
+        "reason": "precision",
+        "rounds": 3,
         "rse_pct": {
-          "treewalker/all-on": 4.372342116738059,
-          "treewalker_research/all-on": 8.822443314730508,
-          "treewalker_research/disable_varying_precompute": 6.581107785064303
+          "treewalker/all-on": 0.9495008894463681,
+          "treewalker_research/all-on": 0.1717014072893905,
+          "treewalker_research/disable_varying_precompute": 0.35033041095590445
         },
-        "seconds": 0.000999487,
+        "seconds": 0.000298513,
         "totals": {
           "treewalker/all-on": [
-            268976,
-            8960
+            72678,
+            2688
           ],
           "treewalker_research/all-on": [
-            300204,
-            8960
+            74000,
+            2688
           ],
           "treewalker_research/disable_varying_precompute": [
-            256502,
-            8960
+            71662,
+            2688
           ]
         }
       }
@@ -2207,7 +2468,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2221,6 +2482,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2234,6 +2508,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2244,24 +2531,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -2279,14 +2579,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -2369,11 +2669,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/identity/treelite/import",
     "load_seconds": {
-      "": 6.2904e-05
+      "exact_sums_off": 6.1043e-05
     },
     "methods": [
       {
@@ -2430,7 +2740,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -2439,10 +2749,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "4a86d4be2bf18782c4283841575f6a218062440b79318c58d12a1768cf689919",
+    "resume_key": "4f0c1348f8c2d167e29744b55f7b639586f5846ac24ffe2dd72573f61d58b2e5",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -2462,10 +2773,10 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.002361223,
+    "seconds": 0.002903622,
     "stop": {
       "serving": {
-        "blocks": 21,
+        "blocks": 42,
         "blocks_per_round": 7,
         "conversion": [],
         "cycle": 2,
@@ -2473,25 +2784,25 @@
         "incomplete_reads": 0,
         "probes": [],
         "reason": "precision",
-        "rounds": 3,
+        "rounds": 6,
         "rse_pct": {
-          "treewalker/all-on": 0.51467054234405,
-          "treewalker_research/all-on": 0.32394977241655576,
-          "treewalker_research/disable_varying_precompute": 0.7691305084098282
+          "treewalker/all-on": 0.8213361989021272,
+          "treewalker_research/all-on": 0.8642052176823058,
+          "treewalker_research/disable_varying_precompute": 0.48437588587019575
         },
-        "seconds": 0.000312831,
+        "seconds": 0.000556926,
         "totals": {
           "treewalker/all-on": [
-            102012,
-            2688
+            175892,
+            5376
           ],
           "treewalker_research/all-on": [
-            97786,
-            2688
+            176876,
+            5376
           ],
           "treewalker_research/disable_varying_precompute": [
-            41984,
-            2688
+            60260,
+            5376
           ]
         }
       }
@@ -2501,7 +2812,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2515,6 +2826,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2528,6 +2852,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2538,24 +2875,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -2573,14 +2923,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=133, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=133, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -2663,11 +3013,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/lt_zero/treelite/import",
     "load_seconds": {
-      "": 6.4244e-05
+      "exact_sums_off": 6.2346e-05
     },
     "methods": [
       {
@@ -2724,7 +3084,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -2733,10 +3093,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "ca229e0b432535e6770b6d13e9cc8e21b668243a14935d17ea17b8e6137aafd8",
+    "resume_key": "ab8a24f7dcbe01a12cf133588f5e74a6ffc8d3a999e9dd77d2cc35134fc88f6e",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -2756,7 +3117,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003450408,
+    "seconds": 0.003668158,
     "stop": {
       "serving": {
         "blocks": 70,
@@ -2769,22 +3130,22 @@
         "reason": "block_cap",
         "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 7.553149411450597,
-          "treewalker_research/all-on": 3.317014855027542,
-          "treewalker_research/disable_varying_precompute": 0.9135107558365432
+          "treewalker/all-on": 2.9517772100382773,
+          "treewalker_research/all-on": 2.8274132363317266,
+          "treewalker_research/disable_varying_precompute": 5.199424925300582
         },
-        "seconds": 0.001112074,
+        "seconds": 0.001068533,
         "totals": {
           "treewalker/all-on": [
-            439154,
+            376910,
             8960
           ],
           "treewalker_research/all-on": [
-            413000,
+            383806,
             8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            217500,
+            191386,
             8960
           ]
         }
@@ -2795,7 +3156,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2809,6 +3170,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2822,6 +3196,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -2832,24 +3219,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -2867,14 +3267,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=49, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=49, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -2957,11 +3357,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/negative_infinity/treelite/import",
     "load_seconds": {
-      "": 6.559e-05
+      "exact_sums_off": 6.1515e-05
     },
     "methods": [
       {
@@ -3018,7 +3428,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -3027,10 +3437,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "1d2c36a98d6ee3c69ba192ab9590ea58e6ccb4020c269764e39f22588489b277",
+    "resume_key": "988f60a82e641803edb57555abdd8a996b65ecda8ed33296eaa50ce3fe9cda28",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -3050,7 +3461,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003489962,
+    "seconds": 0.003703715,
     "stop": {
       "serving": {
         "blocks": 70,
@@ -3063,22 +3474,22 @@
         "reason": "block_cap",
         "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 6.855886922410556,
-          "treewalker_research/all-on": 2.747984104668864,
-          "treewalker_research/disable_varying_precompute": 1.344024095664627
+          "treewalker/all-on": 3.02190852605945,
+          "treewalker_research/all-on": 2.6394812591520536,
+          "treewalker_research/disable_varying_precompute": 6.2193402291443505
         },
-        "seconds": 0.001123225,
+        "seconds": 0.001053178,
         "totals": {
           "treewalker/all-on": [
-            440224,
+            365400,
             8960
           ],
           "treewalker_research/all-on": [
-            414330,
+            369182,
             8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            228970,
+            194012,
             8960
           ]
         }
@@ -3089,7 +3500,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3103,6 +3514,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3116,6 +3540,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3126,24 +3563,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -3161,14 +3611,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=168, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=833, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=833, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=168, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -3251,11 +3701,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/positive_infinity/treelite/import",
     "load_seconds": {
-      "": 6.465e-05
+      "exact_sums_off": 6.2966e-05
     },
     "methods": [
       {
@@ -3312,7 +3772,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -3321,10 +3781,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "a97f5771f003fddca843549e2ce9705f1ddb0d6e8f47325c7ab9e561b0cddb08",
+    "resume_key": "9ad78321bac14ed06635bd71ec66464b27ba81b1bb210dda1f2c5a35821902e8",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -3344,36 +3805,36 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.002493347,
+    "seconds": 0.003694031,
     "stop": {
       "serving": {
-        "blocks": 21,
+        "blocks": 70,
         "blocks_per_round": 7,
         "conversion": [],
         "cycle": 2,
         "failures": [],
         "incomplete_reads": 0,
         "probes": [],
-        "reason": "precision",
-        "rounds": 3,
+        "reason": "block_cap",
+        "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 0.3740409960413816,
-          "treewalker_research/all-on": 0.2365631026961076,
-          "treewalker_research/disable_varying_precompute": 0.6554093262429099
+          "treewalker/all-on": 2.6543188503959283,
+          "treewalker_research/all-on": 2.3989773534748102,
+          "treewalker_research/disable_varying_precompute": 4.8191293455202215
         },
-        "seconds": 0.000399055,
+        "seconds": 0.001086816,
         "totals": {
           "treewalker/all-on": [
-            164362,
-            2688
+            393976,
+            8960
           ],
           "treewalker_research/all-on": [
-            162450,
-            2688
+            392848,
+            8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            93458,
-            2688
+            201562,
+            8960
           ]
         }
       }
@@ -3383,7 +3844,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3397,6 +3858,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3410,6 +3884,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3420,24 +3907,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -3455,14 +3955,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=21, varying=35, unsplit=0, recurse=35, leaf=56, leaf_adds=638, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=567, mask_writes=21"
+        "totals": "const=21, varying=35, unsplit=0, recurse=35, leaf=56, leaf_adds=2688, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=567, mask_writes=21"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=21, varying=35, unsplit=0, recurse=35, leaf=56, leaf_adds=638, row_evals=3850, scan_rows=3850, scan_compares=3675, scan_missing=3850, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=21, varying=35, unsplit=0, recurse=35, leaf=56, leaf_adds=2688, row_evals=3850, scan_rows=3850, scan_compares=3675, scan_missing=3850, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -3545,11 +4045,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/random_forest/treelite/import",
     "load_seconds": {
-      "": 6.2275e-05
+      "exact_sums_off": 6.6105e-05
     },
     "methods": [
       {
@@ -3606,7 +4116,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 21,
       "threshold_type": "F64",
       "trees": 3
@@ -3615,10 +4125,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "5c8e9cdad24543fe0c6a2acfac7c3cb6e95bbac361547f707e99354ca5d15c8c",
+    "resume_key": "89c339531611d90d62d22bd12438d9da421819d42685c83ef0a4ce0fe78e8447",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -3638,36 +4149,36 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.002641477,
+    "seconds": 0.003703072,
     "stop": {
       "serving": {
-        "blocks": 28,
+        "blocks": 70,
         "blocks_per_round": 7,
         "conversion": [],
         "cycle": 2,
         "failures": [],
         "incomplete_reads": 0,
         "probes": [],
-        "reason": "precision",
-        "rounds": 4,
+        "reason": "block_cap",
+        "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 0.7934828513157464,
-          "treewalker_research/all-on": 0.7057220983810718,
-          "treewalker_research/disable_varying_precompute": 0.374525422150363
+          "treewalker/all-on": 8.732773782072215,
+          "treewalker_research/all-on": 2.8793234773658845,
+          "treewalker_research/disable_varying_precompute": 0.8725605162657187
         },
-        "seconds": 0.000482546,
+        "seconds": 0.001055865,
         "totals": {
           "treewalker/all-on": [
-            155652,
-            3584
+            346174,
+            8960
           ],
           "treewalker_research/all-on": [
-            153284,
-            3584
+            336912,
+            8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            146700,
-            3584
+            285382,
+            8960
           ]
         }
       }
@@ -3677,7 +4188,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3691,6 +4202,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3704,6 +4228,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3714,24 +4251,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -3749,14 +4299,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -3839,11 +4389,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/ranking/treelite/import",
     "load_seconds": {
-      "": 7.4719e-05
+      "exact_sums_off": 6.3426e-05
     },
     "methods": [
       {
@@ -3900,7 +4460,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -3909,10 +4469,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "bca26d590d947c79f9fe6f47a00b930da17fbb48313f413757a37cb928771556",
+    "resume_key": "0d2d1ab8f5fdeb2cfc110667622c5efac3b8c0c0ce94a431fbe2bdb9d8b6f860",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -3932,10 +4493,10 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.002549917,
+    "seconds": 0.003240243,
     "stop": {
       "serving": {
-        "blocks": 28,
+        "blocks": 56,
         "blocks_per_round": 7,
         "conversion": [],
         "cycle": 2,
@@ -3943,25 +4504,25 @@
         "incomplete_reads": 0,
         "probes": [],
         "reason": "precision",
-        "rounds": 4,
+        "rounds": 8,
         "rse_pct": {
-          "treewalker/all-on": 0.4189412483961535,
-          "treewalker_research/all-on": 0.9411868040971078,
-          "treewalker_research/disable_varying_precompute": 0.563547746672892
+          "treewalker/all-on": 0.4567731034173222,
+          "treewalker_research/all-on": 0.7968245886902268,
+          "treewalker_research/disable_varying_precompute": 0.9372364731208523
         },
-        "seconds": 0.000414575,
+        "seconds": 0.000765419,
         "totals": {
           "treewalker/all-on": [
-            132674,
-            3584
+            246726,
+            7168
           ],
           "treewalker_research/all-on": [
-            131104,
-            3584
+            236948,
+            7168
           ],
           "treewalker_research/disable_varying_precompute": [
-            55580,
-            3584
+            78634,
+            7168
           ]
         }
       }
@@ -3971,7 +4532,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3985,6 +4546,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -3998,6 +4572,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4008,24 +4595,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -4043,14 +4643,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -4133,11 +4733,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/sigmoid_alpha/treelite/import",
     "load_seconds": {
-      "": 6.7344e-05
+      "exact_sums_off": 6.7653e-05
     },
     "methods": [
       {
@@ -4194,7 +4804,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -4203,10 +4813,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "d9eca25fb7fc3a4d5ef864149b22c819dfbdcf19f9860cc70c45285a55bffddc",
+    "resume_key": "1e8ce7f255b021f6ae55fa581cb996d91c32ff194fec30cbd6e9b17183ef8e21",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -4226,7 +4837,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003600358,
+    "seconds": 0.003708191,
     "stop": {
       "serving": {
         "blocks": 70,
@@ -4239,22 +4850,22 @@
         "reason": "block_cap",
         "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 2.6694156766429624,
-          "treewalker_research/all-on": 2.313893522611119,
-          "treewalker_research/disable_varying_precompute": 11.604131076821927
+          "treewalker/all-on": 2.303827139889669,
+          "treewalker_research/all-on": 1.9091599629369478,
+          "treewalker_research/disable_varying_precompute": 4.242342515611646
         },
-        "seconds": 0.001122526,
+        "seconds": 0.001062019,
         "totals": {
           "treewalker/all-on": [
-            422188,
+            373012,
             8960
           ],
           "treewalker_research/all-on": [
-            413138,
+            381728,
             8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            251584,
+            184774,
             8960
           ]
         }
@@ -4265,7 +4876,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4279,6 +4890,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4292,6 +4916,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4302,24 +4939,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -4337,14 +4987,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=5565, sweep_compares=259, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=5565, sweep_compares=259, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -4427,11 +5077,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/sigmoid_f32/treelite/import",
     "load_seconds": {
-      "": 6.4348e-05
+      "exact_sums_off": 6.551e-05
     },
     "methods": [
       {
@@ -4488,7 +5148,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F32",
       "trees": 2
@@ -4497,10 +5157,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "d90072f1a1610615e6a3eb90c39d605618a183d2af4a6fac9fea58ffc0dd2d31",
+    "resume_key": "9b961fdb0f7c80fa80bf5383b0e53c87def21668fbcf76bad21df5b20b47cc51",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -4520,7 +5181,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003626716,
+    "seconds": 0.003777714,
     "stop": {
       "serving": {
         "blocks": 70,
@@ -4533,22 +5194,22 @@
         "reason": "block_cap",
         "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 3.9646038548388276,
-          "treewalker_research/all-on": 3.793997605378711,
-          "treewalker_research/disable_varying_precompute": 5.182781440642272
+          "treewalker/all-on": 3.4694018574711083,
+          "treewalker_research/all-on": 1.9904070277100436,
+          "treewalker_research/disable_varying_precompute": 4.747162167674887
         },
-        "seconds": 0.001180531,
+        "seconds": 0.001087114,
         "totals": {
           "treewalker/all-on": [
-            470204,
+            404918,
             8960
           ],
           "treewalker_research/all-on": [
-            478028,
+            402852,
             8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            229920,
+            185910,
             8960
           ]
         }
@@ -4559,7 +5220,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4573,6 +5234,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4586,6 +5260,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4596,24 +5283,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -4631,14 +5331,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=896, sort_compares=6272, sweep_compares=385, mask_writes=7"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=182, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=7, varying=7, unsplit=0, recurse=7, leaf=21, leaf_adds=1792, row_evals=896, scan_rows=896, scan_compares=861, scan_missing=896, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -4721,11 +5421,21 @@
       "status": "ready",
       "workload": "fixtures"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 128
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 7,
     "id": "fixtures/sigmoid_f64/treelite/import",
     "load_seconds": {
-      "": 7.6243e-05
+      "exact_sums_off": 7.5049e-05
     },
     "methods": [
       {
@@ -4782,7 +5492,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 6,
       "threshold_type": "F64",
       "trees": 2
@@ -4791,10 +5501,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "ab1ca6c9e2667926923076c6f24575e3d0e7a2d36ff76cbbb0c5e24e70ebce7b",
+    "resume_key": "a9b8f3207511d3759d9b196741a8a4209577197953dd0e5660c9c11975b6b98b",
     "rows": 896,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -4814,7 +5525,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.003586561,
+    "seconds": 0.003830527,
     "stop": {
       "serving": {
         "blocks": 70,
@@ -4827,22 +5538,22 @@
         "reason": "block_cap",
         "rounds": 10,
         "rse_pct": {
-          "treewalker/all-on": 4.789153295815448,
-          "treewalker_research/all-on": 0.7437546477457491,
-          "treewalker_research/disable_varying_precompute": 1.9437943128741226
+          "treewalker/all-on": 4.303514423128782,
+          "treewalker_research/all-on": 10.710738215246458,
+          "treewalker_research/disable_varying_precompute": 4.6910984681860635
         },
-        "seconds": 0.001118143,
+        "seconds": 0.001041171,
         "totals": {
           "treewalker/all-on": [
-            432356,
+            376852,
             8960
           ],
           "treewalker_research/all-on": [
-            398600,
+            402590,
             8960
           ],
           "treewalker_research/disable_varying_precompute": [
-            211316,
+            178258,
             8960
           ]
         }
@@ -4853,7 +5564,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4867,6 +5578,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4880,6 +5604,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -4890,24 +5627,37 @@
           "rows": 896,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 896,
+          "tolerance": 1e-13,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 7,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 4,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }
@@ -4925,14 +5675,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=2993787, varying=638475, unsplit=134413, recurse=504062, leaf=1391062, leaf_adds=2829018, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=113536, sort_compares=393828, sweep_compares=450038, mask_writes=377862"
+        "totals": "const=2993787, varying=638475, unsplit=134413, recurse=504062, leaf=1391062, leaf_adds=14192000, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=113536, sort_compares=393828, sweep_compares=450038, mask_writes=377862"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=2993787, varying=638475, unsplit=134413, recurse=504062, leaf=1391062, leaf_adds=2829018, row_evals=8900261, scan_rows=8900261, scan_compares=4784893, scan_missing=8900261, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=2993787, varying=638475, unsplit=134413, recurse=504062, leaf=1391062, leaf_adds=14192000, row_evals=8900261, scan_rows=8900261, scan_compares=4784893, scan_missing=8900261, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -5234,11 +5984,21 @@
       "warnings": [],
       "workload": "panel"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 16
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 1774,
     "id": "support/nt500_md4_h16/lightgbm/panel",
     "load_seconds": {
-      "": 0.001164992
+      "exact_sums_off": 0.001140794
     },
     "methods": [
       {
@@ -5295,7 +6055,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 13152,
       "threshold_type": "F64",
       "trees": 500
@@ -5304,10 +6064,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "7d2b780a4086507d1ed7dfa0b62174c04e1584f556bae7817146e0d3892c3a12",
+    "resume_key": "665bbbc8d03f913a08959b3263f2f2b5781eca16d08983af77f73b6c5691ca18",
     "rows": 28384,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -5327,7 +6088,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.669619115,
+    "seconds": 0.954669241,
     "stop": {
       "serving": {
         "blocks": 36,
@@ -5340,22 +6101,22 @@
         "reason": "precision",
         "rounds": 3,
         "rse_pct": {
-          "treewalker/all-on": 0.05127714276660477,
-          "treewalker_research/all-on": 0.12049319216432962,
-          "treewalker_research/disable_varying_precompute": 0.15002884624853624
+          "treewalker/all-on": 0.06266159871453042,
+          "treewalker_research/all-on": 0.036228825946833104,
+          "treewalker_research/disable_varying_precompute": 0.07369816338228005
         },
-        "seconds": 0.392180591,
+        "seconds": 0.461950378,
         "totals": {
           "treewalker/all-on": [
-            227064144,
+            292450402,
             85152
           ],
           "treewalker_research/all-on": [
-            241016896,
+            295805482,
             85152
           ],
           "treewalker_research/disable_varying_precompute": [
-            345573284,
+            373721960,
             85152
           ]
         }
@@ -5366,7 +6127,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -5380,6 +6141,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 6.297044173582672e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -5393,6 +6167,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 6.297044173582672e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -5403,30 +6190,43 @@
           "rows": 28384,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 6.297044173582672e-12,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 1774,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 32,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
-          "max_abs": 0.0,
+          "bitwise": false,
+          "max_abs": 1.7763568394002505e-15,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
-          "max_abs": 0.0,
+          "bitwise": false,
+          "max_abs": 1.7763568394002505e-15,
           "mismatches": 0
         }
       },
       "reference": {
-        "max_abs_vs_predict": 1.0547118733938987e-15,
+        "max_abs_vs_predict": 1.0824674490095276e-15,
         "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
         "rows": 28384
       }
@@ -5438,14 +6238,14 @@
       "all-on": {
         "flags": {},
         "load": [],
-        "totals": "const=2899269, varying=627278, unsplit=116229, recurse=511049, leaf=1398049, leaf_adds=2858686, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=85152, sort_compares=179174, sweep_compares=372705, mask_writes=321094"
+        "totals": "const=2899269, varying=627278, unsplit=116229, recurse=511049, leaf=1398049, leaf_adds=14192000, row_evals=0, scan_rows=0, scan_compares=0, scan_missing=0, precompute_evals=85152, sort_compares=179174, sweep_compares=372705, mask_writes=321094"
       },
       "disable_varying_precompute": {
         "flags": {
           "disable_varying_precompute": "active"
         },
         "load": [],
-        "totals": "const=2899269, varying=627278, unsplit=116229, recurse=511049, leaf=1398049, leaf_adds=2858686, row_evals=8692926, scan_rows=4583323, scan_compares=4583323, scan_missing=4583323, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
+        "totals": "const=2899269, varying=627278, unsplit=116229, recurse=511049, leaf=1398049, leaf_adds=14192000, row_evals=8692926, scan_rows=4583323, scan_compares=4583323, scan_missing=4583323, precompute_evals=0, sort_compares=0, sweep_compares=0, mask_writes=0"
       }
     },
     "cell": {
@@ -5696,11 +6496,21 @@
       "warnings": [],
       "workload": "panel"
     },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 16
+        }
+      },
+      "setting": false
+    },
     "excluded": [],
     "groups": 1774,
     "id": "support/nt500_md4_h16/xgboost/panel",
     "load_seconds": {
-      "": 0.001226153
+      "exact_sums_off": 0.001180562
     },
     "methods": [
       {
@@ -5757,7 +6567,7 @@
     ],
     "model": {
       "bitset_bytes": 0,
-      "exact_sums": true,
+      "exact_sums": false,
       "nodes": 13422,
       "threshold_type": "F32",
       "trees": 500
@@ -5766,10 +6576,11 @@
     "required_methods": [
       "treewalker"
     ],
-    "resume_key": "0eb7d7ddea034521c87bedb7451b6e89c3551c5eb0c1b5c19f4acb8fd0cc7ddd",
+    "resume_key": "d0c984625e8c5578434fbfc7b769bc554db21ba2d415f47b7d756738da81e03c",
     "rows": 28384,
     "run": {
       "batch_rows": 1024,
+      "exact_sums": false,
       "fresh_process": true,
       "hardware_counters": true,
       "max_rounds": 10,
@@ -5789,7 +6600,7 @@
       "xgboost_processes": 6
     },
     "sample": null,
-    "seconds": 0.647573689,
+    "seconds": 0.976575989,
     "stop": {
       "serving": {
         "blocks": 36,
@@ -5802,22 +6613,22 @@
         "reason": "precision",
         "rounds": 3,
         "rse_pct": {
-          "treewalker/all-on": 0.08685428593611864,
-          "treewalker_research/all-on": 0.031657967769384614,
-          "treewalker_research/disable_varying_precompute": 0.09539185872378737
+          "treewalker/all-on": 0.06921590197222627,
+          "treewalker_research/all-on": 0.03689067539977703,
+          "treewalker_research/disable_varying_precompute": 0.05499162355410389
         },
-        "seconds": 0.368842793,
+        "seconds": 0.458982671,
         "totals": {
           "treewalker/all-on": [
-            227156592,
+            305628436,
             85152
           ],
           "treewalker_research/all-on": [
-            228910628,
+            295768442,
             85152
           ],
           "treewalker_research/disable_varying_precompute": [
-            307699058,
+            354622098,
             85152
           ]
         }
@@ -5828,7 +6639,7 @@
     "validation": {
       "checks": [
         {
-          "against": "predict",
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -5842,6 +6653,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 4.5475382436599026e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -5855,6 +6679,19 @@
         },
         {
           "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 4.5475382436599026e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
           "bitwise": true,
           "interface": "predict_group",
           "max_abs": 0.0,
@@ -5865,24 +6702,37 @@
           "rows": 28384,
           "tolerance": 0.0,
           "variant": "disable_varying_precompute"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker_research",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 28384,
+          "tolerance": 4.5475382436599026e-12,
+          "variant": "disable_varying_precompute"
         }
       ],
       "groups": 1774,
       "oracle": {
-        "exact_sums": true,
+        "exact_sums": false,
         "groups": 32,
         "output_vs_predict": {
           "mismatches": 0
         },
         "raw_margin": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         },
         "rows": 512,
         "status": "pass",
         "tree_sum": {
-          "bitwise": true,
+          "bitwise": false,
           "max_abs": 0.0,
           "mismatches": 0
         }

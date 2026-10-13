@@ -1,5 +1,5 @@
 {
-  "binary_sha256": "1c99ddde5800e1c7c9e858bcea27607bf23743dae5cf47fae62070f98dd2f3dc",
+  "binary_sha256": "47a2d8350aced11b62efb99ec2c4af36d992707297f8bfc3b82b800f12fe49b0",
   "events": {
     "events": [
       {
@@ -90,86 +90,86 @@
       "cells_done": [
         {
           "id": "support/nt500_md4_h16/lightgbm/panel",
-          "seconds": 0.669688115
+          "seconds": 0.954737394
         },
         {
           "id": "support/nt500_md4_h16/xgboost/panel",
-          "seconds": 0.647640959
+          "seconds": 0.9766498
         },
         {
           "id": "credit/nt500_md4/lightgbm/whatif-v2-k4-G16",
-          "seconds": 1.354046028
+          "seconds": 1.567938265
         },
         {
           "id": "credit/nt500_md4/xgboost/whatif-v2-k4-G16",
-          "seconds": 1.200849656
+          "seconds": 1.471043783
         },
         {
           "id": "fixtures/sigmoid_f64/treelite/import",
-          "seconds": 0.003638704
+          "seconds": 0.003882866
         },
         {
           "id": "fixtures/sigmoid_f32/treelite/import",
-          "seconds": 0.003677073
+          "seconds": 0.003830498
         },
         {
           "id": "fixtures/sigmoid_alpha/treelite/import",
-          "seconds": 0.003652139
+          "seconds": 0.003758308
         },
         {
           "id": "fixtures/identity/treelite/import",
-          "seconds": 0.002409491
+          "seconds": 0.002957116
         },
         {
           "id": "fixtures/ranking/treelite/import",
-          "seconds": 0.002599208
+          "seconds": 0.003292754
         },
         {
           "id": "fixtures/average_base/treelite/import",
-          "seconds": 0.003224611
+          "seconds": 0.003008094
         },
         {
           "id": "fixtures/categories_left/treelite/import",
-          "seconds": 0.003381946
+          "seconds": 0.003445548
         },
         {
           "id": "fixtures/categories_right/treelite/import",
-          "seconds": 0.00327927
+          "seconds": 0.002660887
         },
         {
           "id": "fixtures/categories_f32/treelite/import",
-          "seconds": 0.003359787
+          "seconds": 0.003592067
         },
         {
           "id": "fixtures/lt_zero/treelite/import",
-          "seconds": 0.003505094
+          "seconds": 0.003722264
         },
         {
           "id": "fixtures/positive_infinity/treelite/import",
-          "seconds": 0.002541665
+          "seconds": 0.003744653
         },
         {
           "id": "fixtures/negative_infinity/treelite/import",
-          "seconds": 0.003539871
+          "seconds": 0.003758266
         },
         {
           "id": "fixtures/random_forest/treelite/import",
-          "seconds": 0.002691381
+          "seconds": 0.003755787
         }
       ],
       "cells_failed": [],
       "cells_skipped": [],
-      "finished": 1791658174,
-      "peak_rss_bytes": 47685632,
-      "started": 1791658169
+      "finished": 1791823232,
+      "peak_rss_bytes": 47960064,
+      "started": 1791823225
     }
   ],
   "manifest": {
     "artifacts_dir": "/home/bench/treewalker/experiments/artifacts",
     "cells": 17,
-    "grids_sha256": "e43d3bf51e80fa6ca11a1933b59f7bbcb5d998387c736bcafd56a5217b33d5af",
+    "grids_sha256": "7ca400b8a22ea567e90319e7e171f4c56288ced78b7f5cde42c963e34031b522",
     "source": {
-      "commit": "913fd70e7c936b617445462f983d4ff04ffe970c",
+      "commit": "e721bb8a9cc0bbd02b315578be972a201123fd97",
       "dirty": false,
       "from": "experiments/SOURCE_COMMIT"
     },
@@ -263,9 +263,10 @@
       "version": "3.4.1"
     }
   },
-  "output_schema": 5,
+  "output_schema": 6,
   "run": {
     "batch_rows": 1024,
+    "exact_sums": false,
     "fresh_process": true,
     "hardware_counters": true,
     "max_rounds": 10,
@@ -300,11 +301,11 @@
         "status": "ok",
         "totals": {
           "treewalker/all-on/serving": [
-            227661384,
+            292004750,
             85152
           ]
         },
-        "unix_time": 1791658169
+        "unix_time": 1791823226
       },
       {
         "cells_done": 0,
@@ -313,19 +314,19 @@
         "status": "ok",
         "totals": {
           "treewalker/all-on/serving": [
-            228016660,
+            292618616,
             85152
           ]
         },
-        "unix_time": 1791658170
+        "unix_time": 1791823226
       }
     ]
   },
   "source": {
-    "commit": "913fd70e7c936b617445462f983d4ff04ffe970c",
+    "commit": "e721bb8a9cc0bbd02b315578be972a201123fd97",
     "from": "experiments/SOURCE_COMMIT (git archive)"
   },
-  "started": 1791658169,
+  "started": 1791823225,
   "suite": "acceptance",
   "system_info": {
     "apt_snapshot": "20261005T111000Z",
@@ -333,9 +334,11 @@
     "cmake": "cmake version 4.2.3",
     "cxx": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
     "git": "git version 2.53.0",
-    "git_ref": "913fd70",
+    "git_ref": "e721bb8a9cc0bbd02b315578be972a201123fd97",
+    "hostname": "treewalker-bench-intel-24921e",
     "image": "projects/ubuntu-os-cloud/global/images/ubuntu-2604-resolute-amd64-v20260918",
     "image_requested": "ubuntu-os-cloud/ubuntu-2604-resolute-amd64-v20260918",
+    "instance_id": "1135393484105478231",
     "kernel_cmdline": "BOOT_IMAGE=/vmlinuz-7.0.0-1011-gcp root=PARTUUID=cd6b947b-d3fc-4fe5-a90b-55cd23c59e11 ro console=ttyS0,115200 panic=-1",
     "machine_type": "c4-standard-32",
     "os_release": "Ubuntu 26.04.1 LTS",
@@ -350,28 +353,28 @@
   },
   "timer": {
     "amortized_check": {
-      "amortized_mean": 66.4757,
+      "amortized_mean": 65.6813,
       "calls": 20000,
-      "difference": 129.28660000000002,
+      "difference": 127.8689,
       "overhead_p50": 46,
-      "per_call_mean": 195.7623
+      "per_call_mean": 193.5502
     },
     "calibration": {
       "check_ms": 200,
       "counter": "rdtsc",
-      "hz": 2300000022.9872627,
-      "measured_hz": 2300000022.9872627,
+      "hz": 2299999704.1399474,
+      "measured_hz": 2299999704.1399474,
       "overhead": {
-        "max": 50,
-        "mean": 45.24386,
-        "min": 40,
+        "max": 20602,
+        "mean": 46.33284,
+        "min": 34,
         "n": 100000,
         "p50": 46,
         "p90": 46,
         "p99": 48
       },
       "relative_difference": 0.0,
-      "resolution_ticks": 42,
+      "resolution_ticks": 44,
       "source": "measured"
     }
   },

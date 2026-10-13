@@ -170,7 +170,9 @@ The factorial suite also prepares two kinds of derived models
 
 ## Released results
 
-`experiments/data/runs/` holds the final run, one directory per run ID, packed
+`experiments/data/runs/` holds the camera-ready campaign (2026-10-11 to 13, exact
+sums off, at `e721bb8`) and the final run's factorial and ablation runs
+(2026-10-09 and 10, exact sums on, at `913fd70`), one directory per run ID, packed
 with `treewalker-exp pack`: `run.json` (configuration, host, timer, sentinel and
 the order cells ran in), `cells.json` (each cell's manifest: its sample,
 validation, stopping, probes and XGBoost's processes), the `samples`, `groups`,
@@ -182,12 +184,20 @@ each row of the cell's stage oracle (columns suite, cell, group, row, tree_sum,
 raw_margin, output), written untimed before timing; output schema 6, absent from
 older runs.
 
-| Run | Contents |
-|---|---|
-| `acceptance-{x86_64,aarch64}` | 17 acceptance cells |
-| `factorial-{x86_64,aarch64}` | 1,134 cells: survival panels (SUPPORT and FLCHAIN, horizons 1-128; FLCHAIN also 256-1,024), Expedia sessions, cohorts of 4-32 rows and filled missing values, the credit and reference what-ifs, and seed replicates |
-| `ablation-{x86_64,aarch64}` | 36 cells with every switch and their combinations, in serving and batch mode |
-| `layout-{default,align64}-{x86_64,aarch64}` | the acceptance cells with default and 64-byte-aligned functions |
+| Run | Campaign | Contents |
+|---|---|---|
+| `camera-ready-{x86_64,aarch64}` | camera-ready | the paper's 712 cells: survival panels (SUPPORT and FLCHAIN, horizons 1-128; FLCHAIN also 256-1,024, as whole groups and as 128-row chunks), Expedia sessions, cohorts of 4-32 rows and filled missing values |
+| `camera-ready-ablation-{1,2}-{x86_64,aarch64}` | camera-ready | the 36 ablation cells, run before and after `camera-ready` |
+| `scenario-v1-{x86_64,aarch64}` | camera-ready | E1: the 16 released credit scenario cells |
+| `acceptance-{x86_64,aarch64}` | camera-ready | 17 acceptance cells |
+| `layout-{default,align64}-{x86_64,aarch64}` | camera-ready | the acceptance cells with default and 64-byte-aligned functions |
+| `RUN-retime-rN-{x86_64,aarch64}` | camera-ready | re-time attempts: the cells and modes of `RUN` whose interval was wider than ±2%, timed again with N rounds on the same VM |
+| `factorial-{x86_64,aarch64}` | final | 1,134 cells: survival panels (SUPPORT and FLCHAIN, horizons 1-128; FLCHAIN also 256-1,024), Expedia sessions, cohorts of 4-32 rows and filled missing values, the credit and reference what-ifs, and seed replicates |
+| `ablation-{x86_64,aarch64}` | final | 36 cells with every switch and their combinations, in serving and batch mode |
+
+`experiments/data/retime/` holds each re-time run's manifest and script. The
+final run's acceptance and layout runs, which share their IDs with the
+camera-ready ones, are in the history at `e721bb8`.
 
 ## Reproducing the tables and figures
 

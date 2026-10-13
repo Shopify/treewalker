@@ -1,0 +1,1547 @@
+{
+  "expedia/nt1000_md8/xgboost/cohort32-n4": {
+    "ablations": {},
+    "cell": {
+      "baselines": {
+        "quickscorer": {
+          "effective": null,
+          "identity": {
+            "baseline": "quickscorer",
+            "model_sha256": "5e7fac7393eba46ed73afefbaedcbe26de9eed50f260556e04780d13039850b7",
+            "rule": "threshold = next float32 below t; at most 128 leaves; no categorical splits",
+            "schema_version": 2
+          },
+          "key": "8d4ad0d39d5dd396e36d3a2f0712c0cabd6096a405630579fea84417f290c1c3",
+          "library": "quickscorer.xml",
+          "sha256": null,
+          "status": "unsupported: tree 0 has 236 leaves; QuickScorer takes 128"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 8,
+            "source_files": 41
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "5e7fac7393eba46ed73afefbaedcbe26de9eed50f260556e04780d13039850b7",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 41
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "93eaa7e383adec8479f9494cc5b5c64627c3492acb6d9a0a413c92b55daea75e",
+          "library": "tl2cgen.so",
+          "sha256": "615c5422303ea417f2f64dd80538b6d7a3e287a6b0c4f16bde8584dc197b3abc",
+          "status": "ready"
+        }
+      },
+      "content_key": "bb394e3177fd7115ec1c8ca265a47829ba16f5962dde0cdbfab473fec34e6213",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "3d227612b95732ff556a00d4174796d8b48694ac7812996c1475358ef03118d5",
+        "group_offsets": "50c9fcdbc768de8b1a68a6b39139cd7c12189fd939e4dc65daeb327cd562a713",
+        "test_data": "016a9a79537aa87b417ab07c9d883e3af52cf9be95c6fb49c53783cfbcef2d84",
+        "walker_config": "77e1f705227d80146ae69141b6d534816fcf7aa2febbf6e6ec93c5903d04fad1"
+      },
+      "dataset": "expedia",
+      "feature_order": [
+        "site_id",
+        "visitor_location_country_id",
+        "prop_country_id",
+        "srch_destination_id",
+        "srch_length_of_stay",
+        "srch_booking_window",
+        "srch_adults_count",
+        "srch_children_count",
+        "srch_room_count",
+        "srch_saturday_night_bool",
+        "random_bool",
+        "prop_id",
+        "prop_starrating",
+        "prop_review_score",
+        "prop_brand_bool",
+        "prop_location_score1",
+        "prop_location_score2",
+        "prop_log_historical_price",
+        "position",
+        "price_usd",
+        "promotion_flag"
+      ],
+      "features": {
+        "mono_dec": [],
+        "mono_inc": [],
+        "realized_varying": [
+          "prop_country_id",
+          "prop_id",
+          "prop_starrating",
+          "prop_review_score",
+          "prop_brand_bool",
+          "prop_location_score1",
+          "prop_location_score2",
+          "prop_log_historical_price",
+          "position",
+          "price_usd",
+          "promotion_flag"
+        ],
+        "varying": [
+          "prop_country_id",
+          "prop_id",
+          "prop_starrating",
+          "prop_review_score",
+          "prop_brand_bool",
+          "prop_location_score1",
+          "prop_location_score2",
+          "prop_log_historical_price",
+          "position",
+          "price_usd",
+          "promotion_flag"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "../../../../workloads/cohort32-n4/entities.npy",
+          "sha256": "3d227612b95732ff556a00d4174796d8b48694ac7812996c1475358ef03118d5"
+        },
+        "group_offsets": {
+          "path": "../../../../workloads/cohort32-n4/group_offsets.bin",
+          "sha256": "50c9fcdbc768de8b1a68a6b39139cd7c12189fd939e4dc65daeb327cd562a713"
+        },
+        "model_native": {
+          "path": "../../model_native.json",
+          "sha256": "227e6ed5f1b4f4f07174026ce14a8c2b7b60de9916c2a756fd7bb749486e5b19"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "5e7fac7393eba46ed73afefbaedcbe26de9eed50f260556e04780d13039850b7"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "60019e031e9f6ac3e92f64ae9f61b17d754c81aa005b407e81143d5f44ad09f5"
+        },
+        "predictions": {
+          "path": "predictions.npy",
+          "sha256": "90ab75e2352b86a1e567026ffcad059475b79767af85eeb7191c4a54c118c9e1"
+        },
+        "test_data": {
+          "path": "../../../../workloads/cohort32-n4/test_data.bin",
+          "sha256": "016a9a79537aa87b417ab07c9d883e3af52cf9be95c6fb49c53783cfbcef2d84"
+        },
+        "walker_config": {
+          "path": "../../../../workloads/cohort32-n4/walker_config.json",
+          "sha256": "77e1f705227d80146ae69141b6d534816fcf7aa2febbf6e6ec93c5903d04fad1"
+        }
+      },
+      "framework": "xgboost",
+      "generator": "ranking-cohort-v2",
+      "grouping": {
+        "kind": "cohort-subset",
+        "min_candidates": 32,
+        "n_groups": 3439,
+        "rows": 13756,
+        "size": 4,
+        "size_max": 4,
+        "size_mean": 4.0,
+        "size_min": 4
+      },
+      "horizon": null,
+      "id": "expedia/nt1000_md8/xgboost/cohort32-n4",
+      "k": null,
+      "key": "d74109a6de9239310d87bf49c2ea762aadd4c9877a3ca77059f3cb82ca96ec04",
+      "libraries": {
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2",
+        "xgboost": "3.4.1"
+      },
+      "limits": [],
+      "max_depth": 8,
+      "model": {
+        "dir": "../..",
+        "key": "9f4a5ea75775da5d8a2fb207a4b78557c769b8dddb51d866bbd9e969aa18ff84",
+        "structure": {
+          "max_tree_nodes": 507,
+          "total_nodes": 326566,
+          "trees": 1000
+        },
+        "varying_predicates_upper_bound": 1703
+      },
+      "model_key": "9f4a5ea75775da5d8a2fb207a4b78557c769b8dddb51d866bbd9e969aa18ff84",
+      "n_trees": 1000,
+      "oracle": {
+        "base_score": -3.0623246597902756,
+        "divisor": 1.0,
+        "groups": [
+          34,
+          86,
+          100,
+          115,
+          145,
+          229,
+          296,
+          345,
+          366,
+          441,
+          485,
+          541,
+          724,
+          765,
+          778,
+          782,
+          823,
+          1026,
+          1037,
+          1054,
+          1058,
+          1171,
+          1177,
+          1232,
+          1263,
+          1310,
+          1323,
+          1508,
+          1515,
+          1537,
+          1570,
+          1612,
+          1625,
+          1637,
+          1664,
+          1680,
+          1779,
+          1821,
+          1899,
+          1910,
+          1961,
+          2059,
+          2069,
+          2325,
+          2448,
+          2474,
+          2509,
+          2519,
+          2550,
+          2600,
+          2648,
+          2654,
+          2701,
+          2778,
+          2854,
+          2958,
+          2963,
+          3014,
+          3029,
+          3050,
+          3138,
+          3300,
+          3320,
+          3353
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {
+        "min_candidates": 32,
+        "size": 4
+      },
+      "perturbation": null,
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "order": [
+          1701079435,
+          1
+        ],
+        "split": 1701079435
+      },
+      "split": {
+        "max_sessions": 50000,
+        "search_level_features": [
+          "site_id",
+          "visitor_location_country_id",
+          "srch_destination_id",
+          "srch_length_of_stay",
+          "srch_booking_window",
+          "srch_adults_count",
+          "srch_children_count",
+          "srch_room_count",
+          "srch_saturday_night_bool",
+          "random_bool"
+        ],
+        "seed": 1701079435,
+        "test_frac": 0.2,
+        "unit": "session"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 1000,
+        "params": {
+          "eval_metric": "logloss",
+          "learning_rate": 0.05,
+          "max_depth": 8,
+          "objective": "binary:logistic",
+          "seed": 42,
+          "tree_method": "hist"
+        }
+      },
+      "warnings": [],
+      "workload": "ranking-cohort"
+    },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 4
+        }
+      },
+      "setting": false
+    },
+    "excluded": [
+      {
+        "method": "quickscorer",
+        "reason": "unsupported: tree 0 has 236 leaves; QuickScorer takes 128",
+        "variant": "-"
+      }
+    ],
+    "groups": 3439,
+    "id": "expedia/nt1000_md8/xgboost/cohort32-n4",
+    "load_seconds": {
+      "exact_sums_off": 0.02448073
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_full_walk"
+        ],
+        "interface_one_row": "predict_full_walk",
+        "interfaces": {
+          "serving": "predict_full_walk"
+        },
+        "method": "treewalker_fullwalk",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_full_walk"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "interface_one_row": "predict",
+        "interfaces": {
+          "serving": "predict loop"
+        },
+        "method": "tl2cgen",
+        "precision": "F32",
+        "settings": null,
+        "tolerance": 1e-05,
+        "validated": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "PredictFromDense",
+          "PredictFromDense 1-row loop"
+        ],
+        "interface_one_row": "PredictFromDense",
+        "interfaces": {
+          "serving": "PredictFromDense 1-row loop"
+        },
+        "method": "xgboost_native",
+        "precision": "F32",
+        "settings": {
+          "learner": {
+            "generic_param": {
+              "device": "cpu",
+              "fail_on_invalid_gpu_id": "0",
+              "n_jobs": "1",
+              "nthread": "1",
+              "random_state": "0",
+              "seed": "0",
+              "seed_per_iteration": "0",
+              "validate_parameters": "0"
+            },
+            "gradient_booster": {
+              "dart_train_param": {
+                "normalize_type": "tree",
+                "one_drop": "0",
+                "rate_drop": "0",
+                "sample_type": "uniform",
+                "skip_drop": "0"
+              },
+              "gbtree_model_param": {
+                "num_parallel_tree": "1",
+                "num_trees": "1000"
+              },
+              "gbtree_train_param": {
+                "process_type": "default",
+                "tree_method": "auto",
+                "updater": "grow_quantile_histmaker",
+                "updater_seq": "grow_quantile_histmaker"
+              },
+              "name": "gbtree",
+              "specified_updater": false,
+              "tree_train_param": {
+                "alpha": "0",
+                "colsample_bylevel": "1",
+                "colsample_bynode": "1",
+                "colsample_bytree": "1",
+                "eta": "0.300000012",
+                "gamma": "0",
+                "grow_policy": "depthwise",
+                "interaction_constraints": "",
+                "lambda": "1",
+                "learning_rate": "0.300000012",
+                "max_bin": "256",
+                "max_cat_threshold": "64",
+                "max_cat_to_onehot": "4",
+                "max_delta_step": "0",
+                "max_depth": "6",
+                "max_leaves": "0",
+                "min_child_weight": "1",
+                "min_split_loss": "0",
+                "monotone_constraints": "()",
+                "refresh_leaf": "1",
+                "reg_alpha": "0",
+                "reg_lambda": "1",
+                "sampling_method": "uniform",
+                "sparse_threshold": "0.20000000000000001",
+                "subsample": "1"
+              },
+              "updater": [
+                {
+                  "hist_train_param": {
+                    "debug_synchronize": "0",
+                    "max_cached_hist_node": "18446744073709551615"
+                  },
+                  "name": "grow_quantile_histmaker"
+                }
+              ]
+            },
+            "learner_model_param": {
+              "base_score": "[4.4688355E-2]",
+              "boost_from_average": "1",
+              "num_class": "0",
+              "num_feature": "21",
+              "num_target": "1"
+            },
+            "learner_train_param": {
+              "booster": "gbtree",
+              "disable_default_eval_metric": "0",
+              "multi_strategy": "one_output_per_tree",
+              "objective": "binary:logistic"
+            },
+            "metrics": [],
+            "objective": {
+              "name": "binary:logistic",
+              "reg_loss_param": {
+                "scale_pos_weight": "1"
+              }
+            }
+          },
+          "version": [
+            3,
+            4,
+            1
+          ]
+        },
+        "tolerance": 1e-05,
+        "validated": [
+          "PredictFromDense",
+          "PredictFromDense 1-row loop"
+        ],
+        "variant": "-"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": false,
+      "nodes": 326566,
+      "threshold_type": "F32",
+      "trees": 1000
+    },
+    "model_bytes": 24355013,
+    "required_methods": [
+      "treewalker",
+      "treewalker_fullwalk",
+      "xgboost_native"
+    ],
+    "resume_key": "24e506400a57c83592a477591518d13a4e41d6dac0a398aee162846f2906484c",
+    "rows": 13756,
+    "run": {
+      "batch_rows": 1024,
+      "exact_sums": false,
+      "fresh_process": true,
+      "hardware_counters": true,
+      "max_rounds": 14,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 14,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 2.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 77.541731708,
+    "stop": {
+      "serving": {
+        "blocks": 168,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "PredictFromDense",
+                "ticks": 2291641482
+              },
+              {
+                "interface": "PredictFromDense 1-row loop",
+                "ticks": 468144704
+              }
+            ],
+            "chosen": "PredictFromDense 1-row loop",
+            "margin_pct": 389.5156267750922,
+            "method": "xgboost_native",
+            "rows": 1144,
+            "variant": "-"
+          },
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "DMatrixCreateFromMat+PredictBatch",
+                "ticks": 308354660
+              },
+              {
+                "interface": "predict loop",
+                "ticks": 295816610
+              }
+            ],
+            "chosen": "predict loop",
+            "margin_pct": 4.2384536825028185,
+            "method": "tl2cgen",
+            "rows": 1144,
+            "variant": "-"
+          }
+        ],
+        "reason": "precision",
+        "rounds": 14,
+        "rse_pct": {
+          "tl2cgen/-": 0.011740982024089835,
+          "treewalker/all-on": 0.01633765083199451,
+          "treewalker_fullwalk/-": 0.010493299181945472,
+          "xgboost_native/-": 0.2698485684866272
+        },
+        "seconds": 47.288746865,
+        "totals": {
+          "tl2cgen/-": [
+            25788111096,
+            192584
+          ],
+          "treewalker/all-on": [
+            13727799868,
+            192584
+          ],
+          "treewalker_fullwalk/-": [
+            16269343326,
+            192584
+          ],
+          "xgboost_native/-": [
+            39605976092,
+            192584
+          ]
+        }
+      }
+    },
+    "suite": "camera-ready",
+    "timed_groups": 3439,
+    "validation": {
+      "checks": [
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 13756,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 13756,
+          "tolerance": 3.028394737534175e-11,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 13756,
+          "tolerance": 0.0,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 13756,
+          "tolerance": 3.028394737534175e-11,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "DMatrixCreateFromMat+PredictBatch",
+          "max_abs": 1.6200701627999692e-06,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 13756,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict loop",
+          "max_abs": 1.6200701627999692e-06,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 13756,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictFromDense",
+          "max_abs": 8.404355421598453e-07,
+          "method": "xgboost_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 13756,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictFromDense 1-row loop",
+          "max_abs": 8.404355421598453e-07,
+          "method": "xgboost_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 13756,
+          "tolerance": 1e-05,
+          "variant": "-"
+        }
+      ],
+      "groups": 3439,
+      "oracle": {
+        "exact_sums": false,
+        "groups": 64,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": false,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 256,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": false,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 8.404355421598453e-07,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 13756
+      }
+    },
+    "xgboost_processes": {
+      "arch": "x86_64",
+      "count": 6,
+      "processes": [
+        {
+          "mode": "serving",
+          "process": 0,
+          "rows": 192584,
+          "status": "ok",
+          "ticks": 39605976092,
+          "ticks_per_row": 205655.58972708014
+        },
+        {
+          "mode": "serving",
+          "process": 1,
+          "rows": 13756,
+          "status": "ok",
+          "ticks": 2774854836,
+          "ticks_per_row": 201719.60133759814
+        },
+        {
+          "mode": "serving",
+          "process": 2,
+          "rows": 13756,
+          "status": "ok",
+          "ticks": 2774180744,
+          "ticks_per_row": 201670.59784821168
+        },
+        {
+          "mode": "serving",
+          "process": 3,
+          "rows": 13756,
+          "status": "ok",
+          "ticks": 2819363288,
+          "ticks_per_row": 204955.16778133178
+        },
+        {
+          "mode": "serving",
+          "process": 4,
+          "rows": 13756,
+          "status": "ok",
+          "ticks": 2717763764,
+          "ticks_per_row": 197569.33439953474
+        },
+        {
+          "mode": "serving",
+          "process": 5,
+          "rows": 13756,
+          "status": "ok",
+          "ticks": 2797218552,
+          "ticks_per_row": 203345.34399534747
+        },
+        {
+          "mode": "serving",
+          "process": 6,
+          "rows": 13756,
+          "status": "ok",
+          "ticks": 2805721482,
+          "ticks_per_row": 203963.46917708637
+        }
+      ]
+    }
+  },
+  "flchain/nt50_md2_h1/xgboost/panel": {
+    "ablations": {},
+    "cell": {
+      "baselines": {
+        "quickscorer": {
+          "effective": null,
+          "identity": {
+            "baseline": "quickscorer",
+            "model_sha256": "6934e4dcd0f7782e654cd7dbf53ea6dd7b101349ed10e5f0395c93d30e6da8d8",
+            "rule": "threshold = next float32 below t; at most 128 leaves; no categorical splits",
+            "schema_version": 2
+          },
+          "key": "6f47eab7ab9b2dae5b041e471f7f05bc7257d04dd2911fb36902282dd5a7e032",
+          "library": "quickscorer.xml",
+          "sha256": null,
+          "status": "unsupported: tree 6 has categorical splits; QuickScorer has none"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 8,
+            "source_files": 32
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "6934e4dcd0f7782e654cd7dbf53ea6dd7b101349ed10e5f0395c93d30e6da8d8",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 32
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "d20ee9db343e634d813e99929ec7692af92398e0e27ac1d3675c680a69d98d65",
+          "library": "tl2cgen.so",
+          "sha256": "9c0ff32528e06765596f70d9654633138e71074f79385337f40a276c1876f3f1",
+          "status": "ready"
+        }
+      },
+      "content_key": "bb080bebbfb62a1b3e37f956aac6e46d82cbbb7535d4a7b27355a3de21651e31",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "eab75762c307974706059cf6347861a6bc6bea0b44040e3c2ba383e86c0b650d",
+        "test_data": "9f6179007fc82c2e99fe717d408e44db75b101d1c1f79576bbdd40e61d7209d8",
+        "walker_config": "ee3dcf130b121e6285a41ee20b20ac21ea213c7d675689e8269df580c8aec3b1"
+      },
+      "dataset": "flchain",
+      "feature_order": [
+        "age",
+        "sex",
+        "sample_yr",
+        "kappa",
+        "lambda",
+        "flc_grp",
+        "creatinine",
+        "mgus",
+        "time_step",
+        "time_step_sq",
+        "remaining_steps",
+        "remaining_frac_sq",
+        "interaction_x0_t",
+        "hazard_bump"
+      ],
+      "features": {
+        "mono_dec": [
+          "remaining_steps",
+          "remaining_frac_sq"
+        ],
+        "mono_inc": [
+          "time_step",
+          "time_step_sq",
+          "interaction_x0_t"
+        ],
+        "realized_varying": [],
+        "varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "../../../entities.npy",
+          "sha256": "eab75762c307974706059cf6347861a6bc6bea0b44040e3c2ba383e86c0b650d"
+        },
+        "model_native": {
+          "path": "../../model_native.json",
+          "sha256": "49fa431a4319f630e7698f5f79f29cef08f3d2a972ebf38192fec8931aff76d6"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "6934e4dcd0f7782e654cd7dbf53ea6dd7b101349ed10e5f0395c93d30e6da8d8"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "3ed5e1ed68f1af2a24bd3394601e1bfea3db01dd25a137d2bad82fa63da89c9a"
+        },
+        "predictions": {
+          "path": "../../predictions.npy",
+          "sha256": "0587def799ab130bbdb538f096d5f391822096fb5c406841a7530f0f898768e4"
+        },
+        "test_data": {
+          "path": "../../../test_data.bin",
+          "sha256": "9f6179007fc82c2e99fe717d408e44db75b101d1c1f79576bbdd40e61d7209d8"
+        },
+        "walker_config": {
+          "path": "../../../walker_config.json",
+          "sha256": "ee3dcf130b121e6285a41ee20b20ac21ea213c7d675689e8269df580c8aec3b1"
+        }
+      },
+      "framework": "xgboost",
+      "generator": "panel-v2",
+      "grouping": {
+        "kind": "panel",
+        "n_groups": 1304,
+        "rows": 1304,
+        "size_max": 1,
+        "size_mean": 1.0,
+        "size_min": 1,
+        "width": 1
+      },
+      "horizon": {
+        "realized": 1,
+        "requested": 1
+      },
+      "id": "flchain/nt50_md2_h1/xgboost/panel",
+      "k": null,
+      "key": "fe66fdf9989949e28a970599f403f2aa65d6677dfec6342b4ac53ffa58bf52a8",
+      "libraries": {
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2",
+        "xgboost": "3.4.1"
+      },
+      "limits": [],
+      "max_depth": 2,
+      "model": {
+        "dir": "../..",
+        "key": "c92a741533d5644db3200bf100bc405f606bf8a284370a73802e8793533d6ce3",
+        "structure": {
+          "max_tree_nodes": 7,
+          "total_nodes": 350,
+          "trees": 50
+        },
+        "varying_predicates_upper_bound": 0
+      },
+      "model_key": "c92a741533d5644db3200bf100bc405f606bf8a284370a73802e8793533d6ce3",
+      "n_trees": 50,
+      "oracle": {
+        "base_score": -0.8527773670219754,
+        "divisor": 1.0,
+        "groups": [
+          22,
+          75,
+          77,
+          161,
+          220,
+          224,
+          229,
+          232,
+          235,
+          257,
+          276,
+          277,
+          302,
+          312,
+          325,
+          356,
+          357,
+          371,
+          376,
+          412,
+          429,
+          441,
+          476,
+          480,
+          485,
+          498,
+          501,
+          522,
+          523,
+          559,
+          585,
+          605,
+          607,
+          629,
+          657,
+          658,
+          660,
+          699,
+          721,
+          734,
+          740,
+          781,
+          789,
+          811,
+          856,
+          895,
+          909,
+          924,
+          925,
+          934,
+          998,
+          1026,
+          1042,
+          1099,
+          1118,
+          1146,
+          1148,
+          1164,
+          1171,
+          1206,
+          1218,
+          1240,
+          1247,
+          1294
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {},
+      "perturbation": null,
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "split": 1751214488
+      },
+      "split": {
+        "seed": 1751214488,
+        "test_frac": 0.2,
+        "unit": "patient"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 50,
+        "params": {
+          "eval_metric": "logloss",
+          "learning_rate": 0.05,
+          "max_depth": 2,
+          "objective": "binary:logistic",
+          "seed": 42,
+          "tree_method": "hist"
+        }
+      },
+      "warnings": [],
+      "workload": "panel"
+    },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 1
+        }
+      },
+      "setting": false
+    },
+    "excluded": [
+      {
+        "method": "quickscorer",
+        "reason": "unsupported: tree 6 has categorical splits; QuickScorer has none",
+        "variant": "-"
+      }
+    ],
+    "groups": 1304,
+    "id": "flchain/nt50_md2_h1/xgboost/panel",
+    "load_seconds": {
+      "exact_sums_off": 0.00013413
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_full_walk"
+        ],
+        "interface_one_row": "predict_full_walk",
+        "interfaces": {
+          "serving": "predict_full_walk"
+        },
+        "method": "treewalker_fullwalk",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_full_walk"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "interface_one_row": "predict",
+        "interfaces": {
+          "serving": "predict"
+        },
+        "method": "tl2cgen",
+        "precision": "F32",
+        "settings": null,
+        "tolerance": 1e-05,
+        "validated": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "PredictFromDense",
+          "PredictFromDense 1-row loop"
+        ],
+        "interface_one_row": "PredictFromDense",
+        "interfaces": {
+          "serving": "PredictFromDense"
+        },
+        "method": "xgboost_native",
+        "precision": "F32",
+        "settings": {
+          "learner": {
+            "generic_param": {
+              "device": "cpu",
+              "fail_on_invalid_gpu_id": "0",
+              "n_jobs": "1",
+              "nthread": "1",
+              "random_state": "0",
+              "seed": "0",
+              "seed_per_iteration": "0",
+              "validate_parameters": "0"
+            },
+            "gradient_booster": {
+              "dart_train_param": {
+                "normalize_type": "tree",
+                "one_drop": "0",
+                "rate_drop": "0",
+                "sample_type": "uniform",
+                "skip_drop": "0"
+              },
+              "gbtree_model_param": {
+                "num_parallel_tree": "1",
+                "num_trees": "50"
+              },
+              "gbtree_train_param": {
+                "process_type": "default",
+                "tree_method": "auto",
+                "updater": "grow_quantile_histmaker",
+                "updater_seq": "grow_quantile_histmaker"
+              },
+              "name": "gbtree",
+              "specified_updater": false,
+              "tree_train_param": {
+                "alpha": "0",
+                "colsample_bylevel": "1",
+                "colsample_bynode": "1",
+                "colsample_bytree": "1",
+                "eta": "0.300000012",
+                "gamma": "0",
+                "grow_policy": "depthwise",
+                "interaction_constraints": "",
+                "lambda": "1",
+                "learning_rate": "0.300000012",
+                "max_bin": "256",
+                "max_cat_threshold": "64",
+                "max_cat_to_onehot": "4",
+                "max_delta_step": "0",
+                "max_depth": "6",
+                "max_leaves": "0",
+                "min_child_weight": "1",
+                "min_split_loss": "0",
+                "monotone_constraints": "()",
+                "refresh_leaf": "1",
+                "reg_alpha": "0",
+                "reg_lambda": "1",
+                "sampling_method": "uniform",
+                "sparse_threshold": "0.20000000000000001",
+                "subsample": "1"
+              },
+              "updater": [
+                {
+                  "hist_train_param": {
+                    "debug_synchronize": "0",
+                    "max_cached_hist_node": "18446744073709551615"
+                  },
+                  "name": "grow_quantile_histmaker"
+                }
+              ]
+            },
+            "learner_model_param": {
+              "base_score": "[2.9885057E-1]",
+              "boost_from_average": "1",
+              "num_class": "0",
+              "num_feature": "14",
+              "num_target": "1"
+            },
+            "learner_train_param": {
+              "booster": "gbtree",
+              "disable_default_eval_metric": "0",
+              "multi_strategy": "one_output_per_tree",
+              "objective": "binary:logistic"
+            },
+            "metrics": [],
+            "objective": {
+              "name": "binary:logistic",
+              "reg_loss_param": {
+                "scale_pos_weight": "1"
+              }
+            }
+          },
+          "version": [
+            3,
+            4,
+            1
+          ]
+        },
+        "tolerance": 1e-05,
+        "validated": [
+          "PredictFromDense",
+          "PredictFromDense 1-row loop"
+        ],
+        "variant": "-"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": false,
+      "nodes": 350,
+      "threshold_type": "F32",
+      "trees": 50
+    },
+    "model_bytes": 35711,
+    "required_methods": [
+      "treewalker",
+      "treewalker_fullwalk",
+      "xgboost_native"
+    ],
+    "resume_key": "2d5c420f9eb8a0de097e92239cf9a3f8a257f58bf2289109d40ac8612ffd341b",
+    "rows": 1304,
+    "run": {
+      "batch_rows": 1024,
+      "exact_sums": false,
+      "fresh_process": true,
+      "hardware_counters": true,
+      "max_rounds": 14,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 14,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 2.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.337199683,
+    "stop": {
+      "serving": {
+        "blocks": 168,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 14,
+        "rse_pct": {
+          "tl2cgen/-": 0.26582351850139196,
+          "treewalker/all-on": 0.4661078931897035,
+          "treewalker_fullwalk/-": 0.4939703793627749,
+          "xgboost_native/-": 0.10995293399886641
+        },
+        "seconds": 0.146741248,
+        "totals": {
+          "tl2cgen/-": [
+            13368858,
+            18256
+          ],
+          "treewalker/all-on": [
+            18727158,
+            18256
+          ],
+          "treewalker_fullwalk/-": [
+            17465766,
+            18256
+          ],
+          "xgboost_native/-": [
+            214380150,
+            18256
+          ]
+        }
+      }
+    },
+    "suite": "camera-ready",
+    "timed_groups": 1304,
+    "validation": {
+      "checks": [
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1e-13,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 0.0,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1e-13,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "DMatrixCreateFromMat+PredictBatch",
+          "max_abs": 1.4146751659005474e-07,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict loop",
+          "max_abs": 1.4146751659005474e-07,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictFromDense",
+          "max_abs": 9.512558440949448e-08,
+          "method": "xgboost_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictFromDense 1-row loop",
+          "max_abs": 9.512558440949448e-08,
+          "method": "xgboost_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1e-05,
+          "variant": "-"
+        }
+      ],
+      "groups": 1304,
+      "oracle": {
+        "exact_sums": false,
+        "groups": 64,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": false,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 64,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": false,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 9.512558440949448e-08,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 1304
+      }
+    },
+    "xgboost_processes": {
+      "arch": "x86_64",
+      "count": 6,
+      "processes": [
+        {
+          "mode": "serving",
+          "process": 0,
+          "rows": 18256,
+          "status": "ok",
+          "ticks": 214380150,
+          "ticks_per_row": 11742.996822962314
+        },
+        {
+          "mode": "serving",
+          "process": 1,
+          "rows": 1304,
+          "status": "ok",
+          "ticks": 15264868,
+          "ticks_per_row": 11706.187116564417
+        },
+        {
+          "mode": "serving",
+          "process": 2,
+          "rows": 1304,
+          "status": "ok",
+          "ticks": 15302518,
+          "ticks_per_row": 11735.05981595092
+        },
+        {
+          "mode": "serving",
+          "process": 3,
+          "rows": 1304,
+          "status": "ok",
+          "ticks": 15321646,
+          "ticks_per_row": 11749.728527607362
+        },
+        {
+          "mode": "serving",
+          "process": 4,
+          "rows": 1304,
+          "status": "ok",
+          "ticks": 15310898,
+          "ticks_per_row": 11741.486196319018
+        },
+        {
+          "mode": "serving",
+          "process": 5,
+          "rows": 1304,
+          "status": "ok",
+          "ticks": 15437430,
+          "ticks_per_row": 11838.519938650306
+        },
+        {
+          "mode": "serving",
+          "process": 6,
+          "rows": 1304,
+          "status": "ok",
+          "ticks": 15288862,
+          "ticks_per_row": 11724.587423312883
+        }
+      ]
+    }
+  }
+}
