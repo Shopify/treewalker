@@ -479,6 +479,10 @@ def audit_f32(
     suite: Annotated[
         str, typer.Option(help="The suite whose cells and runs ({suite}-{arch}) to audit.")
     ] = "factorial",
+    runs: Annotated[
+        Path | None,
+        typer.Option(help="The directory holding the runs (experiments/data/runs)."),
+    ] = None,
 ) -> None:
     """App. A.3: TreeWalker's and native XGBoost's raw margins against the same f64
     reference (the stage oracle), one cell per XGBoost model of the suite; TreeWalker's
@@ -490,7 +494,7 @@ def audit_f32(
     if list_missing:
         print("\n".join(str(p) for p in audit.missing(paths.artifacts, doc, suite)))
         return
-    lines = audit.report(paths.runs, paths.artifacts, doc, suite)
+    lines = audit.report(runs or paths.runs, paths.artifacts, doc, suite)
     target = out or paths.figures
     target.mkdir(parents=True, exist_ok=True)
     (target / "audit_f32.md").write_text("\n".join(lines) + "\n")

@@ -19,8 +19,9 @@ resource "terraform_data" "source_archive" {
   triggers_replace = [timestamp()]
 
   provisioner "local-exec" {
-    # The released runs stay out: the VM writes its own runs, under the same IDs.
-    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/source.tar.gz ${var.git_ref} -- . ':(exclude)experiments/data/runs'"
+    # The released runs and re-time manifests stay out: the VM writes its own, under
+    # the same IDs, and runs every re-time script it finds.
+    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/source.tar.gz ${var.git_ref} -- . ':(exclude)experiments/data/runs' ':(exclude)experiments/data/retime'"
   }
 }
 
@@ -30,7 +31,7 @@ resource "terraform_data" "gate_archive" {
   triggers_replace = [timestamp()]
 
   provisioner "local-exec" {
-    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/gate.tar.gz ${var.gate_ref} -- . ':(exclude)experiments/data/runs'"
+    command = "git -C .. archive --format=tar.gz --output=${abspath(path.module)}/.terraform/gate.tar.gz ${var.gate_ref} -- . ':(exclude)experiments/data/runs' ':(exclude)experiments/data/retime'"
   }
 }
 
@@ -153,6 +154,7 @@ resource "google_compute_instance" "bench" {
       retime            = var.retime
       run_settings      = join(" ", [for s in var.run_settings : "--set ${s}"])
       diagnostic        = var.diagnostic
+      diagnostic_input  = var.diagnostic_input
       gcs_gate_uri      = var.gate_ref == "" ? "" : "gs://${google_storage_bucket.bench.name}/${google_storage_bucket_object.gate_source[0].name}"
       apt_snapshot      = var.apt_snapshot
       machine_type      = each.value.machine_type

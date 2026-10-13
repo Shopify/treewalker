@@ -297,3 +297,53 @@ def test_a_claimed_run_not_complete_at_the_end_is_a_failure(tmp_path):
         "Run camera-ready-ablation-1-aarch64: incomplete: failed cell c.json ; "
         "Run scenario-v1-aarch64: incomplete: absent, not packed ;"
     )
+
+
+def test_the_precision_diagnostic_reads_both_campaign_runs_and_restores_the_wheel(tmp_path):
+    repo, home, results = tmp_path / "repo", tmp_path / "home", tmp_path / "results"
+    native = repo / "experiments/.cache/native/xgboost-3.4.1-x/libxgboost.so"
+    wheel = tmp_path / "venv/xgboost/lib/libxgboost.so"
+    for f, text in ((native, "native"), (wheel, "wheel")):
+        f.parent.mkdir(parents=True)
+        f.write_text(text)
+    calls = tmp_path / "calls"
+    stubs = f"""
+set -Eeuo pipefail
+REPO_DIR={repo}; BENCH_HOME={home}; RESULTS_DIR={results}; BENCH_USER={getpass.getuser()}
+ARCH_LABEL=x86_64; FAILURES=""
+log() {{ :; }}
+fail() {{ echo "FAIL: $*"; exit 1; }}
+failed_step() {{ FAILURES="$FAILURES$*; "; }}
+sha256sum() {{ echo "sha  $1"; }}
+chown() {{ :; }}
+gcloud() {{ echo "gcloud $4" >> {calls}; touch "$5/$(basename "$4")"; }}
+as_bench() {{
+  echo "as_bench $*" >> {calls}
+  case "$*" in *xgboost.__file__*) echo {wheel} ;; *natives*) echo campaignsha ;; esac
+}}
+twx() {{ echo "twx $* (lib: $(cat {wheel}))" >> {calls}; }}
+"""
+    script = (INFRA / "scripts/diagnostics/precision.sh").read_text()
+    r = subprocess.run(
+        ["bash", "-c", stubs + "DIAGNOSTIC_INPUT=\n" + script], capture_output=True, text=True
+    )
+    assert r.returncode == 1 and "needs diagnostic_input" in r.stdout
+    tail = 'echo "FAILURES=$FAILURES"\n'
+    r = subprocess.run(
+        ["bash", "-c", stubs + "DIAGNOSTIC_INPUT=gs://b/results\n" + script + tail],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "FAILURES="
+    log = calls.read_text()
+    flat = " ".join(log.split())
+    for m, a in (("intel", "x86_64"), ("arm", "aarch64")):
+        for f in ("run.json", "cells.json", "stages.parquet"):
+            assert f"gcloud gs://b/results/{m}/runs/camera-ready-{a}/{f}" in log
+            assert (home / f"precision-input/runs/camera-ready-{a}/{f}").exists()
+    assert "precision-order --manifest experiments/artifacts/manifests/camera-ready.json" in flat
+    assert f"twx audit-f32 --suite camera-ready --runs {home}/precision-input/runs" in log
+    assert "(lib: native)" in log  # the audit ran on the campaign's library
+    assert wheel.read_text() == "wheel"  # and the wheel's is back
+    assert "campaignsha" in (results / "precision/xgboost_library.txt").read_text()

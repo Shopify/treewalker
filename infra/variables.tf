@@ -58,6 +58,16 @@ variable "diagnostic" {
   default     = ""
 }
 
+variable "diagnostic_input" {
+  description = "A gs:// prefix the diagnostic reads its inputs from (precision: an earlier deployment's results, gs://BUCKET/results); empty for none"
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.diagnostic_input == "" || startswith(var.diagnostic_input, "gs://")
+    error_message = "diagnostic_input must be empty or a gs:// prefix."
+  }
+}
+
 variable "gate_ref" {
   description = "A candidate commit (full 40-character SHA) for the kernel gate: instead of the suites' runs, time TreeWalker built from git_ref (A) and from this commit (B) in alternating processes, with default and 64-byte function alignment; empty for none"
   type        = string

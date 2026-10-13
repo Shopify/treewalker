@@ -26,6 +26,8 @@
 #                       suites' runs, the kernel gate (below); empty for none
 #   diagnostic        — the name of a script in infra/scripts/diagnostics/ to run
 #                       instead of the suites' runs; empty for none
+#   diagnostic_input  — a gs:// prefix the diagnostic reads its inputs from; empty
+#                       for none
 #   apt_snapshot      — Ubuntu archive snapshot every apt operation uses; empty
 #                       for the live archive
 #   machine_type, image, turbo_mode, pmu_level — recorded in run.json
@@ -50,6 +52,7 @@ LAYOUT_CHECK="${layout_check}"
 RETIME="${retime}"
 GCS_GATE_URI="${gcs_gate_uri}"
 DIAGNOSTIC="${diagnostic}"
+DIAGNOSTIC_INPUT="${diagnostic_input}"
 APT_SNAPSHOT="${apt_snapshot}"
 MACHINE_TYPE="${machine_type}"
 # The machine type whose compiled baselines this VM uses and fills: its own, or
