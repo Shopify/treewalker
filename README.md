@@ -199,6 +199,15 @@ older runs.
 final run's acceptance and layout runs, which share their IDs with the
 camera-ready ones, are in the history at `e721bb8`.
 
+`experiments/data/precision/{intel,arm}/` holds App. A.3's measurements, taken
+on the campaign's machine types (2026-10-13, at `6ba9f01`, the `precision`
+diagnostic): `precision_order.json`, `sweep_bench precision-order` over every
+camera-ready LightGBM cell (tree ordering on against off with exact sums off,
+and both against prepare's GTIL reference); `audit_f32.md`, `audit-f32` with
+native XGBoost's margins from the library the campaign timed
+(`xgboost_library.txt` records its hashes), beside the camera-ready runs'
+TreeWalker stages; and both commands' logs.
+
 ## Reproducing the tables and figures
 
 This needs Python 3.14 (`.python-version`), [uv](https://docs.astral.sh/uv/) and
