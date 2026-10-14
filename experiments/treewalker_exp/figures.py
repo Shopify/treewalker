@@ -425,45 +425,36 @@ def ablation_slowdowns(ablation: Any, arch: str = "intel", mode: str = "serving"
 
 
 def fig_ablation_waterfall(ablation: Any, out: Path) -> None:
+    """Each switch's cost at the anchors: the slowdown with it disabled, minus one,
+    in percent, as bars grouped by anchor, largest effect first. The two ablation
+    runs agree within a percentage point, so the bars are their mean; the paper's
+    caption states the agreement."""
+    import numpy as np
     import pandas as pd
     from plotnine import (
         aes,
         element_text,
-        geom_errorbar,
+        geom_col,
         geom_hline,
-        geom_line,
-        geom_point,
         ggplot,
         labs,
-        scale_color_manual,
-        scale_linetype_manual,
-        scale_shape_manual,
+        position_dodge,
+        scale_fill_manual,
     )
 
     pdf = ablation_slowdowns(ablation).to_pandas()
-    pdf["ds"] = pd.Categorical(pdf["ds"], categories=DS_ORDER, ordered=True)
-    pdf["flag"] = pd.Categorical(pdf["flag"], categories=[f for f, _, _ in FLAGS], ordered=True)
+    # Expedia, the largest effects, first within each switch.
+    pdf["ds"] = pd.Categorical(pdf["ds"], categories=DS_ORDER[::-1], ordered=True)
+    # Largest effect first: the geometric mean of each flag's slowdown over the anchors.
+    order = np.exp(np.log(pdf["slowdown"]).groupby(pdf["flag"]).mean()).sort_values(ascending=False)
+    pdf["flag"] = pd.Categorical(pdf["flag"], categories=list(order.index), ordered=True)
+    pdf["slowdown_pct"] = 100 * (pdf["slowdown"] - 1)
     p = (
-        ggplot(pdf, aes(x="flag", y="slowdown", color="ds", linetype="ds", shape="ds", group="ds"))
-        + geom_line(size=1.2)
-        + geom_point(size=3)
-        + geom_errorbar(
-            aes(ymin="lo", ymax="hi"), data=pdf.dropna(subset=["lo"]), width=0.25, linetype="solid"
-        )
-        + geom_hline(yintercept=1.0, linetype="dashed", color="gray", alpha=0.4)
-        + scale_color_manual(values=DS_COLORS)
-        + scale_linetype_manual(values=DS_LINETYPES)
-        + scale_shape_manual(values=DS_MARKERS)
-        + labs(
-            x="Disabled optimisation",
-            y="Slowdown (disabled / baseline)",
-            caption="Bars: range over the ablation runs"
-            + ("" if pdf["lo"].notna().all() else "; none where a switch has no repeated run")
-            + ".",
-            color="",
-            linetype="",
-            shape="",
-        )
+        ggplot(pdf, aes(x="flag", y="slowdown_pct", fill="ds"))
+        + geom_col(position=position_dodge(width=0.8), width=0.75)
+        + geom_hline(yintercept=0, color="gray", size=0.3)
+        + scale_fill_manual(values=DS_COLORS)
+        + labs(x="Disabled optimisation", y="Slowdown when disabled (%)", fill="")
         + theme_paper(
             figure_size=(5.5, 2.475),
             axis_text_x=element_text(rotation=25, ha="right"),
