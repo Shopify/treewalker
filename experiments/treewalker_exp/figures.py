@@ -107,6 +107,11 @@ def _panel_label(labels: list[str]) -> dict[str, str]:
 
 
 def _save(p: Any, out: Path, name: str, width: float, height: float) -> None:
+    import matplotlib
+
+    # Embed TrueType rather than Type 3 fonts: NeurIPS rejects Type 3.
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    matplotlib.rcParams["ps.fonttype"] = 42
     out.mkdir(parents=True, exist_ok=True)
     for ext in ("png", "pdf"):
         p.save(out / f"{name}.{ext}", width=width, height=height, dpi=DPI, verbose=False)
