@@ -1,7 +1,7 @@
 """The paper's figures, regenerated from the final runs (`results`).
 
 The same figures as the v1 scripts (`plot.py`, `gen_heatmap_tex.py` and the
-convergence plot of `decomposition_validation.py`, at the neurips2026 tag), with
+convergence plot of `decomposition_validation.py`, at the neurips2026-submission tag), with
 the same cells, axes and encodings, from the new suites:
 
 - latencies are the camera-ready estimand (`estimand`): the median over blocks of

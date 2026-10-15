@@ -1,6 +1,6 @@
 """The paper's in-text numbers, regenerated from a campaign's runs (`results`).
 
-The same items as v1's paper_numbers.py (at the neurips2026 tag), in its order and
+The same items as v1's paper_numbers.py (at the neurips2026-submission tag), in its order and
 with its paper locations, computed from the new runs and printed as new values only
 (the user's decision, 2026-10-08). The definitions follow the camera-ready estimand
 (`estimand`):

@@ -263,7 +263,7 @@ def test_sentinel_warnings(drifts, warn):
 def test_released_e1_reads_the_tagged_csv():
     released = cr.released_e1(paths.find_repo())
     if released is None:
-        pytest.skip("the neurips2026 tag is not available")
+        pytest.skip("the neurips2026-submission tag is not available")
     assert len(released) == 16 and released[(1, 4)] == pytest.approx(31.836)
 
 

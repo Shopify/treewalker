@@ -55,7 +55,7 @@ G1_ANCHORS = [
     for ds in ("support", "flchain")
     for fw in ("lightgbm", "xgboost")
 ]
-E1_RELEASED = "neurips2026:paper/experiments/data/scenario_credit_results_intel.csv"
+E1_RELEASED = "neurips2026-submission:paper/experiments/data/scenario_credit_results_intel.csv"
 
 
 # Suites the paper's camera-ready numbers come from: every forest must have exact sums off.

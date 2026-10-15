@@ -3,7 +3,7 @@
 - A block is one (round, batch) pass: the samples' ``block`` id, which the runner
   numbers ``round * blocks_per_round + batch`` (``repetition`` is the round).
 - A block's value is the median of its per-group times, by v1's nearest-rank
-  convention (`rank_index`, ``src/bench/timing.rs:24-29`` at the neurips2026 tag:
+  convention (`rank_index`, ``src/bench/timing.rs:24-29`` at the neurips2026-submission tag:
   index ``round(p / 100 * (n - 1))``, half away from zero, so the median of an even
   count is the upper one). In batch mode, where no per-group time is observed, a
   block's value is its ticks over its groups.

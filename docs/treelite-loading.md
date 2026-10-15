@@ -101,7 +101,7 @@ The base score is stored on the forest and added once, after the sum and the
 division, each step rounded to float64: the finalization is staged. Treelite GTIL
 finalizes in the same order, so with exact sums off and tree ordering off
 production prediction can equal GTIL bit for bit (`sweep_bench precision-order`
-measures it per cell). Version 1 (the `neurips2026` tag) instead spread the base
+measures it per cell). Version 1 (the `neurips2026-submission` tag) instead spread the base
 score across the leaves: its parser added `base_score / tree_count` to every leaf
 value, each addition rounded, and the margin was the float64 sum of those leaves.
 The two agree up to rounding, so outputs can differ from version 1's in the last
