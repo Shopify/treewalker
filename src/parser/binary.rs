@@ -5,18 +5,26 @@ use super::common::{
 };
 use super::validation::{self, MAX_TREES, Metadata, ParsedModel};
 use crate::forest::{ThresholdType, Tree};
-use crate::{LoadError, ParseConfig, WalkerConfig};
+use crate::{LoadError, LoadOptions, WalkerConfig};
 use rustc_hash::FxHashMap;
 use std::io::{BufReader, Read};
 
 trait Element: Copy {
     const SIZE: usize;
+    /// Decode one value from exactly `SIZE` bytes.
     fn decode(bytes: &[u8]) -> Self;
+    /// Append the values of `bytes`, whose length is a multiple of `SIZE`.
+    fn extend_from(out: &mut Vec<Self>, bytes: &[u8]);
 }
 macro_rules! element {
     ($($t:ty),*) => { $(impl Element for $t {
         const SIZE: usize = size_of::<Self>();
         fn decode(bytes: &[u8]) -> Self { Self::from_le_bytes(bytes.try_into().unwrap()) }
+        fn extend_from(out: &mut Vec<Self>, bytes: &[u8]) {
+            let (values, rest) = bytes.as_chunks::<{ size_of::<$t>() }>();
+            debug_assert!(rest.is_empty());
+            out.extend(values.iter().map(|&b| Self::from_le_bytes(b)));
+        }
     })* };
 }
 element!(u8, i8, i32, u32, u64, f32, f64);
@@ -96,7 +104,7 @@ impl<R: Read> Reader<R> {
         out.clear();
         out.try_reserve(n)
             .map_err(|e| LoadError::Limit(e.to_string()))?;
-        out.extend(self.raw.chunks_exact(T::SIZE).map(T::decode));
+        T::extend_from(out, &self.raw);
         Ok(())
     }
     fn bools(&mut self, out: &mut Vec<u8>, length: Length, field: &str) -> Result<(), LoadError> {
@@ -124,7 +132,8 @@ impl<R: Read> Reader<R> {
             }
             self.bytes(n * 4, field)?;
             out.clear();
-            out.extend(self.raw.chunks_exact(4).map(|c| f64::from(f32::decode(c))));
+            let (values, _) = self.raw.as_chunks::<4>();
+            out.extend(values.iter().map(|&b| f64::from(f32::from_le_bytes(b))));
             Ok(())
         }
     }
@@ -185,7 +194,7 @@ struct TreeBufs {
 pub(super) fn parse(
     reader: impl Read,
     config: &WalkerConfig,
-    parse: &ParseConfig,
+    options: &LoadOptions,
 ) -> Result<ParsedModel, LoadError> {
     let mut r = Reader {
         input: BufReader::with_capacity(128 * 1024, reader),
@@ -267,7 +276,7 @@ pub(super) fn parse(
     let mut ctx = ParseContext {
         nodes: &mut nodes,
         bitsets: &mut bitsets,
-        bitset_intern: if parse.disable_bitset_intern {
+        bitset_intern: if options.disable_bitset_intern {
             None
         } else {
             Some(&mut intern)
@@ -442,7 +451,7 @@ fn decode_node(
         });
     }
     let feature = b.split_index[i];
-    if feature < 0 || feature as usize >= ctx.config.n_features {
+    if feature < 0 || feature as usize >= ctx.config.n_features() {
         return Err(LoadError::MalformedModel(format!(
             "split_index={feature} out of range"
         )));

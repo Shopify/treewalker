@@ -29,7 +29,7 @@ output "check_done" {
   description = "Check if benchmarks have finished"
   value = {
     for k, inst in google_compute_instance.bench : k =>
-    "gcloud compute ssh ${inst.name} --project=${var.project} --zone=${inst.zone} --command 'cat /home/bench/results/DONE 2>/dev/null || cat /home/bench/results/ERROR 2>/dev/null || echo RUNNING'"
+    "gcloud compute ssh ${inst.name} --project=${var.project} --zone=${inst.zone} --command 'cat /home/bench/results/ERROR 2>/dev/null || cat /home/bench/results/DONE 2>/dev/null || echo RUNNING'"
   }
 }
 

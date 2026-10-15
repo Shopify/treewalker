@@ -1,0 +1,485 @@
+# The benchmark grids. `treewalker-exp prepare --suite NAME` prepares a
+# suite's cells, and `treewalker-exp manifest --suite NAME` resolves it into
+# an explicit execution manifest (artifacts/manifests/NAME.json) listing every
+# model, workload and cell, with the methods and variants each cell times. The
+# Rust runner (`sweep_bench run`) executes that manifest and has no grid logic
+# of its own.
+#
+# A model is one (dataset, framework, T, L, horizon); a workload adds the
+# entity selection, G, k and feature classification; a cell is a workload on
+# one model. Both frameworks are trained for every model.
+
+schema = 1
+
+[defaults]
+seed = 42
+test_frac = 0.2
+frameworks = ["lightgbm", "xgboost"]
+expedia_max_sessions = 50_000
+
+# Treelite JSON exports, for the models that the Rust tests and the
+# byte-identical check read (parse_test's default is flchain/nt500_md8_h16).
+# Every other model writes only the binary export, which the runner and
+# tl2cgen load; listed models still skip a dump over the loader's 64 MiB.
+[treelite_json]
+models = [
+    "flchain/nt500_md8_h16",
+    "support/nt500_md8_h16",
+    "expedia/nt500_md8",
+    "scenario_credit",
+]
+
+# Measurement settings, copied into every execution manifest. The timed groups
+# are split into target_batches batches. A round gives each method its own
+# phase: a warm-up on the batch it times last, then a timed pass over every
+# batch, the same groups in the same order for every method. Method order
+# alternates across rounds, forward then reversed (A B B A). In batch mode a
+# method covers a batch in calls of up to batch_rows rows.
+[run]
+seed = 42
+target_batches = 12
+batch_rows = 1024
+min_rounds = 3
+max_rounds = 10
+precision_pct = 1.0
+mode_budget_secs = 120.0
+hardware_counters = true
+# Rows a round times per method, expected. A cell whose pool is larger times a
+# seeded sample of its groups, the same for every method and mode, and
+# validation checks every method on exactly those groups: every group
+# has the same inclusion probability f = max_rows_per_round / pool rows, raised
+# so the sample keeps at least min_groups_per_round groups. Strata are
+# power-of-two size ranges whose quotas are rounded systematically, so the
+# minimum always holds; the drawn rows vary around the expected rows. The
+# manifest records the seed, the fraction, the expected and drawn rows and
+# their relative overshoot, an exception where the minimum binds, the strata
+# with their weights and a hash of the group indices. Provisional; the validation deployment sets both.
+max_rows_per_round = 65536
+min_groups_per_round = 200
+# The sentinel: this cell, timed at the start of every run invocation (a
+# warm-up, then a measure) and again after every sentinel_every measured cells,
+# under runs/<id>/sentinel/, its ticks and rows in run.json. The analysis
+# flags a method whose time per row drifts more than sentinel_drift_pct percent
+# from the run's first measured sentinel. It stops nothing. sentinel_every = 0
+# turns it off.
+sentinel_cell = "support/nt500_md4_h16/lightgbm/panel"
+sentinel_every = 25
+sentinel_drift_pct = 2.0
+# Each cell, and each sentinel, runs in a new process of the runner. In one
+# long-lived process, a LightGBM model loaded after hundreds of other models ran
+# up to 6.9% slower by the end of the final run's factorial (same instructions);
+# one loaded into a new process did not, nor with jemalloc (the heap-drift
+# diagnostic, 2026-10-09). With fresh processes the sentinel measures the machine.
+fresh_process = true
+# XGBoost's AVX2 block walk runs only when a heap buffer happens to be 32-byte
+# aligned, so on Intel its speed has two modes, random across processes and
+# sometimes switching within one. Each XGBoost cell also times XGBoost alone in
+# this many extra one-round processes, on these architectures
+# (std::env::consts::ARCH); the analysis tells the modes apart inside each batch
+# from the blocks' instructions per row.
+xgboost_processes = 6
+xgboost_process_arches = ["x86_64"]
+# Load every TreeWalker forest with exact leaf sums (LoadOptions::exact_sums),
+# the library's default. false adds each row's leaves in f64, as the paper's
+# algorithms do; the runner refuses a cell whose forests report otherwise, and
+# records each forest's setting in its manifest.
+exact_sums = true
+
+# Compiled baselines. tl2cgen's parallel_comp is the number of source files;
+# "trees" compiles one per tree, the released recipe. Set from the pilot
+# (treewalker-exp pilot-tl2cgen), which times one file per tree against 32 on
+# the largest and a mid-size model; any tuning favors the baseline. On the M4
+# Pro (2026-10-04), 32 files ran 1.3-1.7x faster than one per tree on the
+# T=500 SUPPORT and credit models of both frameworks; the VMs time the largest.
+[baselines]
+tl2cgen_parallel_comp = 32
+
+# --- workloads ---------------------------------------------------------------
+
+# Survival panels: one model per (T, L, horizon), each test patient over the
+# full horizon. SUPPORT tops out at 104 steps.
+[workloads.panel]
+generator = "panel-v2"
+datasets = ["support", "flchain"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+horizon = [1, 2, 4, 8, 16, 32, 64, 128]
+
+# Long FLCHAIN horizons; 1,024 realizes 1,008 steps.
+[workloads.panel-long]
+generator = "panel-v2"
+datasets = ["flchain"]
+n_trees = [500, 2000]
+max_depth = [8, 16]
+horizon = [256, 512, 1024]
+
+# Expedia: one click-probability model per (T, L), used to rank every test
+# session. It is not trained with a ranking objective.
+[workloads.ranking]
+generator = "ranking-sessions-v2"
+datasets = ["expedia"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+
+# The controlled size curve: one cohort of sessions with at least 32
+# candidates; each size is the first n candidates of the session's seeded order.
+[workloads.ranking-cohort]
+generator = "ranking-cohort-v2"
+datasets = ["expedia"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+min_candidates = 32
+sizes = [4, 8, 16, 32]
+
+# What-if: G scenarios for one entity, k perturbed features.
+[workloads.whatif-credit-core]
+generator = "whatif-v2"
+datasets = ["credit"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4, 8, 16]
+k = [1, 4, 8]
+G = [4, 16, 128]
+
+[workloads.whatif-credit-full]
+generator = "whatif-v2"
+datasets = ["credit"]
+n_trees = [500]
+max_depth = [8]
+k = [1, 2, 4, 8]
+G = [4, 16, 64, 128]
+
+# The other datasets on their reference model (survival at horizon 16).
+[workloads.whatif-reference]
+generator = "whatif-v2"
+datasets = ["support", "flchain", "expedia"]
+n_trees = [500]
+max_depth = [8]
+horizon = [16]
+k = [1, 2, 4, 8]
+G = [4, 16, 64, 128]
+
+# Seed replicates. Training has no row or feature subsampling, so it is
+# deterministic and a seed alone changes nothing. Replicate k (1-4) trains with
+# the released parameters on a sample of exactly replicate_fraction of the
+# training split's entities (patients, sessions, applicants), without
+# replacement, seeded by (dataset seed, k); its time bins and test data are the
+# released model's, so it times the released cell's groups. Model IDs end in
+# _r<k>. At three anchors, both frameworks: SUPPORT's panel at T=500 L=4 h16,
+# credit's what-if at T=500 L=4 k4 G16 (the features the released model splits
+# on most), and Expedia's sessions at T=500 L=8.
+[workloads.panel-replicates]
+generator = "panel-v2"
+datasets = ["support"]
+n_trees = [500]
+max_depth = [4]
+horizon = [16]
+replicates = [1, 2, 3, 4]
+replicate_fraction = 0.8
+
+[workloads.whatif-credit-replicates]
+generator = "whatif-v2"
+datasets = ["credit"]
+n_trees = [500]
+max_depth = [4]
+k = [4]
+G = [16]
+replicates = [1, 2, 3, 4]
+replicate_fraction = 0.8
+
+[workloads.ranking-replicates]
+generator = "ranking-sessions-v2"
+datasets = ["expedia"]
+n_trees = [500]
+max_depth = [8]
+replicates = [1, 2, 3, 4]
+replicate_fraction = 0.8
+
+# expedia-filled: the Expedia split with every missing value encoded, before
+# training, as its column's training minimum minus max(1, |minimum|), the same
+# constant in train and test. QuickScorer has no missing-value handling, so it
+# can take these models (trees of at most 16 leaves fit its 128); it compares
+# thresholds in f32, so only cells whose QuickScorer outputs validate are timed.
+# The sessions, their order and the varying features are Expedia's.
+[workloads.ranking-filled]
+generator = "ranking-sessions-v2"
+datasets = ["expedia-filled"]
+n_trees = [50, 500, 1000, 2000]
+max_depth = [2, 4]
+
+# The released credit scenario cells (LightGBM only, in their released layout
+# under artifacts/scenario_credit). Kept for the byte-identical check and the
+# released scenario runs; the factorial suite uses whatif-v2.
+[workloads.whatif-v1]
+generator = "whatif-v1"
+datasets = ["credit"]
+frameworks = ["lightgbm"]
+n_trees = [500]
+max_depth = [8]
+k = [1, 2, 4, 8]
+G = [4, 16, 64, 128]
+
+# The import fixtures (tests/fixtures/import), as cells: boundary-heavy data
+# with missing values, float32 thresholds, categorical splits, nonzero base
+# scores and averaging. Seven constant-feature groups of 128 rows; TreeWalker's
+# methods only, since there are no native models.
+[workloads.fixtures]
+generator = "fixture-v1"
+models = [
+    "sigmoid_f64",
+    "sigmoid_f32",
+    "sigmoid_alpha",
+    "identity",
+    "ranking",
+    "average_base",
+    "categories_left",
+    "categories_right",
+    "categories_f32",
+    "lt_zero",
+    "positive_infinity",
+    "negative_infinity",
+    "random_forest",
+]
+
+# Runner coverage the import fixtures' shape lacks: a model without exact sums
+# (leaves 1e300 and 1e-300) and groups of 1,023 to 2,049 rows, across the
+# 1,024-row piece boundary.
+[workloads.fixtures-runner]
+generator = "fixture-v1"
+models = ["fallback_sums", "wide_pieces"]
+
+# The smallest ablation anchor (T=50, L=4, G=1): a horizon-1 model has no varying
+# predicates, so the path flags are no-ops there.
+[workloads.panel-g1]
+generator = "panel-v2"
+datasets = ["support"]
+n_trees = [50]
+max_depth = [4]
+horizon = [1]
+
+# Every mask width and the widest panel, on small models: groups of 16, 32,
+# 64, 128, 256, 512 and 1,008 rows.
+[workloads.panel-smoke]
+generator = "panel-v2"
+datasets = ["flchain"]
+n_trees = [50]
+max_depth = [4]
+horizon = [16, 32, 64, 128, 256, 512, 1024]
+
+# --- suites --------------------------------------------------------------------
+
+# Each suite declares the modes it times: serving (one call per group, the
+# paper's per-group protocol) and batch (calls of up to batch_rows rows, for
+# engine-cost counters). Only the ablation suite times batch mode.
+[suites.factorial]
+description = "Every workload on every model, timed with every method."
+modes = ["serving"]
+workloads = [
+    "panel",
+    "panel-long",
+    "ranking",
+    "ranking-cohort",
+    "whatif-credit-core",
+    "whatif-credit-full",
+    "whatif-reference",
+    "panel-replicates",
+    "whatif-credit-replicates",
+    "ranking-replicates",
+    "ranking-filled",
+]
+
+# Ablations at the anchors (T, L, G): the survival panels at horizon G, and
+# Expedia's sessions at the anchor's (T, L).
+[suites.ablation]
+description = "Runtime and parse-time ablations at the anchors."
+modes = ["serving", "batch"]
+anchors = [
+    [50, 4, 1],
+    [500, 8, 4],
+    [500, 8, 16],
+    [1000, 16, 32],
+    [500, 4, 16],
+    [500, 8, 64],
+    [500, 8, 128],
+]
+panel_datasets = ["support", "flchain"]
+ranking_datasets = ["expedia"]
+runtime_variants = [
+    [],
+    ["disable_varying_precompute"],
+    ["disable_varying_precompute", "disable_monotonic"],
+    ["disable_unsplit"],
+    ["disable_unsplit", "disable_varying_precompute"],
+    ["disable_predicate_sweep"],
+    ["disable_exact_sums"],
+]
+# LoadOptions, one at a time everywhere; all 8 combinations of the first
+# three at the interaction anchors. disable_prefix_grouping is prefix_depth 0.
+# Disabling dedup keeps bitset interning on.
+parse_flags = [
+    "disable_tree_ordering",
+    "disable_prefix_grouping",
+    "disable_bitset_intern",
+    "disable_predicate_dedup",
+]
+interaction_anchors = [[500, 8, 16], [1000, 16, 32]]
+
+# The released credit scenario cells (E1, the paper's generator), with the
+# trace evaluator for Table 3's d_v, measured and predicted columns. Exact sums
+# off and four rounds, as in the camera-ready suites.
+[suites.scenario-v1]
+description = "The released credit scenario cells (whatif-v1)."
+workloads = ["whatif-v1"]
+methods = "treewalker"
+modes = ["serving"]
+runtime_variants = [[], ["disable_varying_precompute"]]
+run = { exact_sums = false, min_rounds = 4 }
+
+# The camera-ready rerun: the paper's cells, timed with exact sums off (per-row
+# f64 sums, as Algorithms 1 and 2 describe) and at least four rounds, one full
+# forward and reversed order cycle. Survival panels at horizons 1-128, FLCHAIN's
+# long horizons 256-1,024 (whole groups beside 128-row chunks), Expedia's
+# sessions, the fixed-model cohorts and expedia-filled. whatif-v2 and the seed
+# replicates are left out (open decisions): add their workloads here to time them.
+[suites.camera-ready]
+description = "The paper's cells, with exact sums off."
+modes = ["serving"]
+workloads = ["panel", "panel-long", "ranking", "ranking-cohort", "ranking-filled"]
+run = { exact_sums = false, min_rounds = 4 }
+
+# The ablation suite for the camera-ready: the same anchors and layouts, every
+# variant with exact sums off, and no disable_exact_sums variant. The paper's six
+# switches: unsplit, monotonic (against the precompute off, on both sides),
+# precompute, tree ordering, prefix grouping and bitset interning; the sweep and
+# dedup switches are appendix material. It runs twice, as two runs
+# (infra: camera-ready-ablation@1 and @2).
+[suites.camera-ready-ablation]
+description = "Ablations at the anchors, with exact sums off."
+modes = ["serving", "batch"]
+anchors = [
+    [50, 4, 1],
+    [500, 8, 4],
+    [500, 8, 16],
+    [1000, 16, 32],
+    [500, 4, 16],
+    [500, 8, 64],
+    [500, 8, 128],
+]
+panel_datasets = ["support", "flchain"]
+ranking_datasets = ["expedia"]
+runtime_variants = [
+    [],
+    ["disable_varying_precompute"],
+    ["disable_varying_precompute", "disable_monotonic"],
+    ["disable_unsplit"],
+    ["disable_unsplit", "disable_varying_precompute"],
+    ["disable_predicate_sweep"],
+]
+parse_flags = [
+    "disable_tree_ordering",
+    "disable_prefix_grouping",
+    "disable_bitset_intern",
+    "disable_predicate_dedup",
+]
+interaction_anchors = [[500, 8, 16], [1000, 16, 32]]
+run = { exact_sums = false, min_rounds = 4 }
+
+# The first deliverable: one cell end to end before any suite runs. Both
+# frameworks of one ablation anchor (QuickScorer loads depth-4 trees), every
+# adapter each supports with its interface probe, one real ablation, counters,
+# and the import fixtures. SUPPORT's XGBoost model splits on
+# categories, which QuickScorer cannot represent, so a credit what-if cell
+# covers QuickScorer's XML path for XGBoost.
+[suites.acceptance]
+description = "One end-to-end cell, its adapters, one ablation and the import fixtures."
+modes = ["serving"]
+workloads = ["panel", "whatif-credit-core", "fixtures"]
+cells = [
+    "support/nt500_md4_h16/lightgbm/panel",
+    "support/nt500_md4_h16/xgboost/panel",
+    "credit/nt500_md4/lightgbm/whatif-v2-k4-G16",
+    "credit/nt500_md4/xgboost/whatif-v2-k4-G16",
+]
+runtime_variants = [[], ["disable_varying_precompute"]]
+
+# The validation deployment (about 2 h on each VM), before the final run: the
+# new protocol on the acceptance cells, the largest cells, and one cell of each
+# workload the shakedown did not reach. It sets the row cap, checks the probe's
+# choices, the sentinel, XGBoost's modes with children on both machines, and
+# measures the per-row rate for the final run's estimate.
+# treewalker-exp validation-readout RUN_DIR summarizes it.
+[suites.validation]
+description = "The validation deployment's representative cells."
+modes = ["serving"]
+workloads = [
+    "panel",
+    "panel-long",
+    "ranking",
+    "ranking-cohort",
+    "whatif-credit-core",
+    "whatif-credit-full",
+    "whatif-reference",
+    "panel-replicates",
+    "ranking-filled",
+]
+cells = [
+    # The acceptance cells.
+    "support/nt500_md4_h16/lightgbm/panel",
+    "support/nt500_md4_h16/xgboost/panel",
+    "credit/nt500_md4/lightgbm/whatif-v2-k4-G16",
+    "credit/nt500_md4/xgboost/whatif-v2-k4-G16",
+    # The largest cells: sampling, compile memory, run time.
+    "support/nt2000_md16_h128/lightgbm/panel",
+    "support/nt2000_md16_h128/xgboost/panel",
+    "flchain/nt2000_md16_h1024/lightgbm/panel",
+    "flchain/nt2000_md16_h1024/xgboost/panel",
+    "expedia/nt2000_md16/lightgbm/sessions",
+    "expedia/nt2000_md16/xgboost/sessions",
+    # Expedia sessions and the cohort sizes.
+    "expedia/nt500_md8/lightgbm/sessions",
+    "expedia/nt500_md8/xgboost/sessions",
+    "expedia/nt500_md8/xgboost/cohort32-n4",
+    "expedia/nt500_md8/xgboost/cohort32-n8",
+    "expedia/nt500_md8/lightgbm/cohort32-n16",
+    "expedia/nt500_md8/lightgbm/cohort32-n32",
+    # Credit what-ifs at a few (k, G).
+    "credit/nt500_md8/lightgbm/whatif-v2-k1-G4",
+    "credit/nt500_md8/xgboost/whatif-v2-k8-G128",
+    "credit/nt2000_md16/xgboost/whatif-v2-k4-G16",
+    # Intel cells whose XGBoost mode switched within a process in the shakedown,
+    # with few mixed batches: the mixed share with children on.
+    "support/nt1000_md4_h8/xgboost/panel",
+    "flchain/nt2000_md4_h128/xgboost/panel",
+    "flchain/nt1000_md2_h8/xgboost/panel",
+    # The what-if reference, both frameworks.
+    "support/nt500_md8_h16/lightgbm/whatif-v2-k4-G16",
+    "support/nt500_md8_h16/xgboost/whatif-v2-k4-G16",
+    "flchain/nt500_md8_h16/lightgbm/whatif-v2-k4-G16",
+    "flchain/nt500_md8_h16/xgboost/whatif-v2-k4-G16",
+    "expedia/nt500_md8/lightgbm/whatif-v2-k4-G16",
+    "expedia/nt500_md8/xgboost/whatif-v2-k4-G16",
+    # One seed replicate, beside its released cell above; one filled-Expedia
+    # cell, where QuickScorer runs (XGBoost routes missing values right in most
+    # of its Expedia splits, which QuickScorer's -inf cannot follow).
+    "support/nt500_md4_h16_r1/xgboost/panel",
+    "expedia-filled/nt500_md4/xgboost/sessions",
+]
+# Children on both machines, so they can be compared with process 0 where
+# XGBoost is unimodal (Arm); the sentinel more often than every 25 cells.
+run = { xgboost_process_arches = ["x86_64", "aarch64"], sentinel_every = 10 }
+
+# The prepared-artifact smoke tier: f32 and f64 models, every mask width and the
+# 1,024-row piece boundary, exact and fallback accumulation, no-op and active
+# ablations.
+[suites.smoke]
+description = "Small cells for the artifact tests and a quick runner check."
+modes = ["serving"]
+workloads = ["panel-smoke", "panel-g1", "fixtures", "fixtures-runner"]
+runtime_variants = [
+    [],
+    ["disable_varying_precompute"],
+    ["disable_varying_precompute", "disable_monotonic"],
+    ["disable_unsplit"],
+    ["disable_predicate_sweep"],
+    ["disable_exact_sums"],
+    ["disable_monotonic"],
+]

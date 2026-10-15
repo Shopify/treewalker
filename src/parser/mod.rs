@@ -43,17 +43,20 @@ pub(crate) use validation::{Output, ParsedModel, Postprocessor, validate_json_de
 use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;
 
-use crate::config::{ParseConfig, WalkerConfig};
-use crate::forest::{FeatureRange, Node, PrefixGroup, ThresholdType, Tree, VaryingPredicate};
+use crate::config::{LoadOptions, WalkerConfig};
+use crate::forest::{FeatureRange, Node, PrefixGroup, Threshold, Tree, VaryingPredicate};
 
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
 /// Explicit format for loading models from memory or readers.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ModelFormat {
+    /// Treelite 4.0 to 4.7 binary checkpoint, from `Model.serialize_bytes()`.
     TreeliteBinaryV4,
+    /// Treelite JSON dump, from `Model.dump_as_json()`.
     TreeliteJson,
 }
 
@@ -70,56 +73,24 @@ impl ModelFormat {
     }
 }
 
-/// Legacy tuple API for summed, alpha=1 sigmoid models only.
-///
-/// This preserves historical leaf-bias distribution. Panics for other output
-/// semantics, malformed inputs or unsupported models. Prefer [`crate::Forest`]'s
-/// fallible loaders, which retain output metadata and support identity/averaging.
-#[allow(clippy::float_cmp)] // Exact output mode, not an approximate numerical comparison.
-pub fn parse_model(
-    path: impl AsRef<Path>,
-    config: &WalkerConfig,
-    parse_config: &ParseConfig,
-) -> (Vec<Tree>, Vec<Node>, Vec<u8>, ThresholdType) {
-    let path = path.as_ref();
-    let parsed = (|| {
-        let format = ModelFormat::from_path(path)?;
-        parse_reader(std::fs::File::open(path)?, format, config, parse_config)
-    })()
-    .unwrap_or_else(|e| panic!("{e}"));
-    assert!(
-        parsed.output.divisor == 1.0 && parsed.output.postprocessor == Postprocessor::Sigmoid(1.0),
-        "legacy parse_model cannot carry this model's output metadata; use Forest::try_load or Forest::from_reader"
-    );
-    let mut nodes = parsed.nodes;
-    let bias = parsed.output.base_score / parsed.trees.len() as f64;
-    for node in &mut nodes {
-        if node.is_leaf() {
-            node.value += bias;
-        }
-    }
-    (parsed.trees, nodes, parsed.bitsets, parsed.threshold_type)
-}
-
 pub(crate) fn parse_reader(
     reader: impl Read,
     format: ModelFormat,
     config: &WalkerConfig,
-    parse_config: &ParseConfig,
+    options: &LoadOptions,
 ) -> Result<ParsedModel, LoadError> {
-    config.validate()?;
-    if parse_config.prefix_depth > validation::MAX_DEPTH {
+    if options.prefix_depth > validation::MAX_DEPTH {
         return Err(LoadError::Limit(format!(
             "prefix_depth {} exceeds {}",
-            parse_config.prefix_depth,
+            options.prefix_depth,
             validation::MAX_DEPTH
         )));
     }
     let mut parsed = match format {
-        ModelFormat::TreeliteBinaryV4 => binary::parse(reader, config, parse_config)?,
-        ModelFormat::TreeliteJson => json::parse(reader, config, parse_config)?,
+        ModelFormat::TreeliteBinaryV4 => binary::parse(reader, config, options)?,
+        ModelFormat::TreeliteJson => json::parse(reader, config, options)?,
     };
-    if !parse_config.disable_tree_ordering {
+    if !options.disable_tree_ordering {
         (parsed.trees, parsed.nodes, parsed.bitsets) =
             auto_order_trees(parsed.trees, parsed.nodes, parsed.bitsets);
     }
@@ -180,7 +151,7 @@ pub(crate) fn build_varying_predicates(
         } else {
             VaryingPredicate::Num {
                 feature,
-                threshold: node.value,
+                threshold: Threshold(node.value),
                 default_left,
             }
         };
@@ -241,7 +212,7 @@ pub(crate) fn build_varying_predicates_no_dedup(
         } else {
             VaryingPredicate::Num {
                 feature,
-                threshold: node.value,
+                threshold: Threshold(node.value),
                 default_left,
             }
         };
@@ -298,7 +269,7 @@ pub(crate) fn sort_varying_predicates(predicates: &mut Vec<VaryingPredicate>, no
                     (
                         VaryingPredicate::Num { threshold: ta, .. },
                         VaryingPredicate::Num { threshold: tb, .. },
-                    ) => ta.total_cmp(tb),
+                    ) => ta.0.total_cmp(&tb.0),
                     _ => std::cmp::Ordering::Equal,
                 }
             })
@@ -517,7 +488,7 @@ fn auto_order_trees(
 ///
 /// Builds new pools in sorted order and drops the old ones. Peak memory is
 /// 2× the nodes pool during the copy. For models where this matters (>100MB),
-/// the tree ordering can be disabled with `ParseConfig::disable_tree_ordering`.
+/// the tree ordering can be disabled with `LoadOptions::disable_tree_ordering`.
 fn repack_pools_in_tree_order(
     order: &[usize],
     trees: &[Tree],

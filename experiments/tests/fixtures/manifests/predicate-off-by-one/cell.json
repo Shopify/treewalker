@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "id": "credit/nt5_md2/lightgbm/whatif-v2-k1-G4",
+  "workload": "whatif-credit-full",
+  "generator": "whatif-v2",
+  "dataset": "credit",
+  "framework": "lightgbm",
+  "n_trees": 5,
+  "max_depth": 2,
+  "params": {
+    "k": 1,
+    "G": 4
+  },
+  "model_key": "c1343ef2bd80da6e77f7cafd83820f6621851c826a2aadd723f950681a664f49",
+  "data_sha256": {
+    "entities": "23e2a6c05b68c26a66f958ad39be3045c2a84901611fb83fa44ce8cfa582f018",
+    "group_offsets": "ff6a1b309bde31fe1df92c8ae26fbf86109a1f1105f2236115a20599a85728c8",
+    "test_data": "47f266ff5f95099ae57247a704a5f96001785acdbd59fa8c464f8f3e78cb983a",
+    "walker_config": "e85bffc0bce67faea2f87f4be666d170a532fb495fa17c686c24e8ef4bdfebb7"
+  },
+  "key": "7df0624fec4055e50edbb915c986b4d17f85e19bfb6155e120bf2cf601d2ad94",
+  "status": "unsupported",
+  "horizon": null,
+  "grouping": {
+    "kind": "whatif",
+    "G": 4,
+    "n_groups": 20,
+    "rows": 80,
+    "size_min": 4,
+    "size_mean": 4.0,
+    "size_max": 4
+  },
+  "k": null,
+  "feature_order": [
+    "a",
+    "b",
+    "c"
+  ],
+  "features": {
+    "varying": [
+      "a"
+    ],
+    "mono_inc": [],
+    "mono_dec": [],
+    "realized_varying": [
+      "a"
+    ]
+  },
+  "perturbation": null,
+  "seeds": {
+    "split": 0
+  },
+  "split": {
+    "seed": 0,
+    "test_frac": 0.2,
+    "unit": "row"
+  },
+  "train": {
+    "params": {
+      "objective": "binary",
+      "metric": "binary_logloss",
+      "num_leaves": 3,
+      "max_depth": 2,
+      "learning_rate": 0.05,
+      "verbose": -1,
+      "seed": 42
+    },
+    "num_boost_round": 5
+  },
+  "libraries": {
+    "numpy": "2.5.3",
+    "polars": "1.44.2",
+    "treelite": "4.7.2",
+    "lightgbm": "4.7.0"
+  },
+  "model": {
+    "key": "c1343ef2bd80da6e77f7cafd83820f6621851c826a2aadd723f950681a664f49",
+    "dir": "../..",
+    "structure": {
+      "trees": 5,
+      "total_nodes": 25,
+      "max_tree_nodes": 5
+    },
+    "varying_predicates": 4
+  },
+  "contracts": {
+    "ok": true,
+    "violations": [],
+    "missing_in_monotonic": {}
+  },
+  "limits": [
+    "4 varying predicates; limit 3"
+  ],
+  "files": {
+    "entities": {
+      "path": "entities.npy",
+      "sha256": "23e2a6c05b68c26a66f958ad39be3045c2a84901611fb83fa44ce8cfa582f018"
+    },
+    "group_offsets": {
+      "path": "group_offsets.bin",
+      "sha256": "ff6a1b309bde31fe1df92c8ae26fbf86109a1f1105f2236115a20599a85728c8"
+    },
+    "model_native": {
+      "path": "../../model_native.txt",
+      "sha256": "6e698f02a74ca15b19bdcf96d90b0721e341e6c8352c23193e75bd727d2b7a1b"
+    },
+    "model_treelite_bin": {
+      "path": "../../model_treelite.bin",
+      "sha256": "d9da013e8f1563d513698cf194564d89af17b7cbcbf52d035db21517c4c63fce"
+    },
+    "model_treelite_json": {
+      "path": "../../model_treelite.json",
+      "sha256": "cb06006f13c635d8cae64ce6943bb894ecf955965949caa53edc470c7b0f37b8"
+    },
+    "predictions": {
+      "path": "predictions.npy",
+      "sha256": "9030db51d970434c841df7277c513058b677430ab47d6b04f31adb06f6e73670"
+    },
+    "test_data": {
+      "path": "test_data.bin",
+      "sha256": "47f266ff5f95099ae57247a704a5f96001785acdbd59fa8c464f8f3e78cb983a"
+    },
+    "walker_config": {
+      "path": "walker_config.json",
+      "sha256": "e85bffc0bce67faea2f87f4be666d170a532fb495fa17c686c24e8ef4bdfebb7"
+    }
+  },
+  "baselines": {}
+}

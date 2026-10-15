@@ -1,0 +1,12 @@
+# f32 audit: raw margins against the same f64 reference
+
+Reference: each cell's stage oracle, math.fsum of Treelite GTIL's per-tree outputs and the staged finalization with the margin-scale base score.
+
+TreeWalker's oracle check in the camera-ready runs: intel 712 of 712 cells passed, 292,080 rows (0 cells bit for bit, 712 with exact sums off, within 1e-12 relative); arm 712 of 712 cells passed, 292,080 rows (0 cells bit for bit, 712 with exact sums off, within 1e-12 relative).
+
+Native XGBoost (output_margin=True), one cell per model: 292 of 292 models audited (0 without their artifacts, missing or from another prep), 117,096 rows; 117,096 rows (100.0%) differ from the reference; largest error 3.95e-05 (relative 0.00151). Native equals the reference rounded to f32 on 9,159 rows (7.8%).
+
+TreeWalker against native XGBoost, intel (the run's stages, exact sums off): 292 cells, 117,096 rows; TreeWalker closer to the reference on 117,096 (100.00%), tied on 0, farther on 0; TreeWalker differs from the reference on 7 rows, by at most 8.88e-16 (relative 2.08e-16).
+
+TreeWalker against native XGBoost, arm (the run's stages, exact sums off): 292 cells, 117,096 rows; TreeWalker closer to the reference on 117,096 (100.00%), tied on 0, farther on 0; TreeWalker differs from the reference on 7 rows, by at most 8.88e-16 (relative 2.08e-16).
+

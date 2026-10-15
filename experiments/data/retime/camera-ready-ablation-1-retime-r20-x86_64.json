@@ -1,0 +1,723 @@
+{
+  "schema_version": 3,
+  "suite": "camera-ready-ablation",
+  "description": "Ablations at the anchors, with exact sums off.",
+  "artifacts_dir": "/home/bench/treewalker/experiments/artifacts",
+  "grids_sha256": "7ca400b8a22ea567e90319e7e171f4c56288ced78b7f5cde42c963e34031b522",
+  "source": {
+    "commit": "e721bb8a9cc0bbd02b315578be972a201123fd97",
+    "dirty": false,
+    "from": "experiments/SOURCE_COMMIT"
+  },
+  "run": {
+    "batch_rows": 1024,
+    "exact_sums": false,
+    "fresh_process": true,
+    "hardware_counters": true,
+    "max_rounds": 20,
+    "max_rows_per_round": 65536,
+    "min_groups_per_round": 200,
+    "min_rounds": 20,
+    "mode_budget_secs": 120.0,
+    "precision_pct": 1.0,
+    "seed": 42,
+    "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+    "sentinel_drift_pct": 2.0,
+    "sentinel_every": 25,
+    "target_batches": 12,
+    "xgboost_process_arches": [
+      "x86_64"
+    ],
+    "xgboost_processes": 6
+  },
+  "sentinel": {
+    "id": "support/nt500_md4_h16/lightgbm/panel",
+    "dir": "support/nt500_md4_h16/lightgbm/cells/panel",
+    "status": "ready",
+    "key": "1b7fb86bc08487934bdf5eea1984be6d0fb59eb5d764f86f7e4d3d6f01eb55d7",
+    "methods": "factorial",
+    "variants": [],
+    "modes": [
+      "serving"
+    ]
+  },
+  "native": {
+    "lightgbm": {
+      "path": "/home/bench/treewalker/experiments/.cache/native/lightgbm-4.7.0-8f7036f03627/lib_lightgbm.so",
+      "sha256": "d5264b5f3d1456bf4b944d292eb98ace981ae7d35e77fbc711772054da898ecf",
+      "version": "4.7.0",
+      "commit": "8f7036f03627054d5a54a6f965b13f4b9ff2cb63",
+      "build": {
+        "key": "d08aff22bfe74093105bb764cd382ff3a3a70d3860a24a8d12dd67c778d9d5c4",
+        "identity": {
+          "url": "https://github.com/lightgbm-org/LightGBM.git",
+          "tag": "v4.7.0",
+          "commit": "8f7036f03627054d5a54a6f965b13f4b9ff2cb63",
+          "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-march=native",
+            "-DCMAKE_CXX_FLAGS=-march=native",
+            "-DUSE_OPENMP=ON"
+          ],
+          "cc": {
+            "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+            "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+            "target": "x86_64-linux-gnu"
+          },
+          "cxx": {
+            "path": "/usr/bin/x86_64-linux-gnu-g++-15",
+            "version": "x86_64-linux-gnu-g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+            "target": "x86_64-linux-gnu"
+          },
+          "cmake": "cmake version 4.2.3",
+          "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+          "platform": "linux"
+        },
+        "cmake_args": [
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_C_FLAGS=-march=native",
+          "-DCMAKE_CXX_FLAGS=-march=native",
+          "-DUSE_OPENMP=ON"
+        ],
+        "compiler": {
+          "path": "/usr/bin/c++",
+          "version": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+        }
+      }
+    },
+    "xgboost": {
+      "path": "/home/bench/treewalker/experiments/.cache/native/xgboost-3.4.1-6fe8c547bdd2/libxgboost.so",
+      "sha256": "0c8534019e77cd68a99ed6f600906687961f7a42ae9c9b18cd360fb516154aaf",
+      "version": "3.4.1",
+      "commit": "6fe8c547bdd21c73e4555d85b087d9260595d30d",
+      "build": {
+        "key": "ab5d556f36fb80d9be63f59d1f219a8980ccca07fd7cfd3ca770c1a3b0e45ce5",
+        "identity": {
+          "url": "https://github.com/dmlc/xgboost.git",
+          "tag": "v3.4.1",
+          "commit": "6fe8c547bdd21c73e4555d85b087d9260595d30d",
+          "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-march=native",
+            "-DCMAKE_CXX_FLAGS=-march=native",
+            "-DUSE_OPENMP=ON"
+          ],
+          "cc": {
+            "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+            "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+            "target": "x86_64-linux-gnu"
+          },
+          "cxx": {
+            "path": "/usr/bin/x86_64-linux-gnu-g++-15",
+            "version": "x86_64-linux-gnu-g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+            "target": "x86_64-linux-gnu"
+          },
+          "cmake": "cmake version 4.2.3",
+          "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+          "platform": "linux"
+        },
+        "cmake_args": [
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_C_FLAGS=-march=native",
+          "-DCMAKE_CXX_FLAGS=-march=native",
+          "-DUSE_OPENMP=ON"
+        ],
+        "compiler": {
+          "path": "/usr/bin/c++",
+          "version": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+        }
+      }
+    }
+  },
+  "tl2cgen_runtime": {
+    "path": "/home/bench/treewalker/.venv/lib/python3.14/site-packages/tl2cgen/lib/libtl2cgen.so",
+    "sha256": "333719776bd2037c089b6f531615c78dc8c53464f0225924c866e152fcfce0a2"
+  },
+  "counts": {
+    "ready": 3
+  },
+  "ablation": {
+    "anchors": [
+      [
+        50,
+        4,
+        1
+      ],
+      [
+        500,
+        8,
+        4
+      ],
+      [
+        500,
+        8,
+        16
+      ],
+      [
+        1000,
+        16,
+        32
+      ],
+      [
+        500,
+        4,
+        16
+      ],
+      [
+        500,
+        8,
+        64
+      ],
+      [
+        500,
+        8,
+        128
+      ]
+    ],
+    "runtime_variants": [
+      [],
+      [
+        "disable_varying_precompute"
+      ],
+      [
+        "disable_varying_precompute",
+        "disable_monotonic"
+      ],
+      [
+        "disable_unsplit"
+      ],
+      [
+        "disable_unsplit",
+        "disable_varying_precompute"
+      ],
+      [
+        "disable_predicate_sweep"
+      ]
+    ],
+    "parse_flags": [
+      "disable_tree_ordering",
+      "disable_prefix_grouping",
+      "disable_bitset_intern",
+      "disable_predicate_dedup"
+    ],
+    "interaction_anchors": [
+      [
+        500,
+        8,
+        16
+      ],
+      [
+        1000,
+        16,
+        32
+      ]
+    ]
+  },
+  "models": [
+    {
+      "id": "expedia/nt1000_md16/lightgbm",
+      "dir": "expedia/nt1000_md16/lightgbm",
+      "key": "2f79c735fc1e6c750b6795b7816c77c8dea0288b8a25028936757ea9fba62837"
+    },
+    {
+      "id": "expedia/nt1000_md16/xgboost",
+      "dir": "expedia/nt1000_md16/xgboost",
+      "key": "a70bf42dde753492332a84f77b51f23f94d953e38389686a0b5c2fcdc80aa5d3"
+    },
+    {
+      "id": "expedia/nt500_md4/lightgbm",
+      "dir": "expedia/nt500_md4/lightgbm",
+      "key": "8b8ee6e16031ee32e8ef4b4d9a602c909e9c57f6047bd162fff072226d750c7e"
+    },
+    {
+      "id": "expedia/nt500_md4/xgboost",
+      "dir": "expedia/nt500_md4/xgboost",
+      "key": "325e30c976191eeab82b7719636ff3b71b2c99cdf629e860f014b1e0e6bfbea4"
+    },
+    {
+      "id": "expedia/nt500_md8/lightgbm",
+      "dir": "expedia/nt500_md8/lightgbm",
+      "key": "f75d286ac239063c585a2b1e1013810fc4bd2707b2654b7ab97e53dedd4b10b2"
+    },
+    {
+      "id": "expedia/nt500_md8/xgboost",
+      "dir": "expedia/nt500_md8/xgboost",
+      "key": "3546c0994681344e1a346df00766fb7169fc70c6f0aac8d3447ac845b8e51583"
+    },
+    {
+      "id": "expedia/nt50_md4/lightgbm",
+      "dir": "expedia/nt50_md4/lightgbm",
+      "key": "fa2576f33c12497dadbe60442fb864f5559a19d0e79a3909808fbfe5e993bd57"
+    },
+    {
+      "id": "expedia/nt50_md4/xgboost",
+      "dir": "expedia/nt50_md4/xgboost",
+      "key": "8774cefdedaa4334822701be73bf7152ec60fdc98ffa2be43da502627a0ec91e"
+    },
+    {
+      "id": "flchain/nt1000_md16_h32/lightgbm",
+      "dir": "flchain/nt1000_md16_h32/lightgbm",
+      "key": "1d96da1366f54093bbef4efccd2f9bb2f7d611901325a6a66b9964e94d57837b"
+    },
+    {
+      "id": "flchain/nt1000_md16_h32/xgboost",
+      "dir": "flchain/nt1000_md16_h32/xgboost",
+      "key": "fd394fd69d55b151aee4c7d735a4bcb69449cf17eb3bf7e921f2c116f7e11e36"
+    },
+    {
+      "id": "flchain/nt500_md4_h16/lightgbm",
+      "dir": "flchain/nt500_md4_h16/lightgbm",
+      "key": "54cd91f86ae0655afd227b37f9139a997ed1b23be6daef5e622a1043a46061a6"
+    },
+    {
+      "id": "flchain/nt500_md4_h16/xgboost",
+      "dir": "flchain/nt500_md4_h16/xgboost",
+      "key": "71676cc20ed7cb6444e882314fcb8e8fd2e8aad60500ad6b903f8e7deb317fe3"
+    },
+    {
+      "id": "flchain/nt500_md8_h128/lightgbm",
+      "dir": "flchain/nt500_md8_h128/lightgbm",
+      "key": "bffebaee408557fa0c79f1249a3ad1936a49bc1df5b2475575d73de3a4e3f40f"
+    },
+    {
+      "id": "flchain/nt500_md8_h128/xgboost",
+      "dir": "flchain/nt500_md8_h128/xgboost",
+      "key": "2aef8c274cb2e76a60b9eb99fc65eb97532dcfe68e24c1d01d565a0a38eca255"
+    },
+    {
+      "id": "flchain/nt500_md8_h16/lightgbm",
+      "dir": "flchain/nt500_md8_h16/lightgbm",
+      "key": "f8946f72967372237217576b90453d5fee68f29de47eedc65e1db658c894a05c"
+    },
+    {
+      "id": "flchain/nt500_md8_h16/xgboost",
+      "dir": "flchain/nt500_md8_h16/xgboost",
+      "key": "cd3c41248a7774ed7945e4a28d50657cf7b782381cebcc2713a01bd66ad7a3f6"
+    },
+    {
+      "id": "flchain/nt500_md8_h4/lightgbm",
+      "dir": "flchain/nt500_md8_h4/lightgbm",
+      "key": "28b65b59558c9c91fc36682f2f49fc0779f786d2b7bb5c93672327ae4d2c1f89"
+    },
+    {
+      "id": "flchain/nt500_md8_h4/xgboost",
+      "dir": "flchain/nt500_md8_h4/xgboost",
+      "key": "ee67557b271eac85406c7ca85fe095e8c0093bf26fc710dbf2d612d02a2f56c5"
+    },
+    {
+      "id": "flchain/nt500_md8_h64/lightgbm",
+      "dir": "flchain/nt500_md8_h64/lightgbm",
+      "key": "6aeae5c4500adf54ffc748174bf699a496f28169aa2950ffce2f8c3d04ce011e"
+    },
+    {
+      "id": "flchain/nt500_md8_h64/xgboost",
+      "dir": "flchain/nt500_md8_h64/xgboost",
+      "key": "9f90ef0732e5214cd5097207e94b19b587de03647224159d1d1e625433589dbd"
+    },
+    {
+      "id": "flchain/nt50_md4_h1/lightgbm",
+      "dir": "flchain/nt50_md4_h1/lightgbm",
+      "key": "bb159a6a722190c2061c5d644b0d8072a34724e1fc8cd5cb14b9b7ec68e32077"
+    },
+    {
+      "id": "flchain/nt50_md4_h1/xgboost",
+      "dir": "flchain/nt50_md4_h1/xgboost",
+      "key": "057bb5e9dc2b90525a5c8a8eae46c533fd137ce89145da2643dc5357df8a9fae"
+    },
+    {
+      "id": "support/nt1000_md16_h32/lightgbm",
+      "dir": "support/nt1000_md16_h32/lightgbm",
+      "key": "70ca4a8b2faf247c635d3a31eb696336c73ce0bb4ca356d4ab19f7cd4b81ead1"
+    },
+    {
+      "id": "support/nt1000_md16_h32/xgboost",
+      "dir": "support/nt1000_md16_h32/xgboost",
+      "key": "58fd794808d9414d17dfe2dc029314733c96f86def973198a0ced3276df7db69"
+    },
+    {
+      "id": "support/nt500_md4_h16/lightgbm",
+      "dir": "support/nt500_md4_h16/lightgbm",
+      "key": "201d74cee036b817b00b021141a2092e9d0569ebad0337eda1e13fd102d0c0e7"
+    },
+    {
+      "id": "support/nt500_md4_h16/xgboost",
+      "dir": "support/nt500_md4_h16/xgboost",
+      "key": "b08fc6696e69b510b0ad999f43676f5c6577711a1b03be3b1746fd15bd99c52b"
+    },
+    {
+      "id": "support/nt500_md8_h128/lightgbm",
+      "dir": "support/nt500_md8_h128/lightgbm",
+      "key": "5c5e52d3fca6e0540ddf3a1c5de0eb37d988259f05293c54fd02aa4dbd0a88b8"
+    },
+    {
+      "id": "support/nt500_md8_h128/xgboost",
+      "dir": "support/nt500_md8_h128/xgboost",
+      "key": "02a4f8fa5b521271ba59b47cee214740a1c55cf873b435019610b682c3e0342a"
+    },
+    {
+      "id": "support/nt500_md8_h16/lightgbm",
+      "dir": "support/nt500_md8_h16/lightgbm",
+      "key": "435f831200ed19cc28394d0899e126af6402f1251ffe4ca322cb955498856a46"
+    },
+    {
+      "id": "support/nt500_md8_h16/xgboost",
+      "dir": "support/nt500_md8_h16/xgboost",
+      "key": "8348cb916a23897b576886b470fedfc92a563d81a38fb8e143ecf992b5086698"
+    },
+    {
+      "id": "support/nt500_md8_h4/lightgbm",
+      "dir": "support/nt500_md8_h4/lightgbm",
+      "key": "7d441041b07c4f696f8636387d6b806551f5c7da4beae142519d65a84f3341e2"
+    },
+    {
+      "id": "support/nt500_md8_h4/xgboost",
+      "dir": "support/nt500_md8_h4/xgboost",
+      "key": "eaa34375626977a901ce5dca221ae3d59b44389b1173fc8b3672be14515ffe71"
+    },
+    {
+      "id": "support/nt500_md8_h64/lightgbm",
+      "dir": "support/nt500_md8_h64/lightgbm",
+      "key": "d08845d2f11611890bd3f7a8b281e83ca598cd20739a781df05c22be2207307c"
+    },
+    {
+      "id": "support/nt500_md8_h64/xgboost",
+      "dir": "support/nt500_md8_h64/xgboost",
+      "key": "960875aafd2db0a009dcbf517f2004f67edf525f0c4e03ffffdaa78ff5c0200e"
+    },
+    {
+      "id": "support/nt50_md4_h1/lightgbm",
+      "dir": "support/nt50_md4_h1/lightgbm",
+      "key": "8f068e1232f89f1499837deb476f8be86e1564032983a42f78708a147132efbf"
+    },
+    {
+      "id": "support/nt50_md4_h1/xgboost",
+      "dir": "support/nt50_md4_h1/xgboost",
+      "key": "abb57ab6500ba9f3d665b6d66e0646c40297f44663d9d7505c8a8e7e8121c0d3"
+    }
+  ],
+  "workloads": [
+    {
+      "key": "e260f79d200e65897d5ce6948675da0f04a7f6bde0373a685c321a65e5e945c0",
+      "dir": "expedia/nt50_md4",
+      "generator": "ranking-sessions-v2"
+    },
+    {
+      "key": "a4ff606b5395047f95d60c3780f939db7f6062fa3e7f3323c33b8d760ca52492",
+      "dir": "flchain/nt1000_md16_h32",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "ffb9e9d7c6987792b9b4d9534c359d74a6fab4a2e9e15bedf3837b4924aa0fc3",
+      "dir": "flchain/nt500_md8_h128",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "0eaa1d8172817109a9bd206335188de69a91de1f956a5db16da1c6adf8331439",
+      "dir": "flchain/nt500_md8_h16",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "a9bb0ee186cb1cd2ba726522839ad1745326fc1f79bb4fad446f1fbd2f6c9069",
+      "dir": "flchain/nt500_md8_h4",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "3054b3f3dafdaa01f3106525ed4baae9680a1eb5b4cd39b6de7dee4b18292d4a",
+      "dir": "flchain/nt500_md8_h64",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "6166b1738df0f0d4d8bcd82e77064e1d052572c944fb6308f4ff1bb71b336cfd",
+      "dir": "flchain/nt50_md4_h1",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "7156e51eee64a1fa87560ec17c7a23f025e7642ec18750603f019df7153eeff5",
+      "dir": "support/nt1000_md16_h32",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "31177b45abee342d745578475995d9b3f0ca37163a333101eae0a0cce7fef17a",
+      "dir": "support/nt500_md8_h128",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "804ea4d787858d0580dbccba8b7c5f534bf8212f90f0152fd93d8d8cb7c31b6b",
+      "dir": "support/nt500_md8_h16",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "dcf35f062ebe2fc238fdef86073327a4b083502c9754feb1da5ab533c7c6bc5e",
+      "dir": "support/nt500_md8_h4",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "a9ec5b2831ce7236673be0b5793fc008012cee47ddb9d4a020c8d3fe33b29119",
+      "dir": "support/nt500_md8_h64",
+      "generator": "panel-v2"
+    },
+    {
+      "key": "21038d9fe39ebacf533798e40940e6f32ee41e604c6d12059d94d5be44b9da17",
+      "dir": "support/nt50_md4_h1",
+      "generator": "panel-v2"
+    }
+  ],
+  "cells": [
+    {
+      "id": "flchain/nt50_md4_h1/lightgbm/panel",
+      "dir": "flchain/nt50_md4_h1/lightgbm/cells/panel",
+      "dataset": "flchain",
+      "framework": "lightgbm",
+      "grid_workload": "panel",
+      "generator": "panel-v2",
+      "methods": "ablation",
+      "variants": [
+        {
+          "runtime": [],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_monotonic",
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_unsplit"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_unsplit",
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_predicate_sweep"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_tree_ordering"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_prefix_grouping"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_bitset_intern"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_predicate_dedup"
+          ]
+        }
+      ],
+      "modes": [
+        "serving",
+        "batch"
+      ],
+      "interaction": false,
+      "status": "ready",
+      "key": "dced4f625473aa0c180fbe7603b8a27ebb669445b05ac592776d15b56d7062c7",
+      "model": "flchain/nt50_md4_h1/lightgbm",
+      "workload": "6166b1738df0f0d4d8bcd82e77064e1d052572c944fb6308f4ff1bb71b336cfd",
+      "rows": 1304,
+      "n_groups": 1304
+    },
+    {
+      "id": "flchain/nt50_md4_h1/xgboost/panel",
+      "dir": "flchain/nt50_md4_h1/xgboost/cells/panel",
+      "dataset": "flchain",
+      "framework": "xgboost",
+      "grid_workload": "panel",
+      "generator": "panel-v2",
+      "methods": "ablation",
+      "variants": [
+        {
+          "runtime": [],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_monotonic",
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_unsplit"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_unsplit",
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_predicate_sweep"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_tree_ordering"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_prefix_grouping"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_bitset_intern"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_predicate_dedup"
+          ]
+        }
+      ],
+      "modes": [
+        "serving",
+        "batch"
+      ],
+      "interaction": false,
+      "status": "ready",
+      "key": "f1120cd349a972c9fdd37bd8bb672cbf4e7d513b93978fada17f4ef8794f149a",
+      "model": "flchain/nt50_md4_h1/xgboost",
+      "workload": "6166b1738df0f0d4d8bcd82e77064e1d052572c944fb6308f4ff1bb71b336cfd",
+      "rows": 1304,
+      "n_groups": 1304
+    },
+    {
+      "id": "support/nt50_md4_h1/lightgbm/panel",
+      "dir": "support/nt50_md4_h1/lightgbm/cells/panel",
+      "dataset": "support",
+      "framework": "lightgbm",
+      "grid_workload": "panel",
+      "generator": "panel-v2",
+      "methods": "ablation",
+      "variants": [
+        {
+          "runtime": [],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_monotonic",
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_unsplit"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_unsplit",
+            "disable_varying_precompute"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_predicate_sweep"
+          ],
+          "load": []
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_tree_ordering"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_prefix_grouping"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_bitset_intern"
+          ]
+        },
+        {
+          "runtime": [],
+          "load": [
+            "disable_predicate_dedup"
+          ]
+        }
+      ],
+      "modes": [
+        "serving",
+        "batch"
+      ],
+      "interaction": false,
+      "status": "ready",
+      "key": "0e958cb1c8997922c7960b5eee6eb93e44e3748f48c39535370055620b98175c",
+      "model": "support/nt50_md4_h1/lightgbm",
+      "workload": "21038d9fe39ebacf533798e40940e6f32ee41e604c6d12059d94d5be44b9da17",
+      "rows": 1774,
+      "n_groups": 1774
+    }
+  ],
+  "retime": {
+    "of": "camera-ready-ablation-1",
+    "threshold_pct": 2.0,
+    "rounds": 10,
+    "cells": [
+      "flchain/nt50_md4_h1/lightgbm/panel",
+      "flchain/nt50_md4_h1/xgboost/panel",
+      "support/nt50_md4_h1/lightgbm/panel"
+    ]
+  }
+}

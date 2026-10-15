@@ -52,6 +52,7 @@ pub trait RowMask:
     fn count_ones(self) -> u32;
 
     /// Test whether bit `r` is set.
+    #[cfg(test)]
     fn test_bit(self, r: usize) -> bool;
 
     /// Return `self` with bit `r` set.
@@ -93,6 +94,7 @@ macro_rules! impl_row_mask {
             fn count_ones(self) -> u32 {
                 self.count_ones()
             }
+            #[cfg(test)]
             #[inline]
             fn test_bit(self, r: usize) -> bool {
                 debug_assert!(r < Self::WIDTH);
@@ -229,12 +231,17 @@ impl<const W: usize> RowMask for Bits<W> {
     fn count_ones(self) -> u32 {
         self.0.iter().map(|w| w.count_ones()).sum()
     }
+    #[cfg(test)]
     #[inline]
     fn test_bit(self, r: usize) -> bool {
         debug_assert!(r < Self::WIDTH);
         self.0[r / 64] >> (r % 64) & 1 != 0
     }
-    #[inline]
+    #[expect(
+        clippy::inline_always,
+        reason = "keeps the production call path independent of the research builds"
+    )]
+    #[inline(always)]
     fn set_bit(mut self, r: usize) -> Self {
         debug_assert!(r < Self::WIDTH);
         self.0[r / 64] |= 1 << (r % 64);

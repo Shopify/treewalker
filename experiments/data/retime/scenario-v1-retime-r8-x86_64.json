@@ -1,0 +1,268 @@
+{
+  "schema_version": 3,
+  "suite": "scenario-v1",
+  "description": "The released credit scenario cells (whatif-v1).",
+  "artifacts_dir": "/home/bench/treewalker/experiments/artifacts",
+  "grids_sha256": "7ca400b8a22ea567e90319e7e171f4c56288ced78b7f5cde42c963e34031b522",
+  "source": {
+    "commit": "e721bb8a9cc0bbd02b315578be972a201123fd97",
+    "dirty": false,
+    "from": "experiments/SOURCE_COMMIT"
+  },
+  "run": {
+    "batch_rows": 1024,
+    "exact_sums": false,
+    "fresh_process": true,
+    "hardware_counters": true,
+    "max_rounds": 8,
+    "max_rows_per_round": 65536,
+    "min_groups_per_round": 200,
+    "min_rounds": 8,
+    "mode_budget_secs": 120.0,
+    "precision_pct": 1.0,
+    "seed": 42,
+    "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+    "sentinel_drift_pct": 2.0,
+    "sentinel_every": 25,
+    "target_batches": 12,
+    "xgboost_process_arches": [
+      "x86_64"
+    ],
+    "xgboost_processes": 6
+  },
+  "sentinel": {
+    "id": "support/nt500_md4_h16/lightgbm/panel",
+    "dir": "support/nt500_md4_h16/lightgbm/cells/panel",
+    "status": "ready",
+    "key": "1b7fb86bc08487934bdf5eea1984be6d0fb59eb5d764f86f7e4d3d6f01eb55d7",
+    "methods": "factorial",
+    "variants": [],
+    "modes": [
+      "serving"
+    ]
+  },
+  "native": {
+    "lightgbm": {
+      "path": "/home/bench/treewalker/experiments/.cache/native/lightgbm-4.7.0-8f7036f03627/lib_lightgbm.so",
+      "sha256": "d5264b5f3d1456bf4b944d292eb98ace981ae7d35e77fbc711772054da898ecf",
+      "version": "4.7.0",
+      "commit": "8f7036f03627054d5a54a6f965b13f4b9ff2cb63",
+      "build": {
+        "key": "d08aff22bfe74093105bb764cd382ff3a3a70d3860a24a8d12dd67c778d9d5c4",
+        "identity": {
+          "url": "https://github.com/lightgbm-org/LightGBM.git",
+          "tag": "v4.7.0",
+          "commit": "8f7036f03627054d5a54a6f965b13f4b9ff2cb63",
+          "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-march=native",
+            "-DCMAKE_CXX_FLAGS=-march=native",
+            "-DUSE_OPENMP=ON"
+          ],
+          "cc": {
+            "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+            "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+            "target": "x86_64-linux-gnu"
+          },
+          "cxx": {
+            "path": "/usr/bin/x86_64-linux-gnu-g++-15",
+            "version": "x86_64-linux-gnu-g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+            "target": "x86_64-linux-gnu"
+          },
+          "cmake": "cmake version 4.2.3",
+          "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+          "platform": "linux"
+        },
+        "cmake_args": [
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_C_FLAGS=-march=native",
+          "-DCMAKE_CXX_FLAGS=-march=native",
+          "-DUSE_OPENMP=ON"
+        ],
+        "compiler": {
+          "path": "/usr/bin/c++",
+          "version": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+        }
+      }
+    },
+    "xgboost": {
+      "path": "/home/bench/treewalker/experiments/.cache/native/xgboost-3.4.1-6fe8c547bdd2/libxgboost.so",
+      "sha256": "0c8534019e77cd68a99ed6f600906687961f7a42ae9c9b18cd360fb516154aaf",
+      "version": "3.4.1",
+      "commit": "6fe8c547bdd21c73e4555d85b087d9260595d30d",
+      "build": {
+        "key": "ab5d556f36fb80d9be63f59d1f219a8980ccca07fd7cfd3ca770c1a3b0e45ce5",
+        "identity": {
+          "url": "https://github.com/dmlc/xgboost.git",
+          "tag": "v3.4.1",
+          "commit": "6fe8c547bdd21c73e4555d85b087d9260595d30d",
+          "cmake_args": [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-march=native",
+            "-DCMAKE_CXX_FLAGS=-march=native",
+            "-DUSE_OPENMP=ON"
+          ],
+          "cc": {
+            "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+            "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+            "target": "x86_64-linux-gnu"
+          },
+          "cxx": {
+            "path": "/usr/bin/x86_64-linux-gnu-g++-15",
+            "version": "x86_64-linux-gnu-g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+            "target": "x86_64-linux-gnu"
+          },
+          "cmake": "cmake version 4.2.3",
+          "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+          "platform": "linux"
+        },
+        "cmake_args": [
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_C_FLAGS=-march=native",
+          "-DCMAKE_CXX_FLAGS=-march=native",
+          "-DUSE_OPENMP=ON"
+        ],
+        "compiler": {
+          "path": "/usr/bin/c++",
+          "version": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+        }
+      }
+    }
+  },
+  "tl2cgen_runtime": {
+    "path": "/home/bench/treewalker/.venv/lib/python3.14/site-packages/tl2cgen/lib/libtl2cgen.so",
+    "sha256": "333719776bd2037c089b6f531615c78dc8c53464f0225924c866e152fcfce0a2"
+  },
+  "counts": {
+    "ready": 1
+  },
+  "models": [
+    {
+      "id": "scenario_credit/lightgbm",
+      "dir": "scenario_credit/lightgbm",
+      "key": "881ecfec1b7455580eeac5a9f718c5d4d9452a72dd8ef3530a02b1fd3e567ca9"
+    }
+  ],
+  "workloads": [
+    {
+      "key": "454d953ab04dadeb0188754ec7d936ab4a1409a1860e4084c71d79403a364e54",
+      "dir": "scenario_credit/cells/k1_G128",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "8473c529120da61ded05302023f18fa9e56947ccf9fc24ddcc74a2be458874f0",
+      "dir": "scenario_credit/cells/k1_G16",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "30b6c9df6884049af17d95e399d7fae6019e7b74f71c71598ed5acc2639387e1",
+      "dir": "scenario_credit/cells/k1_G4",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "60d221a5bf5b01fcd9398ef151a7cdade145889939e9d08a5da10e56a896404c",
+      "dir": "scenario_credit/cells/k1_G64",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "54ad105323c42da10719b9d009876e8b32027883f0375c1d0a2e1b3e442fb25e",
+      "dir": "scenario_credit/cells/k2_G128",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "381a108ea86d2d235b4f745aae1be144296770f4962970a426e973a5259845ad",
+      "dir": "scenario_credit/cells/k2_G16",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "1ec36289aa2926a81dd32438de0ad07e179ac43e360f960e7ec1ca9c5dc80bd8",
+      "dir": "scenario_credit/cells/k2_G4",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "c78e48a7f93d8bcdf3e08f89c3936c2f41fbe437ce5b87ecf0eee06616edf72c",
+      "dir": "scenario_credit/cells/k2_G64",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "e4211441d39809e7bff9b0f8dbc188bf10c5143ad293ca8e425270158bae0f77",
+      "dir": "scenario_credit/cells/k4_G128",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "d213bd4f3335d0904d5e1f70c61220dea4169940d68e76806859d5a02a474213",
+      "dir": "scenario_credit/cells/k4_G16",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "44266e05a3b88e3f34880e9723b88e09f83471f6fc900f7672c73163044acc3d",
+      "dir": "scenario_credit/cells/k4_G4",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "1ec1661b176896aeffd3ed367952aee71738902a88bf35def39a46d7ea07c73c",
+      "dir": "scenario_credit/cells/k4_G64",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "0c951472d43d31dccded727afcbf49cb9245b91e1e940a38b8076a10c820d0ea",
+      "dir": "scenario_credit/cells/k8_G128",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "93ec73eae61ac293f958f4c53dab20f90ab617aec903abb50740fcccf88a8b14",
+      "dir": "scenario_credit/cells/k8_G16",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "e8f474185b360bca29ebcba9c0e861d4cc727a05de360d1f1a3da290c04ba7bb",
+      "dir": "scenario_credit/cells/k8_G4",
+      "generator": "whatif-v1"
+    },
+    {
+      "key": "a9693a7fa8a834777536a5e426167f97ea6233c494a90b9fe743b71445708fd6",
+      "dir": "scenario_credit/cells/k8_G64",
+      "generator": "whatif-v1"
+    }
+  ],
+  "cells": [
+    {
+      "id": "scenario_credit/lightgbm/whatif-v1-k8-G128",
+      "dir": "scenario_credit/cells/k8_G128",
+      "dataset": "credit",
+      "framework": "lightgbm",
+      "grid_workload": "whatif-v1",
+      "generator": "whatif-v1",
+      "methods": "treewalker",
+      "variants": [
+        {
+          "runtime": [],
+          "load": []
+        },
+        {
+          "runtime": [
+            "disable_varying_precompute"
+          ],
+          "load": []
+        }
+      ],
+      "modes": [
+        "serving"
+      ],
+      "status": "ready",
+      "key": "9507526e9b2d0d9cad25f833f86d0b5f3b0bc84963b93c8cdbc55a410f8bbe33",
+      "model": "scenario_credit/lightgbm",
+      "workload": "0c951472d43d31dccded727afcbf49cb9245b91e1e940a38b8076a10c820d0ea",
+      "rows": 256000,
+      "n_groups": 2000
+    }
+  ],
+  "retime": {
+    "of": "scenario-v1",
+    "threshold_pct": 2.0,
+    "rounds": 4,
+    "cells": [
+      "scenario_credit/lightgbm/whatif-v1-k8-G128"
+    ]
+  }
+}

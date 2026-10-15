@@ -1,19 +1,39 @@
 #!/usr/bin/env bash
 # TreeWalker reproducible benchmark — GCE startup script.
 #
-# Runs end-to-end: install deps → download source → build native LGB/XGB →
-# build TreeWalker → generate artifacts → run sweep → collect CSVs.
+# Runs end to end with the repository's own commands: system packages →
+# source → Rust (rust-toolchain.toml) and Python (.python-version) → native
+# LightGBM and XGBoost (treewalker-exp build-native) → data and models →
+# compiled baselines → sweep_bench → results.
 #
 # Templatefile variables (interpolated by Terraform):
-#   gcs_source_uri    — gs:// path to source tarball
+#   gcs_source_uri    — gs:// path to the source archive (git archive of git_ref)
 #   gcs_results_base  — gs:// prefix for uploading results
-#   gcs_artifacts_uri — gs:// prefix for shared training artifacts
-#   git_ref           — branch/SHA label for metadata
-#   role              — "trainer" (trains models, uploads artifacts)
-#                       or "benchmarker" (downloads artifacts, compiles, benchmarks)
+#   gcs_artifacts_uri — gs:// prefix where the trainer hands its fresh models over
+#   gcs_expedia_uri   — gs:// path to expedia.parquet, empty when no suite needs it
+#   gcs_cache_uri     — gs:// bucket that keeps prepared models and compiled
+#                       baselines across deployments; empty for none
+#   git_ref           — the ref archived; the commit is in experiments/SOURCE_COMMIT
+#   role              — "trainer" (prepares and uploads models) or "benchmarker"
+#                       (downloads the trainer's models, checked by hash)
+#   suites            — space-separated suites from experiments/grids.toml; NAME@TAG
+#                       runs NAME again, into the run ID NAME-TAG-<arch>
+#   run_settings      — "--set KEY=VALUE" arguments for every run, the layout
+#                       check's included; empty for none
+#   layout_check      — "true": also time TreeWalker on the acceptance cells in a
+#                       build with 64-byte function alignment
+#   gcs_gate_uri      — gs:// path to a candidate's source archive: instead of the
+#                       suites' runs, the kernel gate (below); empty for none
+#   diagnostic        — the name of a script in infra/scripts/diagnostics/ to run
+#                       instead of the suites' runs; empty for none
+#   diagnostic_input  — a gs:// prefix the diagnostic reads its inputs from; empty
+#                       for none
+#   apt_snapshot      — Ubuntu archive snapshot every apt operation uses; empty
+#                       for the live archive
+#   machine_type, image, turbo_mode, pmu_level — recorded in run.json
 #
-# Results land in /home/bench/results/.
-# Progress logged to /var/log/treewalker-bench.log.
+# Results land in /home/bench/results/. Progress is logged to
+# /var/log/treewalker-bench.log.
 set -Eeuo pipefail
 
 # ---------------------------------------------------------------------------
@@ -22,19 +42,39 @@ set -Eeuo pipefail
 GCS_SOURCE_URI="${gcs_source_uri}"
 GCS_RESULTS_BASE="${gcs_results_base}"
 GCS_ARTIFACTS_URI="${gcs_artifacts_uri}"
-GCS_EXPEDIA_URI="${gcs_expedia_uri}"  # empty unless bench_suite = "paper"
+GCS_EXPEDIA_URI="${gcs_expedia_uri}"
+GCS_CACHE_URI="${gcs_cache_uri}"
 ROLE="${role}"
 GIT_REF="${git_ref}"
-BENCH_SUITE="${bench_suite}"  # "paper" (full sweep) or "rebuttal" (E1 scenario + E2 chunked-G)
-LLVM_VERSION=20
-CMAKE_VER=3.31.6
-LIGHTGBM_VER=v4.6.0
-XGBOOST_VER=v3.2.0
+SUITES="${suites}"
+RUN_SETTINGS="${run_settings}"
+LAYOUT_CHECK="${layout_check}"
+RETIME="${retime}"
+GCS_GATE_URI="${gcs_gate_uri}"
+DIAGNOSTIC="${diagnostic}"
+DIAGNOSTIC_INPUT="${diagnostic_input}"
+APT_SNAPSHOT="${apt_snapshot}"
+MACHINE_TYPE="${machine_type}"
+# The machine type whose compiled baselines this VM uses and fills: its own, or
+# a benchmark machine's for a compile-only VM of the same CPU.
+CACHE_MACHINE="${cache_machine}"
+EXPECTED_CPU="${expected_cpu}"
+COMPILE_ONLY="${compile_only}"
+TL2CGEN_THREADS="${tl2cgen_threads}"
+IMAGE="${image}"
+TURBO_MODE="${turbo_mode}"
+PMU_LEVEL="${pmu_level}"
 
 BENCH_USER=bench
 BENCH_HOME=/home/$BENCH_USER
 LOG=/var/log/treewalker-bench.log
 RESULTS_DIR=$BENCH_HOME/results
+REPO_DIR=$BENCH_HOME/treewalker
+# The trainer's hand-over marker names this ref and these suites, so a marker
+# left in the bucket by an earlier deployment cannot release the benchmarker.
+UPLOAD_MARKER="UPLOAD_DONE-$GIT_REF-$(echo "$SUITES" | tr ' ' '+')"
+# The suites to prepare, compile and preflight: each name once, without its @TAG.
+SUITE_NAMES=$(for s in $SUITES; do echo "$${s%%@*}"; done | awk '!seen[$0]++' | tr '\n' ' ')
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,6 +84,7 @@ log() { echo "[$(date -Iseconds)] $*"; }
 fail() {
   log "ERROR: $*"
   mkdir -p "$RESULTS_DIR"
+  rm -f "$RESULTS_DIR/DONE"
   echo "$*" > "$RESULTS_DIR/ERROR"
   chown -R $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
   exit 1
@@ -55,457 +96,467 @@ phase() { log "===== Phase $1: $2 ====="; }
 # Terraform's check_done output never reports RUNNING for a crashed VM.
 trap 'fail "Unhandled error on line $LINENO (exit code $?)"' ERR
 
-run_as_bench() {
-  su - $BENCH_USER -c "$*"
-  local rc=$?
-  if [ $rc -ne 0 ]; then
-    log "ERROR: command failed with exit code $rc"
-    return $rc
+# Run a command as the bench user in the repository, with cargo and uv on PATH.
+# Every uv run passes --group baselines, because uv run removes packages
+# outside the groups it syncs.
+as_bench() {
+  su - $BENCH_USER -c "source \"\$HOME/.cargo/env\" 2>/dev/null; source \"\$HOME/.local/bin/env\"; cd '$REPO_DIR' && $*"
+}
+twx() { as_bench "uv run --group baselines treewalker-exp $*"; }
+
+# The cache: prepared/ holds what prep writes, compiled/<machine type>/ the
+# baselines compiled on that machine. A pull only offers files: prep reuses a
+# model or cell only when its manifest's key and hashes match, and
+# compile-baselines a library only when its compile identity and hash match;
+# anything else is rebuilt. A failed pull or push costs time, never the run.
+# Bulk copies print nothing per file: the serial console drains at about 10 KB/s,
+# and a 47 GB pull's file list kept it an hour behind the VM. Errors still print.
+COMPILED_RE='.*\.(so|dylib)$|.*/(tl2cgen|lleaves|quickscorer)\.(json|xml)$'
+ONLY_COMPILED_RE='^(?!.*\.(so|dylib)$)(?!.*/(tl2cgen|lleaves|quickscorer)\.(json|xml)$)'
+cache_pull() {
+  [ -n "$GCS_CACHE_URI" ] || return 0
+  as_bench "mkdir -p experiments/artifacts"
+  if gcloud storage ls "$GCS_CACHE_URI/$1/" &>/dev/null; then
+    gcloud storage rsync --no-user-output-enabled -r "$GCS_CACHE_URI/$1/" "$REPO_DIR/experiments/artifacts/" \
+      || log "Cache: pulling $1 failed; building here"
+    chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
   fi
+}
+# cache_push PREFIX EXCLUDE [required]: best effort, unless required (compile
+# only, whose sole product is the cache), where a failed push fails the boot.
+cache_push() {
+  [ -n "$GCS_CACHE_URI" ] || return 0
+  gcloud storage rsync --no-user-output-enabled -r --exclude="$2" "$REPO_DIR/experiments/artifacts/" "$GCS_CACHE_URI/$1/" \
+    && return 0
+  [ "$${3:-}" != required ] || fail "Cache: pushing $1 failed, and compile only exists to fill the cache"
+  log "Cache: pushing $1 failed"
+}
+
+metadata() {
+  curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/$1" 2>/dev/null || true
 }
 
 # Single redirect — all stdout/stderr goes to log + console (no double lines)
 exec > >(tee -a "$LOG") 2>&1
 
 # ---------------------------------------------------------------------------
-# Phase 0: Create bench user
+# Phase 0: Bench user
 # ---------------------------------------------------------------------------
-phase 0 "Create bench user"
+phase 0 "Bench user"
 if ! id $BENCH_USER &>/dev/null; then
   useradd -m -s /bin/bash $BENCH_USER
 fi
+# An earlier boot that failed before useradd (fail() writes the results) can have
+# created the home as root: the bench user must own it to install its tools.
+chown $BENCH_USER:$BENCH_USER "$BENCH_HOME"
 mkdir -p "$RESULTS_DIR"
 chown $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
 
+# A restarted boot retires the previous boot's terminal marker, into the results'
+# MARKER_HISTORY and out of the bucket, so check_done reads RUNNING while it runs.
+# It runs once the bench user and its results directory exist (nothing under the
+# bench home may be created before useradd, which would leave the home root's),
+# and before anything writes a marker or the results.
+retire_markers() {
+  local m
+  for m in DONE ERROR; do
+    if [ -f "$RESULTS_DIR/$m" ]; then
+      printf '%s, retired at a boot on %s: %s\n' "$m" "$(date -Iseconds)" \
+        "$(cat "$RESULTS_DIR/$m")" >> "$RESULTS_DIR/MARKER_HISTORY"
+      rm -f "$RESULTS_DIR/$m"
+    fi
+  done
+  [ ! -f "$RESULTS_DIR/MARKER_HISTORY" ] || chown $BENCH_USER:$BENCH_USER "$RESULTS_DIR/MARKER_HISTORY"
+  gcloud storage rm --quiet "$GCS_RESULTS_BASE/DONE" "$GCS_RESULTS_BASE/ERROR" >/dev/null 2>&1 || true
+}
+retire_markers
+# Compile only exists to fill the cache: without a bucket its compiles would be
+# lost with the VM, so it stops before preparing anything.
+[ "$COMPILE_ONLY" != "true" ] || [ -n "$GCS_CACHE_URI" ] \
+  || fail "compile_only needs cache_bucket: the compiled baselines would be lost with the VM"
+
 # ---------------------------------------------------------------------------
-# Phase 1: System deps
+# Phase 1: System packages: a C/C++ compiler, CMake, git and curl. No LLVM:
+# lleaves compiles through the LLVM that llvmlite bundles.
 # ---------------------------------------------------------------------------
-phase 1 "System dependencies"
+phase 1 "System packages"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get upgrade -y -qq
-apt-get install -y -qq \
-  build-essential cmake git curl wget pkg-config \
-  libssl-dev libgomp1 \
-  lsb-release software-properties-common gnupg
-
-# CMake (LightGBM needs >= 3.28; Ubuntu 24.04 ships 3.28.3 which is fine)
-log "cmake: $(cmake --version | head -1)"
-
-# ---------------------------------------------------------------------------
-# Phase 2: LLVM (for lleaves compile)
-# ---------------------------------------------------------------------------
-phase 2 "LLVM $LLVM_VERSION"
-wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-bash /tmp/llvm.sh "$LLVM_VERSION" || log "WARNING: LLVM apt install failed"
-# Create symlinks (idempotent)
-for tool in llc clang opt; do
-  versioned="/usr/bin/$${tool}-$${LLVM_VERSION}"
-  [ -f "$versioned" ] && ln -sf "$versioned" "/usr/bin/$${tool}"
-done
-if command -v llc &>/dev/null; then
-  log "LLVM: $(llc --version 2>&1 | head -1)"
-else
-  log "WARNING: llc not found after LLVM install"
+# The image is pinned, and so is the archive: with a snapshot, update, upgrade and
+# install see the archive as it was then (Ubuntu 24.04 and later need no source
+# changes), so GCC and the other tools match across deployments and the cached
+# compiled baselines stay valid.
+if [ -n "$APT_SNAPSHOT" ]; then
+  echo "APT::Snapshot \"$APT_SNAPSHOT\";" > /etc/apt/apt.conf.d/50snapshot
 fi
+# snapshot.ubuntu.com sometimes answers 503 for some index files, and apt goes on
+# without them, so the install finds no packages (two deployments failed so on
+# 2026-10-09). Retry until every index downloads; package downloads retry too.
+for attempt in $(seq 1 30); do
+  apt-get update -qq > /tmp/apt-update.log 2>&1 || true
+  if ! grep -q -E '^(W: Failed to fetch|E: )' /tmp/apt-update.log; then
+    break
+  fi
+  [ "$attempt" -lt 30 ] || { cat /tmp/apt-update.log; fail "apt-get update: indexes still failing after 30 attempts"; }
+  log "apt-get update: some indexes failed (attempt $attempt of 30); retrying in 20 s"
+  sleep 20
+done
+apt-get upgrade -y -qq -o Acquire::Retries=5
+apt-get install -y -qq -o Acquire::Retries=5 build-essential cmake git curl pkg-config libgomp1
+log "cmake: $(cmake --version | head -1); gcc: $(gcc --version | head -1)"
+log "apt: $(apt-cache policy gcc | grep -m1 -E 'https?://' | sed -E 's/^ +//')"
 
 # ---------------------------------------------------------------------------
-# Phase 3: Rust (as bench user)
+# Phase 2: Rust and uv. rustup installs no toolchain, so rust-toolchain.toml
+# (1.97.1) governs; uv follows .python-version (3.14).
 # ---------------------------------------------------------------------------
-phase 3 "Rust toolchain"
-run_as_bench 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable'
-log "Rust: $(run_as_bench 'source "$HOME/.cargo/env" && rustc --version')"
+phase 2 "Rust and uv"
+su - $BENCH_USER -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none'
+su - $BENCH_USER -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 
 # ---------------------------------------------------------------------------
-# Phase 4: Python + uv (as bench user)
+# Phase 3: Source
 # ---------------------------------------------------------------------------
-phase 4 "Python + uv"
-run_as_bench 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-run_as_bench 'source "$HOME/.local/bin/env" && uv python install 3.12'
-log "uv: $(run_as_bench 'source "$HOME/.local/bin/env" && uv --version')"
-
-# ---------------------------------------------------------------------------
-# Phase 5: Download source from GCS
-# ---------------------------------------------------------------------------
-phase 5 "Download source ($GIT_REF)"
-REPO_DIR=$BENCH_HOME/treewalker
+phase 3 "Source ($GIT_REF)"
 mkdir -p "$REPO_DIR"
 chown $BENCH_USER:$BENCH_USER "$REPO_DIR"
 gcloud storage cp "$GCS_SOURCE_URI" /tmp/source.tar.gz
 su - $BENCH_USER -c "tar xzf /tmp/source.tar.gz -C '$REPO_DIR'"
 rm -f /tmp/source.tar.gz
-log "Source extracted to $REPO_DIR"
+log "Source commit: $(cat "$REPO_DIR/experiments/SOURCE_COMMIT")"
+log "Rust: $(as_bench 'rustc --version')"
 
 # ---------------------------------------------------------------------------
-# Phase 6: Build LightGBM C++ from source (native)
+# Phase 4: Python dependencies and native libraries
 # ---------------------------------------------------------------------------
-phase 6 "Build LightGBM $LIGHTGBM_VER (native C++)"
-LGB_SRC=/tmp/LightGBM
-if [ ! -d "$LGB_SRC/.git" ]; then
-  rm -rf "$LGB_SRC"
-  git clone --depth 1 --branch "$LIGHTGBM_VER" --recurse-submodules \
-    https://github.com/microsoft/LightGBM.git "$LGB_SRC"
-fi
-mkdir -p "$LGB_SRC/build" && cd "$LGB_SRC/build"
-cmake .. \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_FLAGS="-march=native" \
-  -DCMAKE_CXX_FLAGS="-march=native" \
-  -DUSE_OPENMP=ON
-make -j"$(nproc)"
-make install && ldconfig
-log "LightGBM C++ built and installed"
+phase 4 "Python dependencies and native LightGBM, XGBoost"
+# tl2cgen has no aarch64 Linux wheel: there it builds from source through the
+# tracked <cstdint> wrapper.
+as_bench "CXX='$REPO_DIR/infra/scripts/cxx-cstdint' uv sync --locked --group baselines"
+twx build-native
 
 # ---------------------------------------------------------------------------
-# Phase 7: Build XGBoost C++ from source (native)
+# Phase 5: Data and models. The trainer starts from the cache, if any, and
+# prep rebuilds anything its manifest does not vouch for. The benchmarker takes
+# the trainer's models; sweep_bench checks every file against the hashes in
+# cell.json. Each machine starts its compiles from its own cached baselines.
 # ---------------------------------------------------------------------------
-phase 7 "Build XGBoost $XGBOOST_VER (native C++)"
-XGB_SRC=/tmp/xgboost
-if [ ! -d "$XGB_SRC/.git" ]; then
-  rm -rf "$XGB_SRC"
-  git clone --depth 1 --branch "$XGBOOST_VER" --recurse-submodules \
-    https://github.com/dmlc/xgboost.git "$XGB_SRC"
-fi
-mkdir -p "$XGB_SRC/build" && cd "$XGB_SRC/build"
-cmake .. \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_FLAGS="-march=native" \
-  -DCMAKE_CXX_FLAGS="-march=native"
-make -j"$(nproc)"
-log "XGBoost C++ built"
-
-chmod -R a+rX "$LGB_SRC" "$XGB_SRC"
-
-# ---------------------------------------------------------------------------
-# Phase 8: Python deps (uv sync + native LGB/XGB override)
-# ---------------------------------------------------------------------------
-phase 8 "Python dependencies"
-
-run_as_bench "
-  source \"\$HOME/.local/bin/env\"
-  cd '$REPO_DIR'
-  uv sync
-"
-
-# Install tl2cgen separately (optional dep — needs g++ wrapper on aarch64
-# because treelite's postprocessor.h is missing #include <cstdint>)
-cat > /usr/local/bin/g++-fix << 'GCCEOF'
-#!/bin/bash
-exec /usr/bin/g++ -include cstdint "$@"
-GCCEOF
-chmod +x /usr/local/bin/g++-fix
-run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && CXX=/usr/local/bin/g++-fix uv pip install 'tl2cgen>=1.0.0'" || log "WARNING: tl2cgen install failed"
-run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv pip install 'lleaves @ git+https://github.com/siboehm/lleaves.git@v1.4.1'" || log "WARNING: lleaves install failed"
-log "uv sync complete"
-
-# Override LightGBM .so with native-built version.
-LGB_SO=$(find "$REPO_DIR/.venv" -name "lib_lightgbm.so" -print -quit 2>/dev/null)
-if [ -n "$LGB_SO" ] && [ -f /usr/local/lib/lib_lightgbm.so ]; then
-  cp /usr/local/lib/lib_lightgbm.so "$LGB_SO"
-  chown $BENCH_USER:$BENCH_USER "$LGB_SO"
-  log "LightGBM .so replaced with native build"
-else
-  log "WARNING: Could not replace LightGBM .so"
-fi
-
-# Override XGBoost .so with native-built version.
-XGB_SO=$(find "$REPO_DIR/.venv" -name "libxgboost.so" -print -quit 2>/dev/null)
-if [ -n "$XGB_SO" ] && [ -f "$XGB_SRC/lib/libxgboost.so" ]; then
-  cp "$XGB_SRC/lib/libxgboost.so" "$XGB_SO"
-  chown $BENCH_USER:$BENCH_USER "$XGB_SO"
-  log "XGBoost .so replaced with native build"
-else
-  log "WARNING: Could not replace XGBoost .so"
-fi
-
-# Verify imports and version match
-run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv run python3 -c 'import lightgbm; print(f\"lightgbm {lightgbm.__version__}\")'"
-run_as_bench "source \"\$HOME/.local/bin/env\" && cd '$REPO_DIR' && uv run python3 -c 'import xgboost; print(f\"xgboost {xgboost.__version__}\")'"
-
-# ---------------------------------------------------------------------------
-# Phase 9: Generate / download artifacts
-# ---------------------------------------------------------------------------
+phase 5 "Data and models ($ROLE)"
 if [ "$ROLE" = "trainer" ]; then
-  phase 9 "Generate artifacts + upload (trainer role)"
-
-  # Pull any existing artifacts from GCS first so prepare.py skips them.
-  mkdir -p "$REPO_DIR/paper/experiments/artifacts"
-  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/artifacts"
-  if gcloud storage ls "$GCS_ARTIFACTS_URI/" &>/dev/null; then
-    gcloud storage rsync -r \
-      "$GCS_ARTIFACTS_URI/" "$REPO_DIR/paper/experiments/artifacts/"
-    # Remove stale sentinel so we write a fresh one after upload.
-    rm -f "$REPO_DIR/paper/experiments/artifacts/UPLOAD_DONE"
-    chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/artifacts"
-    log "Pulled existing artifacts from GCS (prepare.py will skip them)"
-  else
-    log "No existing artifacts in GCS — training from scratch"
+  twx fetch
+  if [ -n "$GCS_EXPEDIA_URI" ]; then
+    gcloud storage cp "$GCS_EXPEDIA_URI" "$REPO_DIR/experiments/data/expedia.parquet"
+    chown $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/data/expedia.parquet"
+    twx fetch-expedia --check-only
   fi
-
-  # Train models, export treelite, generate test data, group distributions.
-  # Skip compiled baselines — those are architecture-specific.
-  # Idempotent: skips any config where artifacts already exist on disk.
-  if [ "$BENCH_SUITE" = "rebuttal" ]; then
-    # Rebuttal suite: SUPPORT reference combo + E1 scenario artifacts (train +
-    # validate) + E2 chunked artifacts (prepare + correctness gate).
-    run_as_bench "
-      source \"\$HOME/.local/bin/env\"
-      source \"\$HOME/.cargo/env\"
-      cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/prepare.py --datasets support --combos 500,8,16 --skip-compiled
-      uv run python3 paper/experiments/scripts/prepare_scenario.py
-      uv run python3 paper/experiments/scripts/prepare_chunked.py --stage prepare
-      uv run python3 paper/experiments/scripts/prepare_chunked.py --stage correctness
-    "
-    log "Rebuttal artifacts generated (SUPPORT + scenario + chunked), correctness gates passed"
-  else
-    # Expedia is not redistributable: Terraform uploads the locally built
-    # parquet; check its fingerprint before training on it.
-    [ -n "$GCS_EXPEDIA_URI" ] || fail "bench_suite=paper needs expedia.parquet (see fetch_expedia.py)"
-    gcloud storage cp "$GCS_EXPEDIA_URI" "$REPO_DIR/paper/experiments/data/expedia.parquet"
-    chown $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/data/expedia.parquet"
-    run_as_bench "
-      source \"\$HOME/.local/bin/env\"
-      source \"\$HOME/.cargo/env\"
-      cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/fetch_expedia.py --check-only
-      uv run python3 paper/experiments/scripts/prepare.py --grid all --prepare-groups --skip-compiled
-    "
-    log "Artifacts generated (models + data)"
-  fi
-
-  # Upload shared artifacts to GCS for the benchmarker.
-  # Excludes .so files (architecture-specific).
-  gcloud storage rsync -r --exclude=".*\.so$" \
-    "$REPO_DIR/paper/experiments/artifacts/" "$GCS_ARTIFACTS_URI/"
-  # Write sentinel AFTER upload completes so benchmarker knows it's safe.
-  echo "$(date -Iseconds)" | gcloud storage cp - "$GCS_ARTIFACTS_URI/UPLOAD_DONE"
-  log "Shared artifacts uploaded to $GCS_ARTIFACTS_URI"
-
-  # Force recompilation of tl2cgen .so (model source changed from native to treelite binary)
-  find "$REPO_DIR/paper/experiments/artifacts" -name "tl2cgen.so" -delete
-  log "Cleared stale tl2cgen .so files"
-
-  # Now compile tl2cgen/lleaves locally for this architecture.
-  # Rebuttal suite runs only treewalker + fullwalk — compiled baselines not needed.
-  if [ "$BENCH_SUITE" != "rebuttal" ]; then
-    run_as_bench "
-      source \"\$HOME/.local/bin/env\"
-      source \"\$HOME/.cargo/env\"
-      cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/prepare.py --grid all --compile-only
-    "
-    log "Local .so compilation complete"
-  fi
-
+  cache_pull prepared
+  for suite in $SUITE_NAMES; do
+    twx prepare --suite "$suite"
+  done
+  cache_push prepared "$COMPILED_RE"
+  # Compiled baselines are per machine; the benchmarker compiles its own.
+  gcloud storage rsync --no-user-output-enabled -r --exclude="$COMPILED_RE" \
+    "$REPO_DIR/experiments/artifacts/" "$GCS_ARTIFACTS_URI/"
+  echo "$(date -Iseconds)" | gcloud storage cp - "$GCS_ARTIFACTS_URI/$UPLOAD_MARKER"
+  log "Models uploaded to $GCS_ARTIFACTS_URI"
 else
-  phase 9 "Download artifacts + compile locally (benchmarker role)"
-
-  # Wait for trainer to upload artifacts (poll every 60s, max 3h).
   WAIT_START=$(date +%s)
-  MAX_WAIT=10800  # 3 hours
-  while true; do
-    # Check for any walker_config.json in the artifacts bucket.
-    if gcloud storage ls "$GCS_ARTIFACTS_URI/UPLOAD_DONE" &>/dev/null; then
-      log "Trainer upload sentinel detected — artifacts complete"
-      break
-    fi
+  MAX_WAIT=86400  # 24 hours: the factorial suite trains 640 models first
+  until gcloud storage ls "$GCS_ARTIFACTS_URI/$UPLOAD_MARKER" &>/dev/null; do
     ELAPSED=$(( $(date +%s) - WAIT_START ))
-    if [ $ELAPSED -ge $MAX_WAIT ]; then
-      fail "Timed out waiting for trainer artifacts after $${MAX_WAIT}s"
-    fi
-    log "Waiting for UPLOAD_DONE sentinel... ($((ELAPSED/60))m elapsed)"
+    [ $ELAPSED -ge $MAX_WAIT ] && fail "Timed out waiting for the trainer after $${MAX_WAIT}s"
+    log "Waiting for the trainer's models... ($((ELAPSED/60))m)"
     sleep 60
   done
-
-  # Download shared artifacts (models, data, configs — no .so files).
-  mkdir -p "$REPO_DIR/paper/experiments/artifacts"
-  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/artifacts"
-  gcloud storage rsync -r \
-    "$GCS_ARTIFACTS_URI/" "$REPO_DIR/paper/experiments/artifacts/"
-  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/paper/experiments/artifacts"
-  log "Shared artifacts downloaded"
-
-  # Force recompilation of tl2cgen .so (model source changed from native to treelite binary)
-  find "$REPO_DIR/paper/experiments/artifacts" -name "tl2cgen.so" -delete
-  log "Cleared stale tl2cgen .so files"
-
-  if [ "$BENCH_SUITE" = "rebuttal" ]; then
-    # Rebuttal suite: artifacts (incl. scenario cells, chunked dirs, references)
-    # came from GCS. prepare_scenario skips existing artifacts but re-validates
-    # (builds sweep_bench as a side effect); chunked correctness re-runs on this arch.
-    run_as_bench "
-      source \"\$HOME/.local/bin/env\"
-      source \"\$HOME/.cargo/env\"
-      cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/prepare_scenario.py
-      uv run python3 paper/experiments/scripts/prepare_chunked.py --stage correctness
-    "
-    log "Rebuttal correctness gates passed on this architecture"
-  else
-    # Build sweep_bench + compile tl2cgen/lleaves locally.
-    run_as_bench "
-      source \"\$HOME/.local/bin/env\"
-      source \"\$HOME/.cargo/env\"
-      cd '$REPO_DIR'
-      uv run python3 paper/experiments/scripts/prepare.py --grid all --compile-only
-    "
-    log "Local .so compilation complete"
-  fi
+  mkdir -p "$REPO_DIR/experiments/artifacts"
+  gcloud storage rsync --no-user-output-enabled -r "$GCS_ARTIFACTS_URI/" "$REPO_DIR/experiments/artifacts/"
+  rm -f "$REPO_DIR/experiments/artifacts/"UPLOAD_DONE*
+  chown -R $BENCH_USER:$BENCH_USER "$REPO_DIR/experiments/artifacts"
+fi
+# Push the compiled baselines even when a compile fails, so a rerun keeps them.
+# A VM filling another machine type's cache must have that machine's CPU: the
+# host CPU is part of each library's compile identity.
+if [ -n "$EXPECTED_CPU" ]; then
+  HOST_CPU=$(as_bench "uv run --group baselines python -c 'from treewalker_exp.baselines import host_cpu; print(host_cpu())'")
+  [ "$HOST_CPU" = "$EXPECTED_CPU" ] || fail "Host CPU '$HOST_CPU' is not the expected '$EXPECTED_CPU'"
+  log "Host CPU: $HOST_CPU, as expected"
+fi
+cache_pull "compiled/$CACHE_MACHINE"
+COMPILED_OK=true
+for suite in $SUITE_NAMES; do
+  twx compile-baselines --suite "$suite" --threads "$TL2CGEN_THREADS" || COMPILED_OK=false
+done
+if [ "$COMPILE_ONLY" = "true" ]; then
+  cache_push "compiled/$CACHE_MACHINE" "$ONLY_COMPILED_RE" required
+else
+  cache_push "compiled/$CACHE_MACHINE" "$ONLY_COMPILED_RE"
+fi
+$COMPILED_OK || fail "Compiling the baselines failed"
+if [ "$COMPILE_ONLY" = "true" ]; then
+  log "Compile only: the baselines for $SUITES are in $GCS_CACHE_URI/compiled/$CACHE_MACHINE"
+  mkdir -p "$RESULTS_DIR"
+  echo "$(date -Iseconds)" > "$RESULTS_DIR/DONE"
+  gcloud storage cp -r "$RESULTS_DIR/*" "$GCS_RESULTS_BASE/"
+  log "===== ALL PHASES COMPLETE ====="
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# Phase 10: Benchmark sweep
+# Phase 6: The machine, tuned and described
 # ---------------------------------------------------------------------------
-phase 10 "Benchmark sweep"
-
-# Kernel tuning for stable benchmarks
-log "Tuning kernel for benchmark stability"
-
-# Set CPU governor to performance (fixed frequency)
-# Note: turbo boost is managed by the GCE hypervisor, not the guest.
+phase 6 "Machine settings"
+# Per-thread, user-space counting of the PMU events.
+sysctl -w kernel.perf_event_paranoid=2
 for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
   [ -f "$gov" ] && echo performance > "$gov"
 done
-log "CPU governor: performance"
-
-# Disable ASLR
 echo 0 > /proc/sys/kernel/randomize_va_space
-log "ASLR disabled"
-
-# Drop caches
 sync && echo 3 > /proc/sys/vm/drop_caches
-log "Caches dropped"
 
-# Log system info
-log "--- System Info ---"
-log "CPUs: $(nproc)"
-lscpu 2>/dev/null | grep -iE "(model name|socket|core|thread|cache)" | while read -r line; do
-  log "  $line"
-done
-free -h 2>/dev/null | head -2 | while read -r line; do
-  log "  $line"
-done
-
-# Detect architecture label for output files.
-ARCH_LABEL=$(uname -m)
-case "$ARCH_LABEL" in
-  x86_64|amd64) ARCH_LABEL="intel" ;;
-  aarch64|arm64) ARCH_LABEL="arm" ;;
-esac
-log "Architecture label: $ARCH_LABEL"
-
-# Locate native-compiled LightGBM and XGBoost shared libraries.
-# Phase 6 installs LightGBM to /usr/local/lib via make install.
-# Phase 7 builds XGBoost to $XGB_SRC/lib/.
-# Both compiled with -march=native for fair comparison.
-LGB_LIB=/usr/local/lib/lib_lightgbm.so
-XGB_LIB=$XGB_SRC/lib/libxgboost.so
-[ -f "$LGB_LIB" ] && log "LightGBM lib: $LGB_LIB (-march=native)" || log "WARNING: $LGB_LIB not found"
-[ -f "$XGB_LIB" ] && log "XGBoost lib: $XGB_LIB (-march=native)" || log "WARNING: $XGB_LIB not found"
-
-# Build optional flags for sweep_bench.
-EXT_FLAGS=""
-[ -f "$LGB_LIB" ] && EXT_FLAGS="$EXT_FLAGS --lgb-lib $LGB_LIB"
-[ -f "$XGB_LIB" ] && EXT_FLAGS="$EXT_FLAGS --xgb-lib $XGB_LIB"
-
-if [ "$BENCH_SUITE" = "rebuttal" ]; then
-  # Clear the released CSVs so this run writes fresh ones.
-  find "$REPO_DIR/paper/experiments/data" \( -name "scenario_credit_*" -o -name "chunked_g_*" \) -delete 2>/dev/null
-  log "Cleared stale rebuttal CSVs/summaries"
-
-  # E1: scenario grid (treewalker + fullwalk, timing + stats + inline correctness).
-  run_as_bench "
-    source \"\$HOME/.cargo/env\"
-    cd '$REPO_DIR'
-    taskset -c 0 ./target/release/sweep_bench \
-      '$REPO_DIR/paper/experiments/artifacts' \
-      --grid scen \
-      --output-dir '$REPO_DIR/paper/experiments/data' \
-      --warmup 3 --iters 21 --min-iters 11 \
-      --max-time-secs 10
-  "
-  log "E1 scenario sweep complete"
-
-  # E2: chunked-G timing pass.
-  run_as_bench "
-    source \"\$HOME/.local/bin/env\"
-    source \"\$HOME/.cargo/env\"
-    cd '$REPO_DIR'
-    taskset -c 0 uv run python3 paper/experiments/scripts/prepare_chunked.py --stage timing
-  "
-  log "E2 chunked-G timing complete"
-
-  # Summaries (read the CSVs this VM just wrote) with explicit provenance.
-  MACHINE_TYPE=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/machine-type 2>/dev/null | awk -F/ '{print $NF}')
-  run_as_bench "
-    source \"\$HOME/.local/bin/env\"
-    cd '$REPO_DIR'
-    uv run python3 paper/experiments/scripts/summarize_scenario.py --arch '$ARCH_LABEL' \
-      --platform-note 'GCE $MACHINE_TYPE, Ubuntu 24.04 LTS, SMT off, core-pinned (taskset -c 0)'
-  "
-  log "Rebuttal summaries written"
-else
-# Clear stale CSVs from prior runs so sweep_bench starts fresh.
-find "$REPO_DIR/paper/experiments/data" -name "grid*_results*.csv" -delete 2>/dev/null
-log "Cleared stale result CSVs"
-
-# Run sweep pinned to core 0 — all methods in one Rust binary.
-run_as_bench "
-  source \"\$HOME/.cargo/env\"
-  cd '$REPO_DIR'
-  taskset -c 0 ./target/release/sweep_bench \
-    '$REPO_DIR/paper/experiments/artifacts' \
-    --grid all \
-    --output-dir '$REPO_DIR/paper/experiments/data' \
-    --warmup 3 --iters 21 --min-iters 11 \
-    --max-time-secs 30 \
-    $EXT_FLAGS
-"
-log "Sweep complete (all methods via sweep_bench)"
-
-# Copy with architecture-free name for backward compatibility.
-for csv in grid1_results; do
-  SRC="$REPO_DIR/paper/experiments/data/$${csv}_$${ARCH_LABEL}.csv"
-  DST="$REPO_DIR/paper/experiments/data/$${csv}.csv"
-  [ -f "$SRC" ] && cp "$SRC" "$DST" && log "  $${csv}_$${ARCH_LABEL} → $csv"
-done
-
-fi
-
-# ---------------------------------------------------------------------------
-# Phase 12: Collect results
-# ---------------------------------------------------------------------------
-phase 12 "Collect results"
-cp "$REPO_DIR/paper/experiments/data/"*.csv "$RESULTS_DIR/" 2>/dev/null || true
-cp "$REPO_DIR/paper/experiments/data/"*.md "$RESULTS_DIR/" 2>/dev/null || true
-cp "$REPO_DIR/paper/experiments/data/"*.log "$RESULTS_DIR/" 2>/dev/null || true
-
-cat > "$RESULTS_DIR/system_info.txt" <<SYSINFO
-git_ref: $GIT_REF
-timestamp: $(date -Iseconds)
-machine_type: $(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/machine-type 2>/dev/null | awk -F/ '{print $NF}' || echo unknown)
-zone: $(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/zone 2>/dev/null | awk -F/ '{print $NF}' || echo unknown)
-cpu: $(lscpu 2>/dev/null | grep "Model name" | sed 's/.*: *//' || echo unknown)
-rust: $(run_as_bench "source \"\$HOME/.cargo/env\" && cd '$REPO_DIR' && rustc --version")
-llvm: $(llc --version 2>&1 | head -1 || echo "not installed")
-lightgbm: $LIGHTGBM_VER (source, cmake Release -march=native)
-xgboost: $XGBOOST_VER (source, cmake Release -march=native)
-arch_label: $ARCH_LABEL
-bench_suite: $BENCH_SUITE
-protocol: $([ "$BENCH_SUITE" = "rebuttal" ] && echo "sweep_bench --grid scen + prepare_chunked.py --stage timing (E1+E2 rebuttal)" || echo "sweep_bench --grid all (per-group Instant timing, all methods in Rust)")
-seed: 42
+# Facts sweep_bench cannot see from inside the guest, recorded in run.json.
+SYSTEM_INFO=$BENCH_HOME/system_info.json
+cat > "$SYSTEM_INFO" <<SYSINFO
+{
+  "git_ref": "$GIT_REF",
+  "machine_type": "$MACHINE_TYPE",
+  "zone": "$(metadata zone | awk -F/ '{print $NF}')",
+  "instance_id": "$(metadata id)",
+  "hostname": "$(hostname)",
+  "image_requested": "$IMAGE",
+  "image": "$(metadata image)",
+  "apt_snapshot": "$APT_SNAPSHOT",
+  "turbo_mode": "$TURBO_MODE",
+  "pmu_level": "$PMU_LEVEL",
+  "os_release": "$(. /etc/os-release && echo "$PRETTY_NAME")",
+  "kernel_cmdline": "$(cat /proc/cmdline)",
+  "cc": "$(cc --version | head -1)",
+  "cxx": "$(c++ --version | head -1)",
+  "cmake": "$(cmake --version | head -1)",
+  "git": "$(git --version)",
+  "uv": "$(as_bench 'uv --version')",
+  "rustup": "$(as_bench 'rustup --version 2>/dev/null' | head -1)",
+  "page_size": "$(getconf PAGESIZE)",
+  "thp_enabled": "$(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null)",
+  "thp_defrag": "$(cat /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null)"
+}
 SYSINFO
+chown $BENCH_USER:$BENCH_USER "$SYSTEM_INFO"
+cat "$SYSTEM_INFO"
 
+# ---------------------------------------------------------------------------
+# Phase 7: Preflight and runs, pinned to core 0
+# ---------------------------------------------------------------------------
+phase 7 "Runs: $SUITES"
+# A failure that should not stop the boot (a run's failed cells, a pack or
+# re-time error, a run left unpacked) is recorded: the later runs go on and the
+# results are uploaded, but the boot ends with ERROR instead of DONE.
+FAILURES=""
+failed_step() { log "FAILED: $*"; FAILURES="$FAILURES$*; "; }
+for suite in $SUITE_NAMES; do
+  twx preflight --suite "$suite" --require-pmu
+done
+ARCH_LABEL=$(uname -m)
+# Copy finished cells to the bucket every 30 minutes while the suites run, so a
+# long run's results are visible, and survive the VM, before it ends. Cells
+# being written live under temporary names, which the copy skips.
+# As the bench user: the runs write into it.
+as_bench "mkdir -p experiments/data/runs"
+# Every run this deployment launches is claimed in $CLAIMS, one run ID a line,
+# which survives a reboot. The source archive ships no runs, so a run directory
+# that exists is this VM's own from an earlier boot, resumed by run ID only if
+# this deployment claimed it; any other existing directory is refused.
+CLAIMS=$BENCH_HOME/runs-claimed.txt
+touch "$CLAIMS"
+chown $BENCH_USER:$BENCH_USER "$CLAIMS"
+run_state() { twx run-state "experiments/data/runs/$1"; }
+run_complete() { twx run-complete "experiments/data/runs/$1"; }
+# claim_run ID: whether to launch run ID. A run this deployment claimed in
+# an earlier boot resumes while raw, is skipped once packed (never timed again,
+# no sentinel appended), and fails if packed tables sit beside raw cells; an
+# existing directory it never claimed is refused. Returns 1 to skip.
+claim_run() {
+  local state
+  state=$(run_state "$1")
+  if grep -qxF -- "$1" "$CLAIMS"; then
+    case "$state" in
+      packed)
+        log "Run $1: packed by an earlier boot of this VM; skipping"
+        return 1
+        ;;
+      mixed)
+        fail "Run directory experiments/data/runs/$1 holds packed tables beside raw cells or an incomplete pack; nothing deleted, investigate"
+        ;;
+    esac
+    log "Run $1: claimed by an earlier boot of this VM; resuming"
+    return 0
+  fi
+  [ "$state" = "absent" ] \
+    || fail "Run directory experiments/data/runs/$1 exists but was not claimed by this deployment"
+  echo "$1" >> "$CLAIMS"
+}
+# The copy runs niced on the last CPU, away from the pinned benchmark on core 0.
+( while sleep 1800; do
+    taskset -c "$(( $(nproc) - 1 ))" nice -n 19 gcloud storage rsync --no-user-output-enabled -r --exclude='.*/\.tmp-.*' \
+      "$REPO_DIR/experiments/data/runs" "$GCS_RESULTS_BASE/runs" >/dev/null 2>&1 || true
+  done ) &
+SYNC_PID=$!
+if [ -n "$DIAGNOSTIC" ]; then
+  # A one-off measurement, from the source archive, with this script's helpers.
+  script="$REPO_DIR/infra/scripts/diagnostics/$DIAGNOSTIC.sh"
+  [ -f "$script" ] || fail "No diagnostic $DIAGNOSTIC ($script)"
+  log "Diagnostic: $DIAGNOSTIC"
+  source "$script"
+elif [ -n "$GCS_GATE_URI" ]; then
+  # The kernel gate: TreeWalker built from this ref (A) and from the candidate (B),
+  # timed in alternating processes, A B B A, three times, with default function
+  # alignment and with every function aligned to 64 bytes. Production only, on the
+  # kernel study's cells. A slowdown counts only if it persists under fixed
+  # alignment.
+  GATE=$BENCH_HOME/gate
+  as_bench "mkdir -p '$GATE/src'"
+  gcloud storage cp "$GCS_GATE_URI" /tmp/gate.tar.gz
+  su - $BENCH_USER -c "tar xzf /tmp/gate.tar.gz -C '$GATE/src'"
+  rm -f /tmp/gate.tar.gz
+  log "Gate: A $(cat "$REPO_DIR/experiments/SOURCE_COMMIT"), B $(cat "$GATE/src/experiments/SOURCE_COMMIT")"
+  for align in default align6; do
+    flags="-C target-cpu=native"
+    [ "$align" = align6 ] && flags="$flags -C llvm-args=-align-all-functions=6"
+    for side in A B; do
+      src=$REPO_DIR
+      [ "$side" = B ] && src=$GATE/src
+      as_bench "cd '$src' && RUSTFLAGS='$flags' cargo build -q --release --bin sweep_bench \
+        --manifest-path experiments/benchmarks/Cargo.toml --target-dir '$GATE/target-$side' \
+        --features external-bench,pmu && cp '$GATE/target-$side/release/sweep_bench' \
+        '$GATE/sweep_bench-$side-$align'"
+    done
+  done
+  # suite:glob pairs; noglob, so the patterns reach sweep_bench unexpanded.
+  set -f
+  GATE_CELLS="acceptance:*_md4* ablation:support/nt50_md4_h1/lightgbm/*
+    ablation:support/nt500_md8_h16/* ablation:support/nt1000_md16_h32/*
+    ablation:expedia/nt500_md8/lightgbm/*"
+  for align in default align6; do
+    for round in 1 2 3; do
+      pos=0
+      for side in A B B A; do
+        pos=$((pos + 1))
+        i=0
+        for spec in $GATE_CELLS; do
+          i=$((i + 1))
+          suite=$${spec%%:*}
+          glob=$${spec#*:}
+          as_bench "taskset -c 0 '$GATE/sweep_bench-$side-$align' run \
+            experiments/artifacts/manifests/$suite.json \
+            --output-dir experiments/data/runs/gate-$align-$round-$pos$side-$i-$ARCH_LABEL \
+            --cells '$glob' --only treewalker --system-info '$SYSTEM_INFO' --require-pmu" \
+            > /dev/null || failed_step "gate $align $round $pos$side $i: failed"
+        done
+      done
+    done
+  done
+  set +f
+else
+  # A run exits nonzero when a cell fails; the cell's diagnostics are in failed/.
+  # Keep going, so one cell cannot cost the later suites or the results upload.
+  # NAME@TAG is a second run of NAME (the camera-ready ablation runs twice), in a
+  # run directory of its own, so it reuses none of the first run's cells.
+  for entry in $SUITES; do
+    suite=$${entry%%@*}
+    rid=$suite
+    [ "$entry" = "$suite" ] || rid="$suite-$${entry#*@}"
+    claim_run "$rid-$ARCH_LABEL" || continue
+    twx run --suite "$suite" --run-id "$rid-$ARCH_LABEL" --core 0 \
+      --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
+      || failed_step "Run $rid: some cells failed; see runs/$rid-$ARCH_LABEL/failed/"
+  done
+fi
+kill "$SYNC_PID" 2>/dev/null || true
+if [ "$LAYOUT_CHECK" = "true" ]; then
+  # Layout sensitivity: the same kernel, instruction-identical, in a build whose
+  # functions are aligned to 64 bytes. The spread is reported with the results.
+  if claim_run "layout-default-$ARCH_LABEL"; then
+    twx run --suite acceptance --run-id "layout-default-$ARCH_LABEL" --core 0 \
+      --only treewalker,treewalker_research --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
+      || failed_step "Layout check (default): some cells failed"
+  fi
+  if claim_run "layout-align64-$ARCH_LABEL"; then
+    twx run --suite acceptance --run-id "layout-align64-$ARCH_LABEL" --core 0 \
+      --only treewalker,treewalker_research --system-info "$SYSTEM_INFO" --require-pmu $RUN_SETTINGS \
+      --rustflags "'-C target-cpu=native -C llvm-args=-align-all-functions=6'" \
+      || failed_step "Layout check (align64): some cells failed"
+  fi
+fi
+# One Parquet file per table per run, verified against the cells, which it then
+# deletes. The bucket keeps the per-cell copies made while the suites ran; a run
+# that fails to pack keeps its cells, and they are uploaded instead.
+# A run an earlier boot packed is skipped, not packed again, and a run no
+# invocation finished ("partial", an earlier boot cut short) is left raw. Re-time
+# runs wait for the re-time phase, which resumes them first: one an earlier boot
+# cut short can look finished from an older invocation.
+for run in "$REPO_DIR"/experiments/data/runs/*/; do
+  case "$(basename "$run")" in *-retime-*) continue ;; esac
+  [ "$(run_state "$(basename "$run")")" = "raw" ] || continue
+  twx pack "$run" --remove || failed_step "Pack $(basename "$run"): failed; uploading its cells"
+done
+if [ "$RETIME" = "true" ]; then
+  # Re-timing: every cell and mode of the paper's runs whose speedup or
+  # ablation-effect interval is wider than ±2% is timed once more with twice the
+  # rounds, here on the parent runs' VM (an attempt on another instance is
+  # refused), from this machine's own manifests, into runs of their own
+  # (RUN-retime-rN-ARCH), pinned to core 0 with the PMU required. The analysis
+  # reports each cell's longer attempt; both are uploaded.
+  RETIME_DIR="$REPO_DIR/experiments/data/retime"
+  for entry in $SUITES; do
+    suite=$${entry%%@*}
+    rid=$suite
+    [ "$entry" = "$suite" ] || rid="$suite-$${entry#*@}"
+    [ "$suite" = "acceptance" ] && continue
+    twx retime "$rid" --out "$RETIME_DIR" || failed_step "Retime $rid: no plan; see the log"
+  done
+  for script in "$RETIME_DIR"/*-"$ARCH_LABEL".sh; do
+    [ -e "$script" ] || continue
+    claim_run "$(basename "$script" .sh)" || continue
+    as_bench "SYSTEM_INFO='$SYSTEM_INFO' sh '$script'" \
+      || failed_step "Retime $(basename "$script"): some cells failed"
+  done
+  for run in "$REPO_DIR"/experiments/data/runs/*-retime-*/; do
+    [ -d "$run" ] || continue
+    [ "$(run_state "$(basename "$run")")" = "raw" ] || continue
+    twx pack "$run" --remove || failed_step "Pack $(basename "$run"): failed; uploading its cells"
+  done
+fi
+# Every run this deployment claimed, in this boot or an earlier one, must end
+# complete (treewalker-exp run-complete): packed, every cell finished, and no
+# failed cell or sentinel attempt unresolved. A restart therefore cannot end in
+# DONE over an earlier boot's failure, nor a run whose sentinel failed (the runner
+# exits 0 then) or whose command failed before creating it.
+while read -r rid; do
+  [ -n "$rid" ] || continue
+  why=$(run_complete "$rid" < /dev/null 2>&1) \
+    || failed_step "Run $rid: incomplete: $(echo "$why" | tr '\n' ' ')"
+done < "$CLAIMS"
+
+# ---------------------------------------------------------------------------
+# Phase 8: Results
+# ---------------------------------------------------------------------------
+phase 8 "Results"
+# A restarted boot stages its results afresh (the bucket keeps every upload).
+rm -rf "$RESULTS_DIR/runs" "$RESULTS_DIR/retime"
+cp -r "$REPO_DIR/experiments/data/runs" "$RESULTS_DIR/"
+cp "$SYSTEM_INFO" "$RESULTS_DIR/"
+[ -d "$REPO_DIR/experiments/data/retime" ] && cp -r "$REPO_DIR/experiments/data/retime" "$RESULTS_DIR/"
+# The boot's start retired any earlier marker. DONE only without a recorded
+# failure; otherwise ERROR names them, and the results are uploaded either way.
+if [ -z "$FAILURES" ]; then
+  echo "$(date -Iseconds)" > "$RESULTS_DIR/DONE"
+else
+  rm -f "$RESULTS_DIR/DONE"
+  echo "The runs finished with failures: $FAILURES" > "$RESULTS_DIR/ERROR"
+fi
 chown -R $BENCH_USER:$BENCH_USER "$RESULTS_DIR"
-echo "$(date -Iseconds)" > "$RESULTS_DIR/DONE"
-log "Results in $RESULTS_DIR"
-ls -la "$RESULTS_DIR/"
-
-# ---------------------------------------------------------------------------
-# Phase 13: Upload results to GCS
-# ---------------------------------------------------------------------------
-phase 13 "Upload results to GCS"
 gcloud storage cp -r "$RESULTS_DIR/*" "$GCS_RESULTS_BASE/"
 log "Results uploaded to $GCS_RESULTS_BASE/"
+if [ -n "$FAILURES" ]; then
+  log "ERROR: $(cat "$RESULTS_DIR/ERROR")"
+  exit 1
+fi
 log "===== ALL PHASES COMPLETE ====="

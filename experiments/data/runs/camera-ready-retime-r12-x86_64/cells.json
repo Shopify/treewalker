@@ -1,0 +1,2462 @@
+{
+  "expedia-filled/nt1000_md4/xgboost/sessions": {
+    "ablations": {},
+    "cell": {
+      "baselines": {
+        "quickscorer": {
+          "effective": {
+            "format": "xml"
+          },
+          "identity": {
+            "baseline": "quickscorer",
+            "model_sha256": "8753c1feeb9108c4daf08fb32146cd31e7e54c9bbd9c62522ba0be069cb3ac31",
+            "rule": "threshold = next float32 below t; at most 128 leaves; no categorical splits",
+            "schema_version": 2
+          },
+          "key": "b3af51e71702784023dcda1447c87bf24929382878109df32ea31a3b865ee115",
+          "library": "quickscorer.xml",
+          "sha256": "757e48ff68550f1c538a0da1158624950399126d678f049eb243b0245821bede",
+          "status": "ready"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 8,
+            "source_files": 32
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "8753c1feeb9108c4daf08fb32146cd31e7e54c9bbd9c62522ba0be069cb3ac31",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 32
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "d66c635c379d799ee0d65907d1e382223cd171f1173b3a7b42ddca419c4c0b14",
+          "library": "tl2cgen.so",
+          "sha256": "e3005b3a3d2f30d27d367dc3955ca6a9ffd27250fe49b541a4c6b00369b9dd93",
+          "status": "ready"
+        }
+      },
+      "content_key": "c3d57d3a756ccc90fd49e9d220c72ddb524130a0947fe37af412b1a27f476794",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "16516e4672746b29c4c1199fd71bf55f2ce41198e35da81646138cc2da8414ec",
+        "group_offsets": "2ac2606611e54a13bd772e07283929b2a9ae572a31dacc3a048af74fa5c43c7a",
+        "test_data": "6f22155630400096914b16c43832f1cd707763cde34da14bb6721e90ab5060c9",
+        "walker_config": "348bae680c187abd90c494a85be374697b44023bb3b0667aeacdf383eb5b9a71"
+      },
+      "dataset": "expedia-filled",
+      "feature_order": [
+        "site_id",
+        "visitor_location_country_id",
+        "prop_country_id",
+        "srch_destination_id",
+        "srch_length_of_stay",
+        "srch_booking_window",
+        "srch_adults_count",
+        "srch_children_count",
+        "srch_room_count",
+        "srch_saturday_night_bool",
+        "random_bool",
+        "prop_id",
+        "prop_starrating",
+        "prop_review_score",
+        "prop_brand_bool",
+        "prop_location_score1",
+        "prop_location_score2",
+        "prop_log_historical_price",
+        "position",
+        "price_usd",
+        "promotion_flag"
+      ],
+      "features": {
+        "mono_dec": [],
+        "mono_inc": [],
+        "realized_varying": [
+          "prop_country_id",
+          "prop_id",
+          "prop_starrating",
+          "prop_review_score",
+          "prop_brand_bool",
+          "prop_location_score1",
+          "prop_location_score2",
+          "prop_log_historical_price",
+          "position",
+          "price_usd",
+          "promotion_flag"
+        ],
+        "varying": [
+          "prop_country_id",
+          "prop_id",
+          "prop_starrating",
+          "prop_review_score",
+          "prop_brand_bool",
+          "prop_location_score1",
+          "prop_location_score2",
+          "prop_log_historical_price",
+          "position",
+          "price_usd",
+          "promotion_flag"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "../../../entities.npy",
+          "sha256": "16516e4672746b29c4c1199fd71bf55f2ce41198e35da81646138cc2da8414ec"
+        },
+        "group_offsets": {
+          "path": "../../../group_offsets.bin",
+          "sha256": "2ac2606611e54a13bd772e07283929b2a9ae572a31dacc3a048af74fa5c43c7a"
+        },
+        "model_native": {
+          "path": "../../model_native.json",
+          "sha256": "4bf05f4a54a3087be9d401fd5833754aae7f8d07e7c2939f5d7abca33c2b77bc"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "8753c1feeb9108c4daf08fb32146cd31e7e54c9bbd9c62522ba0be069cb3ac31"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "55fb7214d1e07ae92aa5116485296ba10a1c16336fa9dd8a69c7464cdb0a9de9"
+        },
+        "predictions": {
+          "path": "../../predictions.npy",
+          "sha256": "56f51ac38ba3cb317a626bd17f5790c7dc8864bbb04be89e256d1a715a3015e4"
+        },
+        "test_data": {
+          "path": "../../../test_data.bin",
+          "sha256": "6f22155630400096914b16c43832f1cd707763cde34da14bb6721e90ab5060c9"
+        },
+        "walker_config": {
+          "path": "../../../walker_config.json",
+          "sha256": "348bae680c187abd90c494a85be374697b44023bb3b0667aeacdf383eb5b9a71"
+        }
+      },
+      "framework": "xgboost",
+      "generator": "ranking-sessions-v2",
+      "grouping": {
+        "kind": "sessions",
+        "n_groups": 10000,
+        "rows": 248076,
+        "size_max": 37,
+        "size_mean": 24.8076,
+        "size_min": 5
+      },
+      "horizon": null,
+      "id": "expedia-filled/nt1000_md4/xgboost/sessions",
+      "k": null,
+      "key": "61588231fa1a2f9d0c6d1bca8e756cb636859101743da348ace7389c1326b719",
+      "libraries": {
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2",
+        "xgboost": "3.4.1"
+      },
+      "limits": [],
+      "max_depth": 4,
+      "missing_values": {
+        "fill": {
+          "prop_location_score2": -1.0,
+          "prop_review_score": -1.0
+        },
+        "missing": {
+          "test": {
+            "prop_location_score2": 53044,
+            "prop_review_score": 348
+          },
+          "train": {
+            "prop_location_score2": 218329,
+            "prop_review_score": 1494
+          }
+        },
+        "rule": "a missing value becomes its column's training-split minimum minus max(1, |minimum|), in train and test alike; test values below it are kept"
+      },
+      "model": {
+        "dir": "../..",
+        "key": "da576c515157fb233f15873ba5a53886b18c8839512b7e0c4ccd7e2967e2a13a",
+        "structure": {
+          "max_tree_nodes": 31,
+          "total_nodes": 30244,
+          "trees": 1000
+        },
+        "varying_predicates_upper_bound": 1190
+      },
+      "model_key": "da576c515157fb233f15873ba5a53886b18c8839512b7e0c4ccd7e2967e2a13a",
+      "n_trees": 1000,
+      "oracle": {
+        "base_score": -3.0623246597902756,
+        "divisor": 1.0,
+        "groups": [
+          21,
+          36,
+          370,
+          676,
+          1369,
+          1515,
+          1536,
+          1613,
+          2032,
+          2149,
+          4063,
+          5121,
+          5953,
+          7355,
+          7415,
+          7554,
+          8203,
+          8609,
+          8703
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {},
+      "perturbation": null,
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "order": [
+          1701079435,
+          1
+        ],
+        "split": 1701079435
+      },
+      "split": {
+        "max_sessions": 50000,
+        "search_level_features": [
+          "site_id",
+          "visitor_location_country_id",
+          "srch_destination_id",
+          "srch_length_of_stay",
+          "srch_booking_window",
+          "srch_adults_count",
+          "srch_children_count",
+          "srch_room_count",
+          "srch_saturday_night_bool",
+          "random_bool"
+        ],
+        "seed": 1701079435,
+        "test_frac": 0.2,
+        "unit": "session"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 1000,
+        "params": {
+          "eval_metric": "logloss",
+          "learning_rate": 0.05,
+          "max_depth": 4,
+          "objective": "binary:logistic",
+          "seed": 42,
+          "tree_method": "hist"
+        }
+      },
+      "warnings": [],
+      "workload": "ranking-filled"
+    },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 37
+        }
+      },
+      "setting": false
+    },
+    "excluded": [],
+    "groups": 10000,
+    "id": "expedia-filled/nt1000_md4/xgboost/sessions",
+    "load_seconds": {
+      "exact_sums_off": 0.002651706
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_full_walk"
+        ],
+        "interface_one_row": "predict_full_walk",
+        "interfaces": {
+          "serving": "predict_full_walk"
+        },
+        "method": "treewalker_fullwalk",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_full_walk"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "interface_one_row": "predict",
+        "interfaces": {
+          "serving": "predict loop"
+        },
+        "method": "tl2cgen",
+        "precision": "F32",
+        "settings": null,
+        "tolerance": 1e-05,
+        "validated": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "PredictFromDense",
+          "PredictFromDense 1-row loop"
+        ],
+        "interface_one_row": "PredictFromDense",
+        "interfaces": {
+          "serving": "PredictFromDense"
+        },
+        "method": "xgboost_native",
+        "precision": "F32",
+        "settings": {
+          "learner": {
+            "generic_param": {
+              "device": "cpu",
+              "fail_on_invalid_gpu_id": "0",
+              "n_jobs": "1",
+              "nthread": "1",
+              "random_state": "0",
+              "seed": "0",
+              "seed_per_iteration": "0",
+              "validate_parameters": "0"
+            },
+            "gradient_booster": {
+              "dart_train_param": {
+                "normalize_type": "tree",
+                "one_drop": "0",
+                "rate_drop": "0",
+                "sample_type": "uniform",
+                "skip_drop": "0"
+              },
+              "gbtree_model_param": {
+                "num_parallel_tree": "1",
+                "num_trees": "1000"
+              },
+              "gbtree_train_param": {
+                "process_type": "default",
+                "tree_method": "auto",
+                "updater": "grow_quantile_histmaker",
+                "updater_seq": "grow_quantile_histmaker"
+              },
+              "name": "gbtree",
+              "specified_updater": false,
+              "tree_train_param": {
+                "alpha": "0",
+                "colsample_bylevel": "1",
+                "colsample_bynode": "1",
+                "colsample_bytree": "1",
+                "eta": "0.300000012",
+                "gamma": "0",
+                "grow_policy": "depthwise",
+                "interaction_constraints": "",
+                "lambda": "1",
+                "learning_rate": "0.300000012",
+                "max_bin": "256",
+                "max_cat_threshold": "64",
+                "max_cat_to_onehot": "4",
+                "max_delta_step": "0",
+                "max_depth": "6",
+                "max_leaves": "0",
+                "min_child_weight": "1",
+                "min_split_loss": "0",
+                "monotone_constraints": "()",
+                "refresh_leaf": "1",
+                "reg_alpha": "0",
+                "reg_lambda": "1",
+                "sampling_method": "uniform",
+                "sparse_threshold": "0.20000000000000001",
+                "subsample": "1"
+              },
+              "updater": [
+                {
+                  "hist_train_param": {
+                    "debug_synchronize": "0",
+                    "max_cached_hist_node": "18446744073709551615"
+                  },
+                  "name": "grow_quantile_histmaker"
+                }
+              ]
+            },
+            "learner_model_param": {
+              "base_score": "[4.4688355E-2]",
+              "boost_from_average": "1",
+              "num_class": "0",
+              "num_feature": "21",
+              "num_target": "1"
+            },
+            "learner_train_param": {
+              "booster": "gbtree",
+              "disable_default_eval_metric": "0",
+              "multi_strategy": "one_output_per_tree",
+              "objective": "binary:logistic"
+            },
+            "metrics": [],
+            "objective": {
+              "name": "binary:logistic",
+              "reg_loss_param": {
+                "scale_pos_weight": "1"
+              }
+            }
+          },
+          "version": [
+            3,
+            4,
+            1
+          ]
+        },
+        "tolerance": 1e-05,
+        "validated": [
+          "PredictFromDense",
+          "PredictFromDense 1-row loop"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "score_collection",
+          "score_fast loop"
+        ],
+        "interface_one_row": "score_fast",
+        "interfaces": {
+          "serving": "score_collection"
+        },
+        "method": "quickscorer",
+        "precision": "F32",
+        "settings": null,
+        "tolerance": 1e-05,
+        "validated": [
+          "score_collection",
+          "score_fast loop"
+        ],
+        "variant": "-"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": false,
+      "nodes": 30244,
+      "threshold_type": "F32",
+      "trees": 1000
+    },
+    "model_bytes": 2427185,
+    "required_methods": [
+      "treewalker",
+      "treewalker_fullwalk",
+      "xgboost_native"
+    ],
+    "resume_key": "a586947bb87eddc90999754dd462a2d3c8458ef3e58ed43be547ee6864a09b54",
+    "rows": 248076,
+    "run": {
+      "batch_rows": 1024,
+      "exact_sums": false,
+      "fresh_process": true,
+      "hardware_counters": true,
+      "max_rounds": 12,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 12,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 2.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": {
+      "cap": 65536,
+      "expected_rows": 65536.0,
+      "fraction": 0.264177107015592,
+      "groups_sha256": "ac8c72212c94abae9bff432920c9f30cdf0af6adcc440df988179c76c723417e",
+      "min_groups": 200,
+      "overshoot": 0.001312255859375,
+      "pool_groups": 10000,
+      "pool_rows": 248076,
+      "rows": 65622,
+      "seed": 5707769178702863998,
+      "strata": [
+        {
+          "max_size": 7,
+          "min_size": 4,
+          "pool": 669,
+          "pool_rows": 4034,
+          "sampled": 176,
+          "sampled_rows": 1057,
+          "weight": 3.8011363636363638
+        },
+        {
+          "max_size": 15,
+          "min_size": 8,
+          "pool": 1495,
+          "pool_rows": 16976,
+          "sampled": 395,
+          "sampled_rows": 4463,
+          "weight": 3.7848101265822787
+        },
+        {
+          "max_size": 31,
+          "min_size": 16,
+          "pool": 4397,
+          "pool_rows": 114351,
+          "sampled": 1162,
+          "sampled_rows": 30369,
+          "weight": 3.7839931153184163
+        },
+        {
+          "max_size": 63,
+          "min_size": 32,
+          "pool": 3439,
+          "pool_rows": 112715,
+          "sampled": 908,
+          "sampled_rows": 29733,
+          "weight": 3.787444933920705
+        }
+      ]
+    },
+    "seconds": 59.010007271,
+    "stop": {
+      "serving": {
+        "blocks": 144,
+        "blocks_per_round": 12,
+        "conversion": [
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 41466,
+            "method": "quickscorer",
+            "round": 0,
+            "rows": 5473,
+            "ticks": 49837998
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 77860,
+            "method": "quickscorer",
+            "round": 1,
+            "rows": 5473,
+            "ticks": 49823720
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 42734,
+            "method": "quickscorer",
+            "round": 2,
+            "rows": 5473,
+            "ticks": 49850386
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 41838,
+            "method": "quickscorer",
+            "round": 3,
+            "rows": 5473,
+            "ticks": 49886334
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 42116,
+            "method": "quickscorer",
+            "round": 4,
+            "rows": 5473,
+            "ticks": 49851176
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 43584,
+            "method": "quickscorer",
+            "round": 5,
+            "rows": 5473,
+            "ticks": 49929102
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 43726,
+            "method": "quickscorer",
+            "round": 6,
+            "rows": 5473,
+            "ticks": 49843726
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 43790,
+            "method": "quickscorer",
+            "round": 7,
+            "rows": 5473,
+            "ticks": 49881948
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 43366,
+            "method": "quickscorer",
+            "round": 8,
+            "rows": 5473,
+            "ticks": 49920346
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 44972,
+            "method": "quickscorer",
+            "round": 9,
+            "rows": 5473,
+            "ticks": 49806810
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 42386,
+            "method": "quickscorer",
+            "round": 10,
+            "rows": 5473,
+            "ticks": 49869874
+          },
+          {
+            "batch": 11,
+            "calls": 220,
+            "conversion_ticks": 42762,
+            "method": "quickscorer",
+            "round": 11,
+            "rows": 5473,
+            "ticks": 49918244
+          }
+        ],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "score_collection",
+                "ticks": 99609400
+              },
+              {
+                "interface": "score_fast loop",
+                "ticks": 100116648
+              }
+            ],
+            "chosen": "score_collection",
+            "margin_pct": 0.509237080034608,
+            "method": "quickscorer",
+            "rows": 5473,
+            "variant": "-"
+          },
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "PredictFromDense",
+                "ticks": 277729594
+              },
+              {
+                "interface": "PredictFromDense 1-row loop",
+                "ticks": 913500712
+              }
+            ],
+            "chosen": "PredictFromDense",
+            "margin_pct": 228.91731084300653,
+            "method": "xgboost_native",
+            "rows": 5473,
+            "variant": "-"
+          },
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "DMatrixCreateFromMat+PredictBatch",
+                "ticks": 255138466
+              },
+              {
+                "interface": "predict loop",
+                "ticks": 253482788
+              }
+            ],
+            "chosen": "predict loop",
+            "margin_pct": 0.6531717648616153,
+            "method": "tl2cgen",
+            "rows": 5473,
+            "variant": "-"
+          }
+        ],
+        "reason": "precision",
+        "rounds": 12,
+        "rse_pct": {
+          "quickscorer/-": 0.011192145776666123,
+          "tl2cgen/-": 0.013306470907054448,
+          "treewalker/all-on": 0.008136908377578852,
+          "treewalker_fullwalk/-": 0.005762917098062832,
+          "xgboost_native/-": 0.654265582386349
+        },
+        "seconds": 39.508890106,
+        "totals": {
+          "quickscorer/-": [
+            7087106688,
+            787464
+          ],
+          "tl2cgen/-": [
+            18091803378,
+            787464
+          ],
+          "treewalker/all-on": [
+            8036674454,
+            787464
+          ],
+          "treewalker_fullwalk/-": [
+            26779757934,
+            787464
+          ],
+          "xgboost_native/-": [
+            20288237410,
+            787464
+          ]
+        }
+      }
+    },
+    "suite": "camera-ready",
+    "timed_groups": 2641,
+    "validation": {
+      "checks": [
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 1.561421681752118e-11,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 0.0,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 1.561421681752118e-11,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "DMatrixCreateFromMat+PredictBatch",
+          "max_abs": 1.1723902345051052e-06,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict loop",
+          "max_abs": 1.1723902345051052e-06,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictFromDense",
+          "max_abs": 6.13963582057897e-07,
+          "method": "xgboost_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictFromDense 1-row loop",
+          "max_abs": 6.13963582057897e-07,
+          "method": "xgboost_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "score_collection",
+          "max_abs": 0.0,
+          "method": "quickscorer",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "score_fast loop",
+          "max_abs": 0.0,
+          "method": "quickscorer",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 65622,
+          "tolerance": 1e-05,
+          "variant": "-"
+        }
+      ],
+      "groups": 2641,
+      "oracle": {
+        "exact_sums": false,
+        "groups": 19,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": false,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 529,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": false,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 6.13963582057897e-07,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 65622
+      }
+    },
+    "xgboost_processes": {
+      "arch": "x86_64",
+      "count": 6,
+      "processes": [
+        {
+          "mode": "serving",
+          "process": 0,
+          "rows": 787464,
+          "status": "ok",
+          "ticks": 20288237410,
+          "ticks_per_row": 25764.018939278492
+        },
+        {
+          "mode": "serving",
+          "process": 1,
+          "rows": 65622,
+          "status": "ok",
+          "ticks": 1745643122,
+          "ticks_per_row": 26601.492212977355
+        },
+        {
+          "mode": "serving",
+          "process": 2,
+          "rows": 65622,
+          "status": "ok",
+          "ticks": 1742578178,
+          "ticks_per_row": 26554.786169272502
+        },
+        {
+          "mode": "serving",
+          "process": 3,
+          "rows": 65622,
+          "status": "ok",
+          "ticks": 1758187820,
+          "ticks_per_row": 26792.658254853555
+        },
+        {
+          "mode": "serving",
+          "process": 4,
+          "rows": 65622,
+          "status": "ok",
+          "ticks": 1755651510,
+          "ticks_per_row": 26754.007954649354
+        },
+        {
+          "mode": "serving",
+          "process": 5,
+          "rows": 65622,
+          "status": "ok",
+          "ticks": 1737778346,
+          "ticks_per_row": 26481.642528420347
+        },
+        {
+          "mode": "serving",
+          "process": 6,
+          "rows": 65622,
+          "status": "ok",
+          "ticks": 1747914504,
+          "ticks_per_row": 26636.105330529397
+        }
+      ]
+    }
+  },
+  "flchain/nt500_md2_h1/lightgbm/panel": {
+    "ablations": {},
+    "cell": {
+      "baselines": {
+        "lleaves": {
+          "effective": {
+            "cc": "/usr/bin/x86_64-linux-gnu-gcc-15",
+            "cc_version": "unknown",
+            "codegen": {
+              "codemodel": "default",
+              "cpu": "emeraldrapids",
+              "features": "+64bit,+adx,+aes,-amx-avx512,+amx-bf16,-amx-complex,-amx-fp16,-amx-fp8,+amx-int8,-amx-movrs,-amx-tf32,+amx-tile,+avx,-avx10.1,-avx10.2,+avx2,+avx512bf16,+avx512bitalg,+avx512bw,+avx512cd,+avx512dq,+avx512f,+avx512fp16,+avx512ifma,+avx512vbmi,+avx512vbmi2,+avx512vl,+avx512vnni,-avx512vp2intersect,+avx512vpopcntdq,-avxifma,-avxneconvert,+avxvnni,-avxvnniint16,-avxvnniint8,+bmi,+bmi2,-ccmp,-cf,+cldemote,+clflushopt,+clwb,-clzero,+cmov,-cmpccxadd,+crc32,+cx16,+cx8,-egpr,-enqcmd,+f16c,+fma,-fma4,+fsgsbase,+fxsr,+gfni,-hreset,+invpcid,-kl,-lwp,+lzcnt,+mmx,+movbe,+movdir64b,+movdiri,-movrs,-mwaitx,-ndd,-nf,+pclmul,-pconfig,-pku,+popcnt,-ppx,-prefetchi,+prfchw,-ptwrite,-push2pop2,-raoint,+rdpid,-rdpru,+rdrnd,+rdseed,+rtm,+sahf,+serialize,-sgx,+sha,-sha512,-shstk,-sm3,-sm4,+sse,+sse2,+sse3,+sse4.1,+sse4.2,-sse4a,+ssse3,-tbm,+tsxldtrk,-uintr,-usermsr,+vaes,+vpclmulqdq,-waitpkg,+wbnoinvd,-widekl,-xop,+xsave,+xsavec,+xsaveopt,+xsaves,-zu",
+              "fp_contract": "on (TargetOptions default, FPOpFusion::Standard)",
+              "ir_optimization": "none",
+              "llvm": "22.1.0",
+              "opt": 3,
+              "reloc": "pic",
+              "triple": "x86_64-unknown-linux-gnu"
+            },
+            "fblocksize": 34,
+            "fp_contract": "on",
+            "link_command": [
+              "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "-shared",
+              "-o",
+              "/home/bench/treewalker/experiments/artifacts/flchain/nt500_md2_h1/lightgbm/lleaves.so",
+              "<objects>"
+            ],
+            "lleaves": "1.4.1",
+            "llvmlite": "0.50.0",
+            "model": "/home/bench/treewalker/experiments/artifacts/flchain/nt500_md2_h1/lightgbm/model_native.txt",
+            "n_jobs": 4,
+            "opt_level": "3",
+            "output": "/home/bench/treewalker/experiments/artifacts/flchain/nt500_md2_h1/lightgbm/lleaves.so",
+            "relocation_model": "pic",
+            "target_cpu": "native",
+            "target_triple": "x86_64-unknown-linux-gnu",
+            "use_fp64": true
+          },
+          "identity": {
+            "baseline": "lleaves",
+            "cc": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "compile_lock_sha256": "761d1326ad45f3bdea0bc145b92f10c107e3958f1c99e16990faef4ff27a917a",
+            "compile_py_sha256": "fbf03429f403a7e43f9d59801dac7e946c57d2ad8637db4709f90ca9083ab543",
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "a3d5096f2374ec82a25fa34562af5fd56d7a0af9d33dbd2f24cae1ad185f3c03",
+            "schema_version": 2,
+            "settings": {
+              "cc": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "fblocksize": 34,
+              "fp_contract": "on",
+              "n_jobs": 4,
+              "opt_level": "3",
+              "relocation_model": "pic",
+              "target_cpu": "native",
+              "use_fp64": true
+            }
+          },
+          "key": "e298df48ba27243bd288b296c8f93e7a9ed9b8ea51a6a6e738c86d85e60799ba",
+          "library": "lleaves.so",
+          "sha256": "48d69239237ce347d05c9d5b01d3449a342e39f6b9a353776b72abc0838bd28f",
+          "status": "ready"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 8,
+            "source_files": 32
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "eec1335679b5edd03cef2ab9b06edadf7b85606066b61a978435b5d04729e84b",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 32
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "1ef2601bffe1d4063d7c747c2ec697c3409ed61694a33d2515672668cf470761",
+          "library": "tl2cgen.so",
+          "sha256": "754ce9c5d56728cbd2aa05420b44281fe9807597ff98d944c1f5635d1a0b1c05",
+          "status": "ready"
+        }
+      },
+      "content_key": "abc52b602bf3db391bf01d44080e2e406cd7fbd72217cc5d51de57d6884b1ca7",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "eab75762c307974706059cf6347861a6bc6bea0b44040e3c2ba383e86c0b650d",
+        "test_data": "9f6179007fc82c2e99fe717d408e44db75b101d1c1f79576bbdd40e61d7209d8",
+        "walker_config": "ee3dcf130b121e6285a41ee20b20ac21ea213c7d675689e8269df580c8aec3b1"
+      },
+      "dataset": "flchain",
+      "feature_order": [
+        "age",
+        "sex",
+        "sample_yr",
+        "kappa",
+        "lambda",
+        "flc_grp",
+        "creatinine",
+        "mgus",
+        "time_step",
+        "time_step_sq",
+        "remaining_steps",
+        "remaining_frac_sq",
+        "interaction_x0_t",
+        "hazard_bump"
+      ],
+      "features": {
+        "mono_dec": [
+          "remaining_steps",
+          "remaining_frac_sq"
+        ],
+        "mono_inc": [
+          "time_step",
+          "time_step_sq",
+          "interaction_x0_t"
+        ],
+        "realized_varying": [],
+        "varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "../../../entities.npy",
+          "sha256": "eab75762c307974706059cf6347861a6bc6bea0b44040e3c2ba383e86c0b650d"
+        },
+        "model_native": {
+          "path": "../../model_native.txt",
+          "sha256": "a3d5096f2374ec82a25fa34562af5fd56d7a0af9d33dbd2f24cae1ad185f3c03"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "eec1335679b5edd03cef2ab9b06edadf7b85606066b61a978435b5d04729e84b"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "38eeca7d917474b8623c2410245f71f4946a9650f13e53ec4f14dedd19f60952"
+        },
+        "predictions": {
+          "path": "../../predictions.npy",
+          "sha256": "f76c055b90538c8bd19ea8c9974ebc24db7ff961aa93b4c753b8ab2fed896fa4"
+        },
+        "test_data": {
+          "path": "../../../test_data.bin",
+          "sha256": "9f6179007fc82c2e99fe717d408e44db75b101d1c1f79576bbdd40e61d7209d8"
+        },
+        "walker_config": {
+          "path": "../../../walker_config.json",
+          "sha256": "ee3dcf130b121e6285a41ee20b20ac21ea213c7d675689e8269df580c8aec3b1"
+        }
+      },
+      "framework": "lightgbm",
+      "generator": "panel-v2",
+      "grouping": {
+        "kind": "panel",
+        "n_groups": 1304,
+        "rows": 1304,
+        "size_max": 1,
+        "size_mean": 1.0,
+        "size_min": 1,
+        "width": 1
+      },
+      "horizon": {
+        "realized": 1,
+        "requested": 1
+      },
+      "id": "flchain/nt500_md2_h1/lightgbm/panel",
+      "k": null,
+      "key": "e8cad8b8f1541d3606dc356425746e96ad4327b681420545c3fa8b368cb17fb9",
+      "libraries": {
+        "lightgbm": "4.7.0",
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2"
+      },
+      "limits": [],
+      "max_depth": 2,
+      "model": {
+        "dir": "../..",
+        "key": "7013acff6b2dd522042adcc262f7ef728954f15365d7e2dbcfd9ebe63faaa98c",
+        "structure": {
+          "max_tree_nodes": 5,
+          "total_nodes": 2500,
+          "trees": 500
+        },
+        "varying_predicates_upper_bound": 0
+      },
+      "model_key": "7013acff6b2dd522042adcc262f7ef728954f15365d7e2dbcfd9ebe63faaa98c",
+      "n_trees": 500,
+      "oracle": {
+        "base_score": 0.0,
+        "divisor": 1.0,
+        "groups": [
+          22,
+          75,
+          77,
+          161,
+          220,
+          224,
+          229,
+          232,
+          235,
+          257,
+          276,
+          277,
+          302,
+          312,
+          325,
+          356,
+          357,
+          371,
+          376,
+          412,
+          429,
+          441,
+          476,
+          480,
+          485,
+          498,
+          501,
+          522,
+          523,
+          559,
+          585,
+          605,
+          607,
+          629,
+          657,
+          658,
+          660,
+          699,
+          721,
+          734,
+          740,
+          781,
+          789,
+          811,
+          856,
+          895,
+          909,
+          924,
+          925,
+          934,
+          998,
+          1026,
+          1042,
+          1099,
+          1118,
+          1146,
+          1148,
+          1164,
+          1171,
+          1206,
+          1218,
+          1240,
+          1247,
+          1294
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {},
+      "perturbation": null,
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "split": 1751214488
+      },
+      "split": {
+        "seed": 1751214488,
+        "test_frac": 0.2,
+        "unit": "patient"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 500,
+        "params": {
+          "learning_rate": 0.05,
+          "max_depth": 2,
+          "metric": "binary_logloss",
+          "num_leaves": 3,
+          "objective": "binary",
+          "seed": 42,
+          "verbose": -1
+        }
+      },
+      "warnings": [],
+      "workload": "panel"
+    },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 1
+        }
+      },
+      "setting": false
+    },
+    "excluded": [
+      {
+        "method": "quickscorer",
+        "reason": "unsupported: categorical splits",
+        "variant": "-"
+      }
+    ],
+    "groups": 1304,
+    "id": "flchain/nt500_md2_h1/lightgbm/panel",
+    "load_seconds": {
+      "exact_sums_off": 0.000529019
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_full_walk"
+        ],
+        "interface_one_row": "predict_full_walk",
+        "interfaces": {
+          "serving": "predict_full_walk"
+        },
+        "method": "treewalker_fullwalk",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_full_walk"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "interface_one_row": "predict",
+        "interfaces": {
+          "serving": "predict"
+        },
+        "method": "tl2cgen",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "forest_root"
+        ],
+        "interface_one_row": "forest_root",
+        "interfaces": {
+          "serving": "forest_root"
+        },
+        "method": "lleaves",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "forest_root"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "PredictForMat",
+          "PredictForMatSingleRowFast loop"
+        ],
+        "interface_one_row": "PredictForMatSingleRowFast",
+        "interfaces": {
+          "serving": "PredictForMatSingleRowFast"
+        },
+        "method": "lightgbm_native",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "PredictForMat",
+          "PredictForMatSingleRowFast loop"
+        ],
+        "variant": "-"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": false,
+      "nodes": 2500,
+      "threshold_type": "F64",
+      "trees": 500
+    },
+    "model_bytes": 301029,
+    "required_methods": [
+      "treewalker",
+      "treewalker_fullwalk",
+      "lightgbm_native"
+    ],
+    "resume_key": "65ed15f2a780e080c75fed7477d8c88fbbf91b8f7b125b465ffcac4edceee84f",
+    "rows": 1304,
+    "run": {
+      "batch_rows": 1024,
+      "exact_sums": false,
+      "fresh_process": true,
+      "hardware_counters": true,
+      "max_rounds": 12,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 12,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 2.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 0.423128815,
+    "stop": {
+      "serving": {
+        "blocks": 144,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [],
+        "reason": "precision",
+        "rounds": 12,
+        "rse_pct": {
+          "lightgbm_native/-": 0.08049010233454258,
+          "lleaves/-": 0.1299396943314504,
+          "tl2cgen/-": 0.6705019619023006,
+          "treewalker/all-on": 0.08743018275347984,
+          "treewalker_fullwalk/-": 0.27973175070855605
+        },
+        "seconds": 0.333798553,
+        "totals": {
+          "lightgbm_native/-": [
+            300435250,
+            15648
+          ],
+          "lleaves/-": [
+            61930542,
+            15648
+          ],
+          "tl2cgen/-": [
+            56377376,
+            15648
+          ],
+          "treewalker/all-on": [
+            117428984,
+            15648
+          ],
+          "treewalker_fullwalk/-": [
+            113978850,
+            15648
+          ]
+        }
+      }
+    },
+    "suite": "camera-ready",
+    "timed_groups": 1304,
+    "validation": {
+      "checks": [
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1.8843497436352366e-12,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 0.0,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1.8843497436352366e-12,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "defect": {
+            "affected_differ": 0,
+            "affected_max_abs": 0.0,
+            "affected_rows": 0,
+            "name": "tl2cgen-f64-missing-alias: Entry union int missing vs double fvalue"
+          },
+          "interface": "DMatrixCreateFromMat+PredictBatch",
+          "max_abs": 8.049116928532385e-16,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1.8843497436352366e-12,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "defect": {
+            "affected_differ": 0,
+            "affected_max_abs": 0.0,
+            "affected_rows": 0,
+            "name": "tl2cgen-f64-missing-alias: Entry union int missing vs double fvalue"
+          },
+          "interface": "predict loop",
+          "max_abs": 8.049116928532385e-16,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1.8843497436352366e-12,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "forest_root",
+          "max_abs": 5.551115123125783e-16,
+          "method": "lleaves",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1.8843497436352366e-12,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictForMat",
+          "max_abs": 8.049116928532385e-16,
+          "method": "lightgbm_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1.8843497436352366e-12,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictForMatSingleRowFast loop",
+          "max_abs": 8.049116928532385e-16,
+          "method": "lightgbm_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 1304,
+          "tolerance": 1.8843497436352366e-12,
+          "variant": "-"
+        }
+      ],
+      "groups": 1304,
+      "oracle": {
+        "exact_sums": false,
+        "groups": 64,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": false,
+          "max_abs": 3.9968028886505635e-15,
+          "mismatches": 0
+        },
+        "rows": 64,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": false,
+          "max_abs": 3.9968028886505635e-15,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 8.049116928532385e-16,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 1304
+      }
+    },
+    "xgboost_processes": null
+  },
+  "support/nt1000_md8_h8/xgboost/panel": {
+    "ablations": {},
+    "cell": {
+      "baselines": {
+        "quickscorer": {
+          "effective": null,
+          "identity": {
+            "baseline": "quickscorer",
+            "model_sha256": "975321d63ccf12c18c625184a7a58f844d7cc9914a49bd7280c51ac8ac73853c",
+            "rule": "threshold = next float32 below t; at most 128 leaves; no categorical splits",
+            "schema_version": 2
+          },
+          "key": "16656d901b6068a9a3c6fb9020b09fa1a9bb60dc9d39139c33590d6598352d55",
+          "library": "quickscorer.xml",
+          "sha256": null,
+          "status": "unsupported: tree 0 has 196 leaves; QuickScorer takes 128"
+        },
+        "tl2cgen": {
+          "effective": {
+            "compiler_command": "gcc -c -O3 -o {obj} {src} -fPIC -std=c99 -march=native -lm",
+            "link_command": "gcc -shared -O3 -o {lib} {objects} -std=c99 -march=native -lm",
+            "nthread": 8,
+            "source_files": 32
+          },
+          "identity": {
+            "baseline": "tl2cgen",
+            "compiler": {
+              "path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+              "target": "x86_64-linux-gnu",
+              "version": "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+            },
+            "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+            "model_sha256": "975321d63ccf12c18c625184a7a58f844d7cc9914a49bd7280c51ac8ac73853c",
+            "schema_version": 2,
+            "settings": {
+              "max_nodes_per_file": 8000,
+              "options": [
+                "-march=native"
+              ],
+              "params": {
+                "parallel_comp": 32
+              },
+              "toolchain": "gcc"
+            },
+            "tl2cgen": "1.0.0",
+            "treelite": "4.7.2"
+          },
+          "key": "74def0f814877e1d7a9e74b8dad240befb96cd1c6301cb0df22fec6149053d7f",
+          "library": "tl2cgen.so",
+          "sha256": "5be9c9d9c5dc1be1515da7f1da66e9b679120e215164f132a47102aaca74c392",
+          "status": "ready"
+        }
+      },
+      "content_key": "5ab6dcf433f75a7bfbf7534754e0ab49ffaa2b7918e089f2c44e512e2de61b6c",
+      "contracts": {
+        "missing_in_monotonic": {},
+        "ok": true,
+        "violations": []
+      },
+      "data_sha256": {
+        "entities": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370",
+        "test_data": "81ea6826d970985c48ce715f8a1065e1e8ef5e4160ac4f9efbc21a4020d62211",
+        "walker_config": "05efd8b04aa18c5d8e4a39ea25fe97b3ab8836f178c39dffeeb31fa081973665"
+      },
+      "dataset": "support",
+      "feature_order": [
+        "x0",
+        "x1",
+        "x2",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "x8",
+        "x9",
+        "x10",
+        "x11",
+        "x12",
+        "x13",
+        "time_step",
+        "time_step_sq",
+        "remaining_steps",
+        "remaining_frac_sq",
+        "interaction_x0_t",
+        "hazard_bump"
+      ],
+      "features": {
+        "mono_dec": [
+          "remaining_steps",
+          "remaining_frac_sq"
+        ],
+        "mono_inc": [
+          "time_step",
+          "time_step_sq",
+          "interaction_x0_t"
+        ],
+        "realized_varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ],
+        "varying": [
+          "time_step",
+          "time_step_sq",
+          "remaining_steps",
+          "remaining_frac_sq",
+          "interaction_x0_t",
+          "hazard_bump"
+        ]
+      },
+      "files": {
+        "entities": {
+          "path": "../../../entities.npy",
+          "sha256": "a29aa7fca6983dc3b6b87194fc55c854d2d31cef66200708019611080c61e370"
+        },
+        "model_native": {
+          "path": "../../model_native.json",
+          "sha256": "69595e937df4373983497e761110c1591d91054df130acf97e7f15cba1d7e2d9"
+        },
+        "model_treelite_bin": {
+          "path": "../../model_treelite.bin",
+          "sha256": "975321d63ccf12c18c625184a7a58f844d7cc9914a49bd7280c51ac8ac73853c"
+        },
+        "oracle": {
+          "path": "oracle.bin",
+          "sha256": "d79d4c4be8cd196d4a6ff220bdcd1f77eb4e38cc9c7e5b36c8aea5d46b34d8d8"
+        },
+        "predictions": {
+          "path": "../../predictions.npy",
+          "sha256": "a25d575cdf09e6fd4624b6e9ddcaf1f1a3d8ee65e9e4d00e84a6392efbd0d667"
+        },
+        "test_data": {
+          "path": "../../../test_data.bin",
+          "sha256": "81ea6826d970985c48ce715f8a1065e1e8ef5e4160ac4f9efbc21a4020d62211"
+        },
+        "walker_config": {
+          "path": "../../../walker_config.json",
+          "sha256": "05efd8b04aa18c5d8e4a39ea25fe97b3ab8836f178c39dffeeb31fa081973665"
+        }
+      },
+      "framework": "xgboost",
+      "generator": "panel-v2",
+      "grouping": {
+        "kind": "panel",
+        "n_groups": 1774,
+        "rows": 14192,
+        "size_max": 8,
+        "size_mean": 8.0,
+        "size_min": 8,
+        "width": 8
+      },
+      "horizon": {
+        "realized": 8,
+        "requested": 8
+      },
+      "id": "support/nt1000_md8_h8/xgboost/panel",
+      "k": null,
+      "key": "fc0bea9bece4a3daaeb1a442de4c5ce4593ba8a8fb2b9a3d2611e3dd1756706c",
+      "libraries": {
+        "numpy": "2.5.3",
+        "polars": "1.44.2",
+        "treelite": "4.7.2",
+        "xgboost": "3.4.1"
+      },
+      "limits": [],
+      "max_depth": 8,
+      "model": {
+        "dir": "../..",
+        "key": "2d16d0772d3c3c90081dde88a7f6d289a5a36c2642105daa6170cbb9e77ce9e9",
+        "structure": {
+          "max_tree_nodes": 417,
+          "total_nodes": 200860,
+          "trees": 1000
+        },
+        "varying_predicates_upper_bound": 263
+      },
+      "model_key": "2d16d0772d3c3c90081dde88a7f6d289a5a36c2642105daa6170cbb9e77ce9e9",
+      "n_trees": 1000,
+      "oracle": {
+        "base_score": -1.9685999876566247,
+        "divisor": 1.0,
+        "groups": [
+          26,
+          59,
+          86,
+          150,
+          174,
+          186,
+          283,
+          300,
+          384,
+          396,
+          421,
+          429,
+          463,
+          479,
+          492,
+          500,
+          511,
+          513,
+          521,
+          559,
+          566,
+          583,
+          587,
+          703,
+          724,
+          731,
+          795,
+          805,
+          816,
+          829,
+          844,
+          915,
+          955,
+          968,
+          985,
+          1000,
+          1001,
+          1031,
+          1042,
+          1061,
+          1097,
+          1126,
+          1143,
+          1146,
+          1179,
+          1212,
+          1241,
+          1254,
+          1303,
+          1313,
+          1358,
+          1374,
+          1390,
+          1408,
+          1442,
+          1618,
+          1626,
+          1647,
+          1649,
+          1741,
+          1746,
+          1747,
+          1752,
+          1762
+        ],
+        "postprocessor": "sigmoid",
+        "sigmoid_alpha": 1.0,
+        "source": "math.fsum of Treelite GTIL 4.7.2 predict_per_tree"
+      },
+      "params": {},
+      "perturbation": null,
+      "prep_policy": 3,
+      "schema_version": 1,
+      "seeds": {
+        "split": 1886352030
+      },
+      "split": {
+        "seed": 1886352030,
+        "test_frac": 0.2,
+        "unit": "patient"
+      },
+      "status": "ready",
+      "train": {
+        "num_boost_round": 1000,
+        "params": {
+          "eval_metric": "logloss",
+          "learning_rate": 0.05,
+          "max_depth": 8,
+          "objective": "binary:logistic",
+          "seed": 42,
+          "tree_method": "hist"
+        }
+      },
+      "warnings": [],
+      "workload": "panel"
+    },
+    "exact_sums": {
+      "forests": {
+        "exact_sums_off": {
+          "exact_sums": false,
+          "load": [],
+          "max_group_width": 8
+        }
+      },
+      "setting": false
+    },
+    "excluded": [
+      {
+        "method": "quickscorer",
+        "reason": "unsupported: tree 0 has 196 leaves; QuickScorer takes 128",
+        "variant": "-"
+      }
+    ],
+    "groups": 1774,
+    "id": "support/nt1000_md8_h8/xgboost/panel",
+    "load_seconds": {
+      "exact_sums_off": 0.015085002
+    },
+    "methods": [
+      {
+        "candidates": [
+          "predict_group"
+        ],
+        "interface_one_row": "predict_group",
+        "interfaces": {
+          "serving": "predict_group"
+        },
+        "method": "treewalker",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_group"
+        ],
+        "variant": "all-on"
+      },
+      {
+        "candidates": [
+          "predict_full_walk"
+        ],
+        "interface_one_row": "predict_full_walk",
+        "interfaces": {
+          "serving": "predict_full_walk"
+        },
+        "method": "treewalker_fullwalk",
+        "precision": "F64",
+        "settings": null,
+        "tolerance": 1e-13,
+        "validated": [
+          "predict_full_walk"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "interface_one_row": "predict",
+        "interfaces": {
+          "serving": "predict loop"
+        },
+        "method": "tl2cgen",
+        "precision": "F32",
+        "settings": null,
+        "tolerance": 1e-05,
+        "validated": [
+          "DMatrixCreateFromMat+PredictBatch",
+          "predict loop"
+        ],
+        "variant": "-"
+      },
+      {
+        "candidates": [
+          "PredictFromDense",
+          "PredictFromDense 1-row loop"
+        ],
+        "interface_one_row": "PredictFromDense",
+        "interfaces": {
+          "serving": "PredictFromDense 1-row loop"
+        },
+        "method": "xgboost_native",
+        "precision": "F32",
+        "settings": {
+          "learner": {
+            "generic_param": {
+              "device": "cpu",
+              "fail_on_invalid_gpu_id": "0",
+              "n_jobs": "1",
+              "nthread": "1",
+              "random_state": "0",
+              "seed": "0",
+              "seed_per_iteration": "0",
+              "validate_parameters": "0"
+            },
+            "gradient_booster": {
+              "dart_train_param": {
+                "normalize_type": "tree",
+                "one_drop": "0",
+                "rate_drop": "0",
+                "sample_type": "uniform",
+                "skip_drop": "0"
+              },
+              "gbtree_model_param": {
+                "num_parallel_tree": "1",
+                "num_trees": "1000"
+              },
+              "gbtree_train_param": {
+                "process_type": "default",
+                "tree_method": "auto",
+                "updater": "grow_quantile_histmaker",
+                "updater_seq": "grow_quantile_histmaker"
+              },
+              "name": "gbtree",
+              "specified_updater": false,
+              "tree_train_param": {
+                "alpha": "0",
+                "colsample_bylevel": "1",
+                "colsample_bynode": "1",
+                "colsample_bytree": "1",
+                "eta": "0.300000012",
+                "gamma": "0",
+                "grow_policy": "depthwise",
+                "interaction_constraints": "",
+                "lambda": "1",
+                "learning_rate": "0.300000012",
+                "max_bin": "256",
+                "max_cat_threshold": "64",
+                "max_cat_to_onehot": "4",
+                "max_delta_step": "0",
+                "max_depth": "6",
+                "max_leaves": "0",
+                "min_child_weight": "1",
+                "min_split_loss": "0",
+                "monotone_constraints": "()",
+                "refresh_leaf": "1",
+                "reg_alpha": "0",
+                "reg_lambda": "1",
+                "sampling_method": "uniform",
+                "sparse_threshold": "0.20000000000000001",
+                "subsample": "1"
+              },
+              "updater": [
+                {
+                  "hist_train_param": {
+                    "debug_synchronize": "0",
+                    "max_cached_hist_node": "18446744073709551615"
+                  },
+                  "name": "grow_quantile_histmaker"
+                }
+              ]
+            },
+            "learner_model_param": {
+              "base_score": "[1.2253934E-1]",
+              "boost_from_average": "1",
+              "num_class": "0",
+              "num_feature": "20",
+              "num_target": "1"
+            },
+            "learner_train_param": {
+              "booster": "gbtree",
+              "disable_default_eval_metric": "0",
+              "multi_strategy": "one_output_per_tree",
+              "objective": "binary:logistic"
+            },
+            "metrics": [],
+            "objective": {
+              "name": "binary:logistic",
+              "reg_loss_param": {
+                "scale_pos_weight": "1"
+              }
+            }
+          },
+          "version": [
+            3,
+            4,
+            1
+          ]
+        },
+        "tolerance": 1e-05,
+        "validated": [
+          "PredictFromDense",
+          "PredictFromDense 1-row loop"
+        ],
+        "variant": "-"
+      }
+    ],
+    "model": {
+      "bitset_bytes": 0,
+      "exact_sums": false,
+      "nodes": 200860,
+      "threshold_type": "F32",
+      "trees": 1000
+    },
+    "model_bytes": 15210837,
+    "required_methods": [
+      "treewalker",
+      "treewalker_fullwalk",
+      "xgboost_native"
+    ],
+    "resume_key": "9459527af42c325b70394d8eb8084d2d2b7fc6e7eae871727bd7ac8ab5a80067",
+    "rows": 14192,
+    "run": {
+      "batch_rows": 1024,
+      "exact_sums": false,
+      "fresh_process": true,
+      "hardware_counters": true,
+      "max_rounds": 12,
+      "max_rows_per_round": 65536,
+      "min_groups_per_round": 200,
+      "min_rounds": 12,
+      "mode_budget_secs": 120.0,
+      "precision_pct": 1.0,
+      "seed": 42,
+      "sentinel_cell": "support/nt500_md4_h16/lightgbm/panel",
+      "sentinel_drift_pct": 2.0,
+      "sentinel_every": 25,
+      "target_batches": 12,
+      "xgboost_process_arches": [
+        "x86_64"
+      ],
+      "xgboost_processes": 6
+    },
+    "sample": null,
+    "seconds": 69.000164486,
+    "stop": {
+      "serving": {
+        "blocks": 144,
+        "blocks_per_round": 12,
+        "conversion": [],
+        "cycle": 2,
+        "failures": [],
+        "incomplete_reads": 0,
+        "probes": [
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "PredictFromDense",
+                "ticks": 1182450772
+              },
+              {
+                "interface": "PredictFromDense 1-row loop",
+                "ticks": 612352364
+              }
+            ],
+            "chosen": "PredictFromDense 1-row loop",
+            "margin_pct": 93.09973170937249,
+            "method": "xgboost_native",
+            "rows": 1176,
+            "variant": "-"
+          },
+          {
+            "batch": 11,
+            "candidates": [
+              {
+                "interface": "DMatrixCreateFromMat+PredictBatch",
+                "ticks": 208043932
+              },
+              {
+                "interface": "predict loop",
+                "ticks": 200179328
+              }
+            ],
+            "chosen": "predict loop",
+            "margin_pct": 3.928779299329044,
+            "method": "tl2cgen",
+            "rows": 1176,
+            "variant": "-"
+          }
+        ],
+        "reason": "precision",
+        "rounds": 12,
+        "rse_pct": {
+          "tl2cgen/-": 0.013011202476034543,
+          "treewalker/all-on": 0.03963069156332739,
+          "treewalker_fullwalk/-": 0.011825335979544646,
+          "xgboost_native/-": 0.38998675311073805
+        },
+        "seconds": 38.544720244,
+        "totals": {
+          "tl2cgen/-": [
+            14662789942,
+            170304
+          ],
+          "treewalker/all-on": [
+            6388717424,
+            170304
+          ],
+          "treewalker_fullwalk/-": [
+            12795231250,
+            170304
+          ],
+          "xgboost_native/-": [
+            44730932990,
+            170304
+          ]
+        }
+      }
+    },
+    "suite": "camera-ready",
+    "timed_groups": 1774,
+    "validation": {
+      "checks": [
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 0.0,
+          "variant": "all-on"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_group",
+          "max_abs": 0.0,
+          "method": "treewalker",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.6634285424055993e-11,
+          "variant": "all-on"
+        },
+        {
+          "against": "full walk exact_sums_off",
+          "bitwise": true,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 0.0,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict_full_walk",
+          "max_abs": 0.0,
+          "method": "treewalker_fullwalk",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1.6634285424055993e-11,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "DMatrixCreateFromMat+PredictBatch",
+          "max_abs": 1.516541822343953e-06,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "predict loop",
+          "max_abs": 1.516541822343953e-06,
+          "method": "tl2cgen",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictFromDense",
+          "max_abs": 8.185091568968517e-07,
+          "method": "xgboost_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1e-05,
+          "variant": "-"
+        },
+        {
+          "against": "predict",
+          "bitwise": false,
+          "interface": "PredictFromDense 1-row loop",
+          "max_abs": 8.185091568968517e-07,
+          "method": "xgboost_native",
+          "mismatches": 0,
+          "mode": "serving",
+          "passed": true,
+          "rows": 14192,
+          "tolerance": 1e-05,
+          "variant": "-"
+        }
+      ],
+      "groups": 1774,
+      "oracle": {
+        "exact_sums": false,
+        "groups": 64,
+        "output_vs_predict": {
+          "mismatches": 0
+        },
+        "raw_margin": {
+          "bitwise": false,
+          "max_abs": 0.0,
+          "mismatches": 0
+        },
+        "rows": 512,
+        "status": "pass",
+        "tree_sum": {
+          "bitwise": false,
+          "max_abs": 0.0,
+          "mismatches": 0
+        }
+      },
+      "reference": {
+        "max_abs_vs_predict": 8.185091568968517e-07,
+        "note": "prepare's reference: GTIL for LightGBM, native XGBoost; informational",
+        "rows": 14192
+      }
+    },
+    "xgboost_processes": {
+      "arch": "x86_64",
+      "count": 6,
+      "processes": [
+        {
+          "mode": "serving",
+          "process": 0,
+          "rows": 170304,
+          "status": "ok",
+          "ticks": 44730932990,
+          "ticks_per_row": 262653.4490675498
+        },
+        {
+          "mode": "serving",
+          "process": 1,
+          "rows": 14192,
+          "status": "ok",
+          "ticks": 3735623630,
+          "ticks_per_row": 263220.37979143177
+        },
+        {
+          "mode": "serving",
+          "process": 2,
+          "rows": 14192,
+          "status": "ok",
+          "ticks": 3782675208,
+          "ticks_per_row": 266535.7390078918
+        },
+        {
+          "mode": "serving",
+          "process": 3,
+          "rows": 14192,
+          "status": "ok",
+          "ticks": 3805794156,
+          "ticks_per_row": 268164.75169109355
+        },
+        {
+          "mode": "serving",
+          "process": 4,
+          "rows": 14192,
+          "status": "ok",
+          "ticks": 3831501618,
+          "ticks_per_row": 269976.15684892895
+        },
+        {
+          "mode": "serving",
+          "process": 5,
+          "rows": 14192,
+          "status": "ok",
+          "ticks": 3726389892,
+          "ticks_per_row": 262569.75
+        },
+        {
+          "mode": "serving",
+          "process": 6,
+          "rows": 14192,
+          "status": "ok",
+          "ticks": 3660437676,
+          "ticks_per_row": 257922.60963923336
+        }
+      ]
+    }
+  }
+}

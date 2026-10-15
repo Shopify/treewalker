@@ -1,46 +1,27 @@
-//! Errors returned by the validated import APIs.
-use std::{fmt, io};
+//! Errors returned by the import APIs.
+use std::io;
 
-#[derive(Debug)]
 /// Failure to read, validate, or represent a model or grouping configuration.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum LoadError {
     /// An underlying reader or file operation failed.
-    Io(io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
     /// The model is truncated, inconsistent, or syntactically invalid.
+    #[error("malformed model: {0}")]
     MalformedModel(String),
     /// The grouping configuration violates its schema or feature contract.
+    #[error("malformed grouping configuration: {0}")]
     MalformedConfig(String),
     /// Valid or recognizable metadata requests unsupported model semantics.
+    #[error("unsupported model capability: {0}")]
     Unsupported(String),
     /// An import budget or compact representation limit was exceeded.
+    #[error("import limit exceeded: {0}")]
     Limit(String),
 }
 
-impl fmt::Display for LoadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "I/O error: {e}"),
-            Self::MalformedModel(s) => write!(f, "malformed model: {s}"),
-            Self::MalformedConfig(s) => write!(f, "malformed grouping configuration: {s}"),
-            Self::Unsupported(s) => write!(f, "unsupported model capability: {s}"),
-            Self::Limit(s) => write!(f, "import limit exceeded: {s}"),
-        }
-    }
-}
-impl std::error::Error for LoadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        if let Self::Io(e) = self {
-            Some(e)
-        } else {
-            None
-        }
-    }
-}
-impl From<io::Error> for LoadError {
-    fn from(e: io::Error) -> Self {
-        Self::Io(e)
-    }
-}
 impl LoadError {
     pub(crate) fn at(self, context: &str) -> Self {
         match self {
