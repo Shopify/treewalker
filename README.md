@@ -13,7 +13,8 @@ and the cloud setup used for them.
 
 The measurements here are the 2.0 engine's final run (October 2026). The
 paper as submitted, its engine, its result CSVs and the scripts that read them
-are preserved under the `neurips2026` tag.
+are preserved under the `neurips2026` tag; the camera-ready paper's code,
+measurements and figure code are under `neurips2026-final`.
 
 This repository serves two purposes: as a source for the library and as a
 permanent archive of the code at time of submission. The latter can always be
@@ -171,8 +172,8 @@ The factorial suite also prepares two kinds of derived models
 ## Released results
 
 `experiments/data/runs/` holds the camera-ready campaign (2026-10-11 to 13, exact
-sums off, at `e721bb8`) and the final run's factorial and ablation runs
-(2026-10-09 and 10, exact sums on, at `913fd70`), one directory per run ID, packed
+sums off) and the final run's factorial and ablation runs (2026-10-09 and 10,
+exact sums on), one directory per run ID, packed
 with `treewalker-exp pack`: `run.json` (configuration, host, timer, sentinel and
 the order cells ran in), `cells.json` (each cell's manifest: its sample,
 validation, stopping, probes and XGBoost's processes), the `samples`, `groups`,
@@ -197,11 +198,11 @@ older runs.
 
 `experiments/data/retime/` holds each re-time run's manifest and script. The
 final run's acceptance and layout runs, which share their IDs with the
-camera-ready ones, are in the history at `e721bb8`.
+camera-ready ones, are in the history at `134f556`.
 
 `experiments/data/precision/{intel,arm}/` holds App. A.3's measurements, taken
-on the campaign's machine types (2026-10-13, at `6ba9f01`, the `precision`
-diagnostic): `precision_order.json`, `sweep_bench precision-order` over every
+on the campaign's machine types (2026-10-13, the `precision` diagnostic):
+`precision_order.json`, `sweep_bench precision-order` over every
 camera-ready LightGBM cell (tree ordering on against off with exact sums off,
 and both against prepare's GTIL reference); `audit_f32.md`, `audit-f32` with
 native XGBoost's margins from the library the campaign timed
@@ -411,7 +412,7 @@ T=500, L=8) took 1.26-1.29x the default's latency at G=128 on Intel and 1.59-1.6
 on Arm, 1.25-1.28x and 1.40-1.45x at G=64, 1.10-1.15x and 1.13-1.15x at G=16,
 1.02-1.06x and 0.99-1.02x at G=4, and 0.98-0.99x and 0.96-0.97x on Expedia's
 sessions, where exact sums are the slower. Each mode times at least 4
-rounds (`min_rounds = 4`), one full forward and reversed order cycle. The suites,
+rounds (`min_rounds = 4`), two full forward-and-reversed order cycles. The suites,
 in `grids.toml`, each set both in their own run table, so `factorial` and
 `ablation` keep their defaults:
 
