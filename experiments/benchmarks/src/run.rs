@@ -132,32 +132,21 @@ pub fn binary_sha256() -> String {
         .unwrap_or_default()
 }
 
-/// The resolved source commit: an `export-subst` file in archives, else git.
-pub fn source_commit(repo_hint: &Path) -> Value {
-    for dir in repo_hint.ancestors() {
-        let file = dir.join("experiments/SOURCE_COMMIT");
-        if let Ok(s) = std::fs::read_to_string(&file) {
-            let s = s.trim();
-            if !s.starts_with("$Format") && !s.is_empty() {
-                return json!({"commit": s, "from": "experiments/SOURCE_COMMIT (git archive)"});
-            }
-            let git = |args: &[&str]| {
-                std::process::Command::new("git")
-                    .args(args)
-                    .current_dir(dir)
-                    .output()
-                    .ok()
-                    .filter(|o| o.status.success())
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            };
-            return json!({
-                "commit": git(&["rev-parse", "HEAD"]),
-                "dirty": git(&["status", "--porcelain"]).is_some_and(|s| !s.is_empty()),
-                "from": "git",
-            });
-        }
+/// The source commit this executable was built from.
+///
+/// `build.rs` reads it from an `export-subst` file in archives, else from git,
+/// with whether the compiled sources differed from it. The manifest's own source
+/// is recorded apart, under `manifest`.
+pub fn source_commit() -> Value {
+    let commit = env!("TW_SOURCE_COMMIT");
+    if commit.is_empty() {
+        return Value::Null;
     }
-    Value::Null
+    json!({
+        "commit": commit,
+        "dirty": env!("TW_SOURCE_DIRTY") == "true",
+        "from": env!("TW_SOURCE_FROM"),
+    })
 }
 
 /// The measurement domain of a run.
@@ -301,7 +290,6 @@ pub fn header(
     ctx: &Context,
     manifest: Option<&Manifest>,
     opts: &Options,
-    repo: &Path,
 ) -> Result<(Value, Vec<u64>)> {
     let (cal, overhead) = timer::calibrate(200, 100_000);
     let amortized = timer::amortized_check(20_000, cal.overhead.p50);
@@ -323,7 +311,7 @@ pub fn header(
                 "suite": m.suite, "grids_sha256": m.grids_sha256, "source": m.source,
                 "artifacts_dir": m.artifacts_dir, "cells": m.cells.len(),
             })),
-            "source": source_commit(repo),
+            "source": source_commit(),
             "binary_sha256": binary_sha256(),
             "host": system::host(),
             "system_info": system_info,
@@ -381,7 +369,7 @@ pub fn run(
             .map(|r| (r.path.clone(), r.sha256.clone())),
         opts,
     )?;
-    let (header, overhead) = header(&ctx, Some(&manifest), opts, manifest_path)?;
+    let (header, overhead) = header(&ctx, Some(&manifest), opts)?;
     let started = header["started"].clone();
     let mut header = open_run(run_dir, header, &overhead)?;
     // Every cell must have its own output directory.

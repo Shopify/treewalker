@@ -276,7 +276,7 @@ fn real_main() -> Result<bool> {
                 &opts,
             )?;
             // The same output contract as run: run.json and timer.parquet.
-            let (header, overhead) = run::header(&ctx, None, &opts, &cell_dir)?;
+            let (header, overhead) = run::header(&ctx, None, &opts)?;
             let header = run::open_run(&output_dir, header, &overhead)?;
             let doc: Value =
                 serde_json::from_str(&std::fs::read_to_string(cell_dir.join("cell.json"))?)?;
