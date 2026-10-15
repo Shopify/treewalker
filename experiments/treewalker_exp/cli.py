@@ -655,7 +655,9 @@ def check_run(
     ],
     released_e1: Annotated[
         Path | None,
-        typer.Option(help="E1's released Intel CSV (default: from git, the neurips2026 tag)."),
+        typer.Option(
+            help="E1's released Intel CSV (default: from git, the neurips2026-submission tag)."
+        ),
     ] = None,
     exact_sums: Annotated[
         str | None,

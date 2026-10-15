@@ -13,12 +13,12 @@ and the cloud setup used for them.
 
 The measurements here are the 2.0 engine's final run (October 2026). The
 paper as submitted, its engine, its result CSVs and the scripts that read them
-are preserved under the `neurips2026` tag; the camera-ready paper's code,
+are preserved under the `neurips2026-submission` tag; the camera-ready paper's code,
 measurements and figure code are under `neurips2026-final`.
 
 This repository serves two purposes: as a source for the library and as a
 permanent archive of the code at time of submission. The latter can always be
-found [under the neurips2026 tag](https://github.com/Shopify/treewalker/releases/tag/neurips2026).
+found [under the neurips2026-submission tag](https://github.com/Shopify/treewalker/releases/tag/neurips2026-submission).
 
 ## Layout
 
@@ -198,7 +198,7 @@ older runs.
 
 `experiments/data/retime/` holds each re-time run's manifest and script. The
 final run's acceptance and layout runs, which share their IDs with the
-camera-ready ones, are in the history at `134f556`.
+camera-ready ones, are in the history at `2562892`.
 
 `experiments/data/precision/{intel,arm}/` holds App. A.3's measurements, taken
 on the campaign's machine types (2026-10-13, the `precision` diagnostic):
@@ -265,7 +265,7 @@ installs, were built from source for the host, and TreeWalker with
 `-C target-cpu=native` and Rust 1.97.1 (`rust-toolchain.toml`). Each
 `run.json` records the rest (`host`, `system_info`).
 `infra/scripts/startup.sh` is the full machine recipe. The paper's
-measurements (the `neurips2026` tag) ran on the same machine types in
+measurements (the `neurips2026-submission` tag) ran on the same machine types in
 `us-central1-a`.
 
 ### On GCE with Terraform
@@ -294,7 +294,7 @@ fingerprint before training. Terraform uploads `git archive` of `var.git_ref`
 to a new bucket. `git_ref` is a full 40-character commit SHA, which Terraform
 checks: the archive, the VMs and the model hand-over are named after it, so a
 moving branch would keep the old source. It has no default: it must contain `experiments/` and
-`treewalker-exp`, which the `neurips2026` tag predates. The Intel VM trains the models and shares them, so both machines
+`treewalker-exp`, which the `neurips2026-submission` tag predates. The Intel VM trains the models and shares them, so both machines
 evaluate identical models, checked by hash. Results land in the bucket under
 `results/`.
 

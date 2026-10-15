@@ -16,7 +16,7 @@ native equals the reference rounded to f32 (the best an f32 result can do). A ru
 without the stages table, or whose cell was prepared from another oracle than the
 local one, contributes no TreeWalker comparison and says so.
 
-v1's audit (audit_f32.py at the neurips2026 tag) summed the leaves itself in f32,
+v1's audit (audit_f32.py at the neurips2026-submission tag) summed the leaves itself in f32,
 f64 and Kahan-compensated f64; this one compares the libraries' actual outputs.
 One cell per XGBoost model is audited, the first in ID order, on the oracle's rows
 (whole groups, up to 512 rows).

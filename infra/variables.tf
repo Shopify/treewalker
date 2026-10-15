@@ -11,7 +11,7 @@ variable "zone" {
 
 variable "git_ref" {
   # No default: the startup script needs experiments/ and treewalker-exp, which
-  # the neurips2026 tag predates. A full commit SHA only: the source archive, the
+  # the neurips2026-submission tag predates. A full commit SHA only: the source archive, the
   # VMs and the model hand-over are named after it, so a branch that moves would
   # keep the old source, and a branch name's slash breaks the hand-over marker.
   description = "Full 40-character commit SHA to benchmark (git rev-parse HEAD); it must contain experiments/ and treewalker-exp"
