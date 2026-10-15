@@ -4,7 +4,7 @@ fn test_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("TEST_ARTIFACTS").unwrap_or_else(|_| {
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../paper/experiments/artifacts/expedia/nt50_md8"
+            "/../paper/experiments/artifacts/expedia/nt500_md8"
         )
         .into()
     }))
@@ -22,7 +22,7 @@ fn test_load_walker_config() {
         return;
     }
     let config = WalkerConfig::from_file(&config_path);
-    // Expedia nt50_md8 (a factorial-grid config): 21 features, 10 varying
+    // Expedia nt500_md8 (a factorial-grid config): 21 features, 10 varying
     // (indices 11-20), widest test session 37 rows.
     assert_eq!(config.n_features, 21);
     assert_eq!(config.max_group_width, 37);
