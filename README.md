@@ -439,7 +439,8 @@ margins, and both orderings' outputs with the cell's GTIL reference
 
 `check-run` exits non-zero when a validity gate fails, and fails closed: the
 run's tables missing, a failed cell or sentinel attempt that no later attempt of
-the same cell, or of the sentinel's role, resolved (resolved failures stay in the
+the same cell (in the order of `run.json`'s invocations, each failure in
+`failed/` recording its invocation), or of the sentinel's role, resolved (resolved failures stay in the
 data and are listed), a cell whose stage oracle
 did not pass, a required method not timed, a timed interface without a passing
 check on the timed rows, process 0's samples not covering the timed groups in

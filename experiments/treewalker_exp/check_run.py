@@ -5,8 +5,9 @@ one fails):
 
 - the run's tables are present (``stages`` from output schema 6);
 - no failed cell: every cell of the manifest finished, and every failed attempt
-  of a cell (``failed/``) or of a sentinel was followed by a successful attempt
-  of the same cell or sentinel; the resolved failures are listed, not gated;
+  of a cell (``failed/`` or an invocation's ``cells_failed``) or of a sentinel was
+  followed by a successful attempt of the same cell or sentinel, in invocation
+  order for a cell (`open_failures`); the resolved failures are listed, not gated;
 - every method validated on its timed groups, failing closed: per cell (and per
   sentinel cell), a passing nonempty stage oracle, every required method timed,
   each timed method and mode with a passing check of the interface it timed on
@@ -325,19 +326,47 @@ def _listed(lines: list[str], what: str, bad: dict[str, list[str]]) -> None:
         lines.append(f"       {cell}: {'; '.join(f)}")
 
 
-def open_failures(run: Path, cells: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """The run's failed cells (``failed/<cell>.json``), split into the open ones and
-    those resolved by a later attempt of the same cell that finished (it is in
-    cells.json). Every failed attempt stays in the data; only open ones gate."""
-    open_: list[str] = []
-    resolved: list[str] = []
+def open_failures(
+    run: Path, info: dict[str, Any], cells: dict[str, Any]
+) -> tuple[list[str], list[str]]:
+    """The run's failed cells, split into the open ones and those resolved by a
+    later attempt of the same cell that finished (and is in cells.json), in
+    invocation order. ``run.json`` lists each invocation's outcomes in order
+    (``cells_done``, reused cells included, and ``cells_failed``), and
+    ``failed/<cell>.json``, the cell's latest refused attempt, records the
+    invocation it ran in. An invocation cut short is not listed, so the next one
+    has its index: a ``failed/`` record from invocation K is resolved by the cell
+    finishing in invocation K or later, a failure listed in invocation K by its
+    finishing after K. A record without its invocation counts from the last
+    invocation that listed the cell's failure, and is open when none did. A
+    failure only an invocation lists (a cell that errored without writing to
+    ``failed/``) is named ``ID (invocation K)``. Every failed attempt stays in the
+    data; only open ones gate."""
+    done: dict[str, int] = {}
+    # Per cell, the first invocation in which finishing it resolves its listed failures.
+    after: dict[str, int] = {}
+    for k, inv in enumerate(info.get("invocations") or []):
+        done |= {c.get("id"): k for c in inv.get("cells_done") or []}
+        after |= {c.get("id"): k + 1 for c in inv.get("cells_failed") or []}
+    failures: list[tuple[str, Any, int | None]] = []
     d = run / "failed"
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
         try:
-            cid = fm.read_json(p).get("id")
-        except OSError, ValueError:
-            cid = None
-        (resolved if cid in cells else open_).append(p.name)
+            doc = fm.read_json(p)
+            cid, at = doc.get("id"), doc.get("invocation")
+        except OSError, ValueError, AttributeError:
+            cid, at = None, None
+        listed = after.get(cid)
+        failures.append((p.name, cid, listed if at is None else max(at, listed or 0)))
+    in_failed = {cid for _, cid, _ in failures}
+    failures += [
+        (f"{cid} (invocation {a - 1})", cid, a) for cid, a in after.items() if cid not in in_failed
+    ]
+    open_: list[str] = []
+    resolved: list[str] = []
+    for name, cid, start in failures:
+        ok = start is not None and cid in cells and done.get(cid, -1) >= start
+        (resolved if ok else open_).append(name)
     return open_, resolved
 
 
@@ -371,7 +400,7 @@ def completeness(run: Path) -> list[str]:
         return [f"{state}, not packed"]
     info = fm.read_json(run / "run.json")
     cells = fm.read_json(run / "cells.json")
-    failed, _ = open_failures(run, cells)
+    failed, _ = open_failures(run, info, cells)
     expected = (info.get("manifest") or {}).get("cells")
     missing = 0 if expected is None else expected - len(cells)
     bad, _ = open_sentinel_failures((info.get("sentinel") or {}).get("records") or [])
@@ -399,7 +428,7 @@ def gates(run: Path, expect_exact_sums: bool | None = None) -> tuple[list[str], 
         return lines, False
     lines.append(f"  ok   tables present ({', '.join(names)}; output schema {schema})")
     cells = fm.read_json(run / "cells.json")
-    failed, resolved = open_failures(run, cells)
+    failed, resolved = open_failures(run, info, cells)
     expected = (info.get("manifest") or {}).get("cells")
     missing = 0 if expected is None else expected - len(cells)
     sentinels = (info.get("sentinel") or {}).get("records") or []
@@ -407,7 +436,7 @@ def gates(run: Path, expect_exact_sums: bool | None = None) -> tuple[list[str], 
     if failed or missing > 0 or bad_sentinels or not cells:
         ok = False
         lines.append(
-            f"  FAIL failed cells: {len(failed)} in failed/ ({', '.join(failed[:5])}"
+            f"  FAIL failed cells: {len(failed)} unresolved ({', '.join(failed[:5])}"
             f"{', ...' if len(failed) > 5 else ''}); {max(missing, 0)} of {expected} cells "
             f"missing from cells.json; {len(bad_sentinels)} sentinel attempts not ok"
         )

@@ -47,6 +47,9 @@ pub struct Context {
     /// Interfaces to time instead of probing, by method and mode: the sentinel
     /// keeps its first run's choices, so drift never mixes in an interface change.
     pub interface_override: BTreeMap<String, BTreeMap<String, String>>,
+    /// This invocation's index in `run.json`'s `invocations`, which the runner
+    /// appends at its end; a failure in `failed/` records it.
+    pub invocation: usize,
 }
 
 /// A method or variant that is not timed, and why.
@@ -1868,6 +1871,7 @@ pub fn xgboost_process(request: &Value) -> Result<Value> {
         process,
         timing_began: 0,
         interface_override: BTreeMap::new(),
+        invocation: 0,
     };
     let (mut samples, mut hw) = (output::samples_table(), output::hw_table());
     let mut stops = serde_json::Map::new();
@@ -1954,12 +1958,20 @@ pub struct CellOutcome {
 }
 
 /// A cell that may not be published as a completed measurement. Its diagnostics
-/// go to `<run_dir>/failed/<cell>.json`, never into `cells/`.
-fn refuse(run_dir: &Path, cell_id: &str, reason: &str, diagnostics: &Value) -> anyhow::Error {
+/// go to `<run_dir>/failed/<cell>.json`, never into `cells/`, with the invocation
+/// it failed in, so a later attempt that finished can be told from an earlier one.
+fn refuse(
+    run_dir: &Path,
+    invocation: usize,
+    cell_id: &str,
+    reason: &str,
+    diagnostics: &Value,
+) -> anyhow::Error {
     let name = Cell::slug(cell_id).unwrap_or_else(|_| "unsafe-cell-id".into());
     let dir = run_dir.join("failed");
     let written = std::fs::create_dir_all(&dir).and_then(|()| {
-        let doc = json!({"id": cell_id, "reason": reason, "diagnostics": diagnostics});
+        let doc = json!({"id": cell_id, "invocation": invocation, "reason": reason,
+                         "diagnostics": diagnostics});
         std::fs::write(dir.join(format!("{name}.json")), doc.to_string())
     });
     match written {
@@ -1991,7 +2003,13 @@ pub fn run_cell(
     let cell = Cell::load(cell_dir).with_context(|| format!("loading {}", cell_dir.display()))?;
     cell.verify_files()?;
     if timing && let Err(e) = crate::run::check_entry(mc, &cell.doc) {
-        return Err(refuse(run_dir, &mc.id, &format!("{e:#}"), &Value::Null));
+        return Err(refuse(
+            run_dir,
+            ctx.invocation,
+            &mc.id,
+            &format!("{e:#}"),
+            &Value::Null,
+        ));
     }
     let cfg = ctx.config.clone();
     let max_rows = cfg.batch_rows.max(cell.max_group_rows());
@@ -2017,7 +2035,7 @@ pub fn run_cell(
     let vgroups = Gathered::new(&cell, order);
     if let Some(reason) = loaded.exact_sums_mismatch() {
         let diag = json!({"exact_sums": cfg.exact_sums, "forests": loaded.records});
-        return Err(refuse(run_dir, &cell.id, &reason, &diag));
+        return Err(refuse(run_dir, ctx.invocation, &cell.id, &reason, &diag));
     }
     let mut stages_t = output::stages_table();
     let oracle = check_oracle(&cell, loaded.base(), &ctx.suite, &mut stages_t)?;
@@ -2025,6 +2043,7 @@ pub fn run_cell(
     if timing && !oracle_ok {
         return Err(refuse(
             run_dir,
+            ctx.invocation,
             &cell.id,
             "the stage oracle did not pass",
             &oracle,
@@ -2058,11 +2077,17 @@ pub fn run_cell(
     if timing && !missing.is_empty() {
         let diag = json!({"checks": checks, "excluded": loaded.excluded, "oracle": oracle});
         let reason = format!("required methods failed to load or validate: {missing:?}");
-        return Err(refuse(run_dir, &cell.id, &reason, &diag));
+        return Err(refuse(run_dir, ctx.invocation, &cell.id, &reason, &diag));
     }
 
     if timing && timed_groups.is_empty() {
-        return Err(refuse(run_dir, &cell.id, "no groups to time", &Value::Null));
+        return Err(refuse(
+            run_dir,
+            ctx.invocation,
+            &cell.id,
+            "no groups to time",
+            &Value::Null,
+        ));
     }
     let mut is_timed = vec![false; cell.n_groups()];
     for &g in &timed_groups {
@@ -2116,7 +2141,13 @@ pub fn run_cell(
     if ctx.require_pmu && incomplete_reads > 0 {
         let reason =
             format!("{incomplete_reads} blocks' hardware counters were multiplexed or not read");
-        return Err(refuse(run_dir, &cell.id, &reason, &Value::Object(stops)));
+        return Err(refuse(
+            run_dir,
+            ctx.invocation,
+            &cell.id,
+            &reason,
+            &Value::Object(stops),
+        ));
     }
     // A method that failed during timing loses its whole measurement, both modes.
     if !failed_timing.is_empty() {
@@ -2141,6 +2172,7 @@ pub fn run_cell(
             let reason = format!("required method {r} failed during timing");
             return Err(refuse(
                 run_dir,
+                ctx.invocation,
                 &cell.id,
                 &reason,
                 &json!({"failures": failed_timing}),
@@ -2557,6 +2589,7 @@ mod timing_tests {
             process: 0,
             timing_began: 0,
             interface_override: BTreeMap::new(),
+            invocation: 0,
         }
     }
 

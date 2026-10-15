@@ -123,6 +123,7 @@ pub fn context(
         process: 0,
         timing_began: 0,
         interface_override: std::collections::BTreeMap::new(),
+        invocation: 0,
     })
 }
 
@@ -374,6 +375,7 @@ pub fn run(
     let (header, overhead) = header(&ctx, Some(&manifest), opts)?;
     let started = header["started"].clone();
     let mut header = open_run(run_dir, header, &overhead)?;
+    ctx.invocation = header["invocations"].as_array().map_or(0, Vec::len);
     // Every cell must have its own output directory.
     let mut names = std::collections::BTreeMap::new();
     for c in &manifest.cells {
@@ -496,6 +498,7 @@ struct CellRequest {
     tl2cgen_override: Option<PathBuf>,
     require_pmu: bool,
     interface_override: BTreeMap<String, BTreeMap<String, String>>,
+    invocation: usize,
     cell: ManifestCell,
     cell_dir: PathBuf,
     out_dir: PathBuf,
@@ -537,6 +540,7 @@ pub fn time_cell(
         tl2cgen_override: ctx.tl2cgen_override.clone(),
         require_pmu: ctx.require_pmu,
         interface_override: ctx.interface_override.clone(),
+        invocation: ctx.invocation,
         cell: mc.clone(),
         cell_dir: cell_dir.to_path_buf(),
         out_dir: out_dir.to_path_buf(),
@@ -589,6 +593,7 @@ pub fn cell_process(request: &Path, result: &Path) -> Result<()> {
     };
     let mut ctx = context(&r.suite, r.config, &r.natives, r.tl2cgen_runtime, &opts)?;
     ctx.interface_override = r.interface_override;
+    ctx.invocation = r.invocation;
     eprintln!("    (in process {})", std::process::id());
     let outcome = driver::run_cell(&mut ctx, &r.cell, &r.cell_dir, &r.out_dir, &r.key, true);
     let doc = CellResult {

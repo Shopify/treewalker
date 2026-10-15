@@ -164,7 +164,7 @@ def test_gates_pass_and_fail(tmp_path):
     lines, ok = cr.gates(write_run(other, {"a/c": bad}, failed=["b_c.json"]))
     assert not ok
     text = "\n".join(lines)
-    assert "FAIL failed cells: 1 in failed/" in text and "FAIL exact sums (False): 1 cells" in text
+    assert "FAIL failed cells: 1 unresolved" in text and "FAIL exact sums (False): 1 cells" in text
     # A runner older than schema 6, without the setting: said, not gated, outside
     # the paper's suites.
     old = tmp_path / "old"
@@ -421,21 +421,72 @@ def test_batch_rounds_cover_the_timed_groups_count_and_rows(tmp_path):
     assert any("calls cover 3 groups" in f for f in got["a/c"])
 
 
+def invocations(run, *attempts):
+    """Record one invocation per ``(done, failed)`` pair of cell-ID lists."""
+    info = fm.read_json(run / "run.json")
+    info["invocations"] = [
+        {"cells_done": [{"id": c} for c in done], "cells_failed": [{"id": c} for c in failed]}
+        for done, failed in attempts
+    ]
+    fm.write_json(run / "run.json", info)
+
+
 def test_a_failure_a_later_attempt_resolved_is_listed_not_gated(tmp_path):
     d = tmp_path / "resolved"
     d.mkdir()
     run = write_run(d, {"a/c": cell()})
     (run / "failed").mkdir()
-    # The cell failed once and finished on a later attempt: it is in cells.json.
-    fm.write_json(run / "failed" / "a_2fc.json", {"id": "a/c", "reason": "oracle"})
+    # The cell failed in invocation 0 and finished in invocation 1.
+    invocations(run, ([], ["a/c"]), (["a/c"], []))
+    fm.write_json(run / "failed" / "a_2fc.json", {"id": "a/c", "invocation": 0, "reason": "x"})
     lines, ok = cr.gates(run)
     text = "\n".join(lines)
     assert ok, text
     assert "resolved: 1 failed cells finished on a later attempt (a_2fc.json)" in text
     # A failed cell no later attempt finished still gates.
-    fm.write_json(run / "failed" / "b_2fc.json", {"id": "b/c", "reason": "oracle"})
+    fm.write_json(run / "failed" / "b_2fc.json", {"id": "b/c", "invocation": 0, "reason": "x"})
     lines, ok = cr.gates(run)
-    assert not ok and "FAIL failed cells: 1 in failed/ (b_2fc.json)" in "\n".join(lines)
+    assert not ok and "FAIL failed cells: 1 unresolved (b_2fc.json)" in "\n".join(lines)
+
+
+def test_a_finished_result_older_than_the_failure_does_not_resolve_it(tmp_path):
+    """A rerun of a changed cell that fails leaves the earlier result in cells.json;
+    only an attempt after the failure resolves it (rnewman, PR 15)."""
+    d = tmp_path / "replaced"
+    d.mkdir()
+    run = write_run(d, {"a/c": cell()})
+    (run / "failed").mkdir()
+    fm.write_json(run / "failed" / "a_2fc.json", {"id": "a/c", "invocation": 1, "reason": "x"})
+    invocations(run, (["a/c"], []), ([], ["a/c"]))
+    assert cr.completeness(run) == ["failed cell a_2fc.json"]
+    lines, ok = cr.gates(run)
+    assert not ok and "FAIL failed cells: 1 unresolved (a_2fc.json)" in "\n".join(lines)
+    # An invocation cut short records nothing: a failure in it, at index 1 after
+    # one listed invocation, then the cell finishing in the next one, at index 1.
+    invocations(run, (["a/c"], []), (["a/c"], []))
+    assert cr.completeness(run) == []
+    # A failure in an invocation cut short after the cell last finished stays open.
+    invocations(run, (["a/c"], []))
+    assert cr.completeness(run) == ["failed cell a_2fc.json"]
+    # A record without its invocation counts from the last one that listed the failure.
+    fm.write_json(run / "failed" / "a_2fc.json", {"id": "a/c", "reason": "x"})
+    invocations(run, ([], ["a/c"]), (["a/c"], []))
+    assert cr.completeness(run) == []
+    invocations(run, (["a/c"], []), ([], ["a/c"]))
+    assert cr.completeness(run) == ["failed cell a_2fc.json"]
+    invocations(run, (["a/c"], []))
+    assert cr.completeness(run) == ["failed cell a_2fc.json"]
+
+
+def test_a_failure_only_an_invocation_lists_needs_a_later_finish(tmp_path):
+    # A cell that failed before it was timed (a hash mismatch) writes no failed/.
+    d = tmp_path / "listed"
+    d.mkdir()
+    run = write_run(d, {"a/c": cell()})
+    invocations(run, (["a/c"], []), ([], ["a/c"]))
+    assert cr.completeness(run) == ["failed cell a/c (invocation 1)"]
+    invocations(run, ([], ["a/c"]), (["a/c"], []))
+    assert cr.completeness(run) == []
 
 
 def test_a_sentinel_attempt_retried_with_success_is_resolved():
@@ -457,9 +508,10 @@ def test_completeness_is_the_no_failed_cell_rule(tmp_path):
     run = write_run(d, {"a/c": cell()})
     assert cr.completeness(run) == []
     (run / "failed").mkdir()
-    fm.write_json(run / "failed" / "a_2fc.json", {"id": "a/c"})  # resolved: a/c finished
+    invocations(run, ([], ["a/c"]), (["a/c"], []))
+    fm.write_json(run / "failed" / "a_2fc.json", {"id": "a/c", "invocation": 0})  # resolved
     assert cr.completeness(run) == []
-    fm.write_json(run / "failed" / "b_2fc.json", {"id": "b/c"})  # unresolved
+    fm.write_json(run / "failed" / "b_2fc.json", {"id": "b/c", "invocation": 0})  # unresolved
     assert cr.completeness(run) == ["failed cell b_2fc.json"]
     (run / "failed" / "b_2fc.json").unlink()
     info = fm.read_json(run / "run.json")
