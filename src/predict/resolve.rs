@@ -601,29 +601,62 @@ unsafe fn resolve_listed<
         )
     };
     pass.n_leaves = n_leaves;
-    let mut n = 0usize;
-    // SAFETY: as above; every listed position is an item's, below `n_items`.
-    unsafe {
-        for i in 0..listed {
-            let j = *pass.listed.add(i) as usize;
-            let w1 = *pass.words.add(j);
+    // The split of listed position `$j`, binding its word 1, node, sides and whether
+    // each side has rows.
+    macro_rules! split {
+        ($j:expr => $w1:ident, $node:ident, $heavy:ident, $light:ident, $has_heavy:ident, $has_light:ident) => {
+            let j = $j;
+            let $w1 = *pass.words.add(j);
             let carry = (*pass.items.add(j)).carry;
-            let node = *pass.stops.add(j);
-            let field = ((w1 >> MASK_SHIFT) & MASK_FIELD) as usize;
+            let $node = *pass.stops.add(j);
+            let field = (($w1 >> MASK_SHIFT) & MASK_FIELD) as usize;
             let side = if SCAN {
                 let (pred, right) = ((field - 1) / 2, field.is_multiple_of(2));
                 carry.scan_side(pass.arena, pred, right, scan, pass.scratch, u)
             } else {
                 C::side(pass.masks, field, u)
             };
-            let (heavy, light, has_heavy, has_light) =
+            let ($heavy, $light, $has_heavy, $has_light) =
                 carry.split(side, EMPTY, pass.arena, &mut pass.next_slot, u);
             if STATS {
-                seen.splits += u64::from(has_heavy & has_light);
+                seen.splits += u64::from($has_heavy & $has_light);
                 if EMPTY {
-                    seen.empty_sides += u64::from(!has_heavy) + u64::from(!has_light);
+                    seen.empty_sides += u64::from(!$has_heavy) + u64::from(!$has_light);
                 }
             }
+        };
+    }
+    if cfg!(target_arch = "x86_64") {
+        // On x86-64, a cursor through the list and one through the items written,
+        // rather than an index into each beside their bases: two fewer live registers,
+        // which keeps the loop's state off the stack.
+        // SAFETY: as above; every listed position is an item's, below `n_items`, and
+        // the list holds `listed` of them.
+        unsafe {
+            let (mut at, end, mut out) =
+                (pass.listed.cast_const(), pass.listed.add(listed), pass.out);
+            while at.cast_mut() < end {
+                split!(*at as usize => w1, node, heavy, light, has_heavy, has_light);
+                at = at.add(1);
+                *out = Item {
+                    node: node + 1,
+                    carry: heavy,
+                };
+                out = out.add(usize::from(has_heavy | EMPTY));
+                *out = Item {
+                    node: w1 as u32,
+                    carry: light,
+                };
+                out = out.add(usize::from(has_light | EMPTY));
+            }
+            return out.offset_from_unsigned(pass.out);
+        }
+    }
+    let mut n = 0usize;
+    // SAFETY: as above; every listed position is an item's, below `n_items`.
+    unsafe {
+        for i in 0..listed {
+            split!(*pass.listed.add(i) as usize => w1, node, heavy, light, has_heavy, has_light);
             *pass.out.add(n) = Item {
                 node: node + 1,
                 carry: heavy,
