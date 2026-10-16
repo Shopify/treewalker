@@ -18,6 +18,28 @@ use crate::load::layout::{FLAG_LEAF, LayoutNode, SLOT_SHIFT, STOPS_VARYING};
 
 pub(super) use crate::rules::{MAX_DISTANCE, MAX_LANES};
 
+/// A lane's cursor, the position of its item: on x86-64 a `usize`, which addresses
+/// the items, stops and words without extending it, where a `u32` cursor takes a
+/// zero-extended copy for each address (x86-64 has no extending address mode), and
+/// spills more at 8 lanes. Instructions per round of 8 lane steps, `usize` against
+/// `u32` cursors, on emeraldrapids (x86-64-v4), rustc 1.97.1: the walk without varying
+/// stops 180 against 190 at distance 0 (180, 190) and 202 against 219 at distance
+/// 1 or more (213, 223); the walks with varying stops over 8-byte items 187 against
+/// 196 (187, 194) and 216 against 232 (218, 230), over 16-byte items 200 against 211
+/// (201, 211) and 236 against 237 (235, 238). Elsewhere a `u32`, which AArch64's
+/// addressing extends for free (`uxtw`) and the M4's pass loop keeps narrow.
+#[cfg(target_arch = "x86_64")]
+type Cursor = usize;
+#[cfg(not(target_arch = "x86_64"))]
+type Cursor = u32;
+
+/// The position `c` as an index.
+#[inline(always)]
+#[allow(clippy::unnecessary_cast, reason = "a usize on x86-64")]
+const fn at(c: Cursor) -> usize {
+    c as usize
+}
+
 /// Items past a pass's last that a walk of `lanes` lanes prefetching `distance`
 /// items ahead may read: a lane's cursor stays below the item count plus the lanes,
 /// and its prefetch reads `distance` lanes' worth of items further.
@@ -118,7 +140,7 @@ macro_rules! lanes {
     (@run $r:expr, $dummy:expr, $first:expr, $step:expr; $(($lane:literal, $i:ident, $c:ident))+) => {{
         $(
             let mut $i: u32 = $first($lane);
-            let mut $c: u32 = $lane;
+            let mut $c: Cursor = $lane;
         )+
         // The rounds of a rate are written out, each after the test that every
         // round has, so the prefetch's absence costs nothing in the others.
@@ -154,6 +176,26 @@ macro_rules! lanes {
 /// an item, it prefetches the root of the item `D` items later in its sequence; `D`
 /// = 0 prefetches nothing.
 ///
+/// A lane loads its next item once the step has moved its cursor, on the chain from
+/// its node to its next one. Loading the item after its own at the start of each
+/// step instead (an early load) takes it off the chain, but holds one more value per
+/// lane through the step. At a lane count that reaches the issue bound
+/// ([`crate::rules::lanes`]) the chain does not bind, and an early load is worth only
+/// the difference in instructions. At x86-64's 8 lanes (instructions per round of 8
+/// lane steps, emeraldrapids, rustc 1.97.1) it saved 3% on the walk without varying
+/// stops at distance 0 and at prefetch rates 2 and 4 (180 → 174, 397 → 385) and lost
+/// 2% at distance 1 or more, rate 1 (202 → 207; on x86-64-v4 it saved 7%, 213 → 198);
+/// it cost 1% on the walks with varying stops over 8-byte items at distance 1 or more
+/// (216 → 219), and 7–16% on those at distance 0 (187 → 217 over 8-byte items, 200 →
+/// 232 over 16-byte items) and over 16-byte items at any distance (236 → 252).
+/// On Emerald Rapids the walks with it ran in 0.985 and 0.983 of the time without it
+/// (and `u32` cursors) at the two alignments, but 6 cells were slower at both, exactly
+/// those that walk the instantiations it lengthens (the 64-row panels by 2.5–5.2%,
+/// their instructions per group up 3.4–3.8% and their IPC unchanged), and the gains
+/// came mostly from the `usize` cursors ([`Cursor`]). On the M4, whose 8 or 9 lanes
+/// keep the walk bound by throughput as well, it cost 1 or 2 instructions per lane
+/// step and spilled the varying walks' lanes.
+///
 /// # Safety
 ///
 /// `items` holds `n + pad(lanes, D)` items on nodes of `p`, `stops` and `words` have
@@ -188,7 +230,7 @@ pub(super) unsafe fn walk<
             R,
             p.dummy,
             |lane: u32| (*items.add(lane as usize)).node(),
-            |i: &mut u32, c: &mut u32, ahead: bool| {
+            |i: &mut u32, c: &mut Cursor, ahead: bool| {
                 if STATS {
                     steps.count(*i != p.dummy);
                 }
@@ -198,15 +240,16 @@ pub(super) unsafe fn walk<
                 // The lane's item stops here or later, so its last writes are its stop.
                 // Resolve needs the node only to split at a varying stop.
                 if VARYING {
-                    *stops.add(*c as usize) = *i;
+                    *stops.add(at(*c)) = *i;
                 }
-                *words.add(*c as usize) = w1;
-                let cursor = *c + k as u32 * u32::from(stop);
-                let item = (*items.add(cursor as usize)).node();
+                *words.add(at(*c)) = w1;
+                let cursor = *c + k as Cursor * Cursor::from(stop);
+                // The lane's next item, taken if it stops here.
+                let item = (*items.add(at(cursor))).node();
                 if D > 0 && ahead {
                     prefetch(
                         p.nodes
-                            .add((*items.add(cursor as usize + D * k)).node() as usize)
+                            .add((*items.add(at(cursor) + D * k)).node() as usize)
                             .cast(),
                     );
                 }

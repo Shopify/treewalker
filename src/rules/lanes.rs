@@ -21,7 +21,7 @@ pub(crate) const MAX_LANES: usize = 12;
 /// reloaded, off the lanes' dependent chains: LLVM's allocator weighs uses, and an
 /// invariant is used by every lane's step while a lane's node or cursor is used by
 /// one, so when the registers run short it spills lanes first, which then cost a store
-/// and a load per step (x86-64 at 8 lanes stores 13 to 45 values per iteration; an
+/// and a load per step (x86-64 at 8 lanes stores 11 to 46 values per iteration; an
 /// attempt to force the invariants to memory with volatile reads still stored 3 to 7).
 const fn invariants(varying: bool) -> usize {
     let x86 = cfg!(target_arch = "x86_64");
@@ -101,13 +101,13 @@ const X86_ISSUE_WIDTH: usize = 6;
 /// x86-64: the uops of one lane step with every lane in registers (2 lanes, a
 /// prefetch every round): instructions, less a macro-fused compare-and-branch per
 /// lane, plus one for each load-op with an index register (unlaminated) and for each
-/// `cmova`/`cmovbe` (2 uops on Intel). Counted from the same assembly: 25 for the walk
-/// without varying stops, 25 and 28.5 for those with them over 8- and 16-byte items;
-/// the fewest, 25, which reach the issue bound last.
-const X86_STEP_UOPS: usize = 25;
+/// `cmova`/`cmovbe` (2 uops on Intel). Counted from the same assembly: 24 for the walk
+/// without varying stops, 24 and 27.5 for those with them over 8- and 16-byte items;
+/// the fewest, 24, which reach the issue bound last.
+const X86_STEP_UOPS: usize = 24;
 
 /// x86-64: uops a lane value that does not fit the registers adds per round, its store
-/// and its reload. The assembly adds more per lane step (at 8 lanes 3.5 to 6 against
+/// and its reload. The assembly adds more per lane step (at 8 lanes 3 to 6 against
 /// 2 lanes, invariant reloads and register moves included): more uops only reach the
 /// issue bound sooner.
 const X86_SPILL_UOPS: usize = 2;
@@ -164,7 +164,7 @@ const fn parse(s: &str) -> usize {
 ///   those cores forward a store to a load of the same address with zero latency. So
 ///   the lanes are the fewest powers of two that reach the issue bound
 ///   ([`x86_issue_bound`]) with the spilled values' uops counted: 8, `26 × 6 = 156 <=
-///   8 × 25 + 2 × 10` (4 give 104). Without zero-latency forwarding a spilled lane's
+///   8 × 24 + 2 × 10` (4 give 100). Without zero-latency forwarding a spilled lane's
 ///   chain is about 31 cycles, and 8 lanes still step every 3.9 cycles against 4 lanes'
 ///   6.5 to 7.75, so the choice does not depend on it. On Emerald Rapids, over R5's 90
 ///   cells at both alignments, research lanes=4 took 0.793 of 2 lanes' time (lanes=1
@@ -185,8 +185,8 @@ const fn parse(s: &str) -> usize {
 ///
 /// | Walk | uops per step | lanes that fit | values spilled at 8 | lanes |
 /// |---|---|---|---|---|
-/// | varying | 25 | 2 | 11 | 8 (`156 <= 200 + 22`; 4 give 106) |
-/// | constant | 25 | 3 | 10 | 8 (`156 <= 200 + 20`; 4 give 104) |
+/// | varying | 24 | 2 | 11 | 8 (`156 <= 192 + 22`; 4 give 102) |
+/// | constant | 24 | 3 | 10 | 8 (`156 <= 192 + 20`; 4 give 100) |
 ///
 /// Not capped by the items of a pass. A pass's last round leaves lanes on the dummy:
 /// with `n` items of similar length, `⌈n / k⌉ k − n` slots, on average `k / 2n` of
