@@ -12,6 +12,8 @@ experiments/data/expedia.parquet
 experiments/data/raw/
 experiments/data/*_summary.md
 experiments/data/*.log
+# Runs stay local; committing one needs `git add -f`.
+experiments/data/runs/
 
 # Terraform state and caches
 infra/.terraform/
