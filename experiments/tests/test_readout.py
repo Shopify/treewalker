@@ -34,8 +34,8 @@ def xgboost(rows):
 
 
 def test_children_against_process_zero_on_the_same_batch_and_cluster():
-    # rev-gpt's case: process 0 costs 200 in round 0 and 100 later; the child
-    # costs 200 in its one round: against the later rounds, 2.
+    # Process 0 costs 200 in round 0 and 100 later; the child costs 200 in its one
+    # round: against the later rounds, 2.
     rows = [(0, r, b, 200 if r == 0 else 100, 1000) for r in range(3) for b in range(2)]
     rows += [(1, 0, b, 200, 1000) for b in range(2)]
     df, r = xgboost(rows)

@@ -1,5 +1,5 @@
 """pack, summarize and validation-readout end to end, on a small Linux-like run with
-counters and XGBoost children (rev-opus n44, round 9)."""
+counters and XGBoost children."""
 
 from pathlib import Path
 
@@ -149,8 +149,8 @@ def test_summarize_and_the_readout_on_a_run_with_counters_and_children(tmp_path)
 
 
 def test_a_one_round_run_has_no_round_zero_evidence(tmp_path):
-    # rev-gpt's N18: process 0 times one round only, so no method has a later
-    # period to compare round 0 with.
+    # Process 0 times one round only, so no method has a later period to compare
+    # round 0 with.
     write_run(tmp_path, rounds=1)
     text = "\n".join(readout.readout(tmp_path))
     assert "round-0 rule at 1%: not decided" in text

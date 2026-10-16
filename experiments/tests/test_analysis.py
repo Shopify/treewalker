@@ -152,8 +152,8 @@ def test_modes_switching_within_rounds_on_real_blocks():
 
 
 def test_mode_shares_that_differ_by_batch_are_labelled_exactly():
-    # rev-gpt's synthetic: processes 0-3 fast in batches 0-5, 4-6 in batches
-    # 6-11; batch 6-11 rows cost twice as much; the modes are 7.5% apart in time.
+    # Synthetic modes: processes 0-3 fast in batches 0-5, 4-6 in batches 6-11;
+    # batch 6-11 rows cost twice as much; the modes are 7.5% apart in time.
     rows, truth = [], []
     for p in range(7):
         for rnd in range(3 if p == 0 else 1):
@@ -182,8 +182,8 @@ def test_unread_blocks_leave_the_rest_by_instructions():
 
 
 def misoriented(time_gap=1.075):
-    """rev-gpt's round-3 case: the low-instruction label costs `time_gap` more in
-    every batch, but its batch mix puts it in the cheap batches more often."""
+    """The low-instruction label costs `time_gap` more in every batch, but its batch
+    mix puts it in the cheap batches more often."""
     rows, true_fast = [], []
     for p in range(7):
         for rnd in range(3 if p == 0 else 1):
@@ -250,10 +250,9 @@ def test_a_cell_without_a_mixed_batch_shows_no_second_mode_and_flags_its_span():
     assert "expected over processes 101.7143 us/row (the mean of 7)" in line
     assert r["weights"] == [(b, 100.0) for b in range(12)]
     assert all(x is None for x in faster_labels(r))
-    # rev-gpt's round-6 and round-7 attacks: no batch mixed, batches 0-5 slow and
-    # 6-11 fast, or one batch fast, 9.6% apart in instructions. Nothing inside a
-    # batch tells modes from batch effects, so the all-process time (the mixture)
-    # shows, with the span flagged.
+    # No batch mixed: batches 0-5 slow and 6-11 fast, or one batch fast, 9.6% apart
+    # in instructions. Nothing inside a batch tells modes from batch effects, so the
+    # all-process time (the mixture) shows, with the span flagged.
     for fast in (set(range(6, 12)), {11}, set(range(11))):
         r = analysis.xgboost_faster_mode(
             blocks(
@@ -274,7 +273,7 @@ def test_a_cell_without_a_mixed_batch_shows_no_second_mode_and_flags_its_span():
 
 
 def test_a_partial_block_near_the_faster_level_and_a_counter_outlier():
-    # rev-gpt's round-9 cases: full slow (71,700 instructions a row, 107.5 ticks)
+    # Three levels: full slow (71,700 instructions a row, 107.5 ticks)
     # and fast (78,600, 100) blocks in every batch from the children, and
     # process 0's round-0 block of each batch in between (75,300, 103.5), nearer
     # the fast level. It joins the faster cluster: at most a quarter of the time
@@ -308,9 +307,9 @@ def test_a_partial_block_near_the_faster_level_and_a_counter_outlier():
 
 
 def unmatched(mixed, effect=0.12):
-    """rev-gpt's round-4 case: 12 batches, `mixed` holding both modes; the others
-    hold one each, whose instructions carry a batch effect of +-`effect`. The
-    fast mode (78,600 instructions a row) costs 100 ticks a row, the slow 107.5."""
+    """12 batches, `mixed` holding both modes; the others hold one each, whose
+    instructions carry a batch effect of +-`effect`. The fast mode (78,600
+    instructions a row) costs 100 ticks a row, the slow 107.5."""
     rows, truth = [], []
     for p in range(7):
         for rnd in range(3 if p == 0 else 1):
@@ -324,7 +323,7 @@ def unmatched(mixed, effect=0.12):
 
 
 def test_single_mode_batches_are_unknown():
-    # rev-gpt's round-4 case: pure batches with +-12% instruction offsets.
+    # Pure batches with +-12% instruction offsets.
     for mixed in (6, 10):
         rows, truth = unmatched(mixed)
         r = analysis.xgboost_faster_mode(blocks(rows))
@@ -335,9 +334,8 @@ def test_single_mode_batches_are_unknown():
 
 
 def test_pure_batches_a_gap_away_are_unknown_not_the_other_mode():
-    # rev-gpt's round-5 attack: each pure batch's offset is one gap, plus or
-    # minus 0.2%, so it lands on the wrong level; the faster mode costs 100 in
-    # every batch, the slower 107.5.
+    # Each pure batch's offset is one gap, plus or minus 0.2%, so it lands on the
+    # wrong level; the faster mode costs 100 in every batch, the slower 107.5.
     for mixed in (1, 2, 6, 10, 12):
         for perturb in (0.0, 0.002, -0.002):
             rows, truth = [], []
