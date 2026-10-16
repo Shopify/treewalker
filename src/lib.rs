@@ -76,6 +76,9 @@ mod error;
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod exact;
 mod legacy;
+// The new kernel's parts, unused until the kernel that uses them lands.
+#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
+mod predict;
 #[cfg(feature = "research")]
 #[path = "legacy/research.rs"]
 pub mod research;
