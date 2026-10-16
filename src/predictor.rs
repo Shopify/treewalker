@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::forest::Forest;
 use crate::model::Model;
 use crate::predict::{Options, Workspace};
 
@@ -74,6 +75,31 @@ impl std::fmt::Debug for Predictor {
         f.debug_struct("Predictor")
             .field("max_group_width", &self.model.config.max_group_width())
             .finish_non_exhaustive()
+    }
+}
+
+impl Forest {
+    /// Create a [`Predictor`] with scratch space for this model's widest group.
+    ///
+    /// Predictors are meant to be reused: create one per worker, not one per call.
+    /// The scratch grows linearly with `max_group_width` and the number of varying
+    /// predicates P: about `max_group_width × (52 + (2P + 1) / 8)` bytes beyond a
+    /// chunk of trees (`16 × limbs` instead of 32 of the 52 for models past the
+    /// 126-bit rule), so 1.2 MiB for groups of 4,096 rows and 1,000 varying
+    /// predicates.
+    ///
+    /// # Panics
+    ///
+    /// If the scratch for `max_group_width` exceeds what memory can address, or the
+    /// allocator cannot provide it; the message names `max_group_width` and the bytes.
+    /// Also if `max_group_width` passes 2^38 − 128 rows, whose 2^32 mask words a 32-bit
+    /// index no longer counts.
+    #[must_use]
+    pub fn predictor(&self) -> Predictor {
+        Predictor {
+            workspace: Workspace::new(&self.model),
+            model: Arc::clone(&self.model),
+        }
     }
 }
 

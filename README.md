@@ -90,6 +90,32 @@ for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids
 done
 ```
 
+The walk's lane count comes from a model of its step (`src/rules/lanes.rs`): on AArch64
+the most lanes that fit the registers, on x86-64 the fewest that reach the issue bound,
+whose lanes beyond the registers spill. `experiments/scripts/walk_spills.py` builds
+`examples/walk_asm.rs` for a target and CPU, emits its post-LTO assembly and counts each
+walk loop's stack stores and loads. It fails if a loop stores to the stack (a spilled
+lane value) although the lanes, a step's temporaries and the loop's invariants all fit
+the registers, or stores nothing although they do not; `--lanes K` builds every walk at
+K lanes to see where the registers run out:
+
+```bash
+python3 experiments/scripts/walk_spills.py                       # this machine
+python3 experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu emeraldrapids
+```
+
+`experiments/scripts/asm_identity.py` compares the production functions of two commits
+on a target and CPU. It builds each commit's post-LTO assembly of `examples/walk_asm.rs`
+(or, with `--bench`, of `sweep_bench`, whose timed regions it reports apart), demangles
+and normalizes it, and lists the functions that differ or that one side lacks. A change
+meant to leave the generated code alone, such as a refactoring, should show none; `--map`
+renames the paths of code that moved between modules:
+
+```bash
+python3 experiments/scripts/asm_identity.py HEAD~1 HEAD --cpu apple-m4
+python3 experiments/scripts/asm_identity.py HEAD~1 HEAD --target x86_64-unknown-linux-gnu --cpu emeraldrapids
+```
+
 ## Using the library
 
 Load a model once and predict through a `Predictor`, one per worker thread.

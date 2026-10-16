@@ -72,7 +72,7 @@ impl Forest {
     #[must_use]
     pub fn research_predictor(&self, ablation: Ablation) -> ResearchPredictor {
         ResearchPredictor {
-            inner: self.predictor(),
+            inner: self.legacy_predictor(),
             variant: ablation,
         }
     }
@@ -339,7 +339,7 @@ mod tests {
             r.predict_groups(&rows, &[0, 16, 33], &mut out);
             assert_eq!(r.inner.last_variant(), Some(variant), "groups");
         }
-        let mut p = forest.predictor();
+        let mut p = forest.legacy_predictor();
         p.predict_group(&rows, &mut out);
         assert_eq!(p.last_variant(), Some(Ablation::default()), "production");
     }

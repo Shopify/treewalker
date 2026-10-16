@@ -181,8 +181,8 @@ impl Forest {
     /// is not finite or the leaf exponents span too wide a range for a 126-bit fixed
     /// point; prediction then adds each row's leaves in `f64` in tree order, as the
     /// full walk does.
-    // Scaffolding while `src/legacy/` serves the Predictor: the new kernel sums every
-    // model exactly.
+    // Scaffolding while `src/legacy/` serves the research API: its predictors' sums.
+    // The Predictor sums every model exactly.
     #[inline]
     #[must_use]
     pub fn exact_sums(&self) -> bool {

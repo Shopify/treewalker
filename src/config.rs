@@ -83,10 +83,11 @@ pub struct LoadOptions {
     /// Until the research module's load ablations replace it: give every varying node
     /// its own predicate instead of sharing one between identical splits.
     pub disable_predicate_dedup: bool,
-    /// Until every model sums exactly: sum each row's leaf values exactly and round
-    /// once, when the model's leaves allow it (the default). False adds them per row
-    /// in `f64`, in the loaded tree order, as the full walk does;
-    /// [`Forest::exact_sums`](crate::Forest::exact_sums) then reports false.
+    /// Until the research API runs on the new kernel: the research predictors sum
+    /// each row's leaf values exactly and round once, when the model's leaves allow it
+    /// (the default). False adds them per row in `f64`, in the loaded tree order, as
+    /// the full walk does; [`Forest::exact_sums`](crate::Forest::exact_sums) then
+    /// reports false. The Predictor sums every model exactly.
     pub exact_sums: bool,
 }
 

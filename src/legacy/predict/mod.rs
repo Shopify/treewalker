@@ -255,11 +255,9 @@ impl std::fmt::Debug for Predictor {
 }
 
 impl Forest {
-    /// Create a [`Predictor`] with scratch space for this model's widest group.
-    ///
-    /// Predictors are meant to be reused: create one per worker, not one per call.
-    #[must_use]
-    pub fn predictor(&self) -> Predictor {
+    /// Scaffolding while `src/legacy/` serves the research API: today's predictor,
+    /// which the research predictor wraps.
+    pub(crate) fn legacy_predictor(&self) -> Predictor {
         Predictor {
             workspace: Workspace::new(self.legacy()),
             model: Arc::clone(self.legacy()),
