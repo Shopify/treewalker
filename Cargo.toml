@@ -78,6 +78,22 @@ required-features = ["research"]
 name = "research"
 required-features = ["research"]
 
+[[test]]
+name = "property"
+required-features = ["research"]
+
+[[test]]
+name = "vectors"
+required-features = ["research"]
+
+[[test]]
+name = "miri"
+required-features = ["research"]
+
+[[test]]
+name = "limits"
+required-features = ["research"]
+
 # Developer benchmarks over the committed fixtures: cargo bench.
 [[bench]]
 name = "predict"
