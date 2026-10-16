@@ -27,17 +27,8 @@ pub trait RunSink {
     /// `at < self.entries()`.
     unsafe fn sub(&mut self, at: usize, v: Self::Value);
 
-    /// Adds `v` to every row through `sum`.
-    fn add_all(&mut self, sum: &mut Self::Sum, v: Self::Value);
-
-    /// Adds each of `values` to every row through `sum`, as [`Self::add_all`] would
-    /// one by one.
-    #[inline]
-    fn add_all_of(&mut self, sum: &mut Self::Sum, values: impl Iterator<Item = Self::Value>) {
-        for v in values {
-            self.add_all(sum, v);
-        }
-    }
+    /// Adds each of `values` to every row through `sum`.
+    fn add_all_of(&mut self, sum: &mut Self::Sum, values: impl Iterator<Item = Self::Value>);
 
     /// Adds `sum` to every row, at the first entry. No subtraction at the last entry
     /// is needed: the prefix sum reads entries `0..n` only.
@@ -67,8 +58,10 @@ impl RunSink for [i128] {
     }
 
     #[inline]
-    fn add_all(&mut self, sum: &mut i128, v: i128) {
-        *sum += v;
+    fn add_all_of(&mut self, sum: &mut i128, values: impl Iterator<Item = i128>) {
+        for v in values {
+            *sum += v;
+        }
     }
 
     #[inline]

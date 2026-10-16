@@ -167,11 +167,13 @@ fn single_row(c: &Cell, f: &Forest) -> Result<(), String> {
 }
 
 /// Every runtime flag reaches the same leaves with the same rows, so outputs are
-/// bit-identical to production.
+/// bit-identical to production. Of the flags' 16 combinations, the 8 that run
+/// differently: the sweep's flag does nothing with the precompute off, and the
+/// monotonic scans' nothing with it on.
 fn runtime_ablations(c: &Cell, f: &Forest) -> Result<(), String> {
     let reference = predict(f, c);
     let monotonic = honors_monotonic(c, f.config());
-    for bits in 0..16u8 {
+    for bits in [0u8, 1, 2, 4, 5, 6, 9, 13] {
         let a = Ablation {
             disable_varying_precompute: bits & 1 != 0,
             disable_predicate_sweep: bits & 2 != 0,

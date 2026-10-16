@@ -91,11 +91,6 @@ impl<S: RunSink + ?Sized> RunSink for CountRuns<'_, S> {
         unsafe { self.sink.sub(at, v) };
     }
 
-    fn add_all(&mut self, sum: &mut S::Sum, v: S::Value) {
-        self.runs += 1;
-        self.sink.add_all(sum, v);
-    }
-
     fn add_all_of(&mut self, sum: &mut S::Sum, values: impl Iterator<Item = S::Value>) {
         let runs = &mut self.runs;
         self.sink.add_all_of(sum, values.inspect(|_| *runs += 1));

@@ -1,6 +1,7 @@
-//! The kernel against the exact full walk and the generator's evaluator, and its outputs
-//! across lane counts, width dispatch, single rows' constant walk, restart prefetch
-//! and chunk sizes.
+//! The kernel's outputs across lane counts, width dispatch, single rows' constant walk,
+//! prefetch distances and rates, the research ablations and chunk sizes, and the
+//! precompute's masks against the float predicates. The kernel against the exact oracle
+//! is the property tests' (`tests/property.rs`).
 
 // The property tests' generator, with the exact module's copy of their oracle.
 #[expect(clippy::float_cmp, reason = "exact expectations")]
@@ -29,7 +30,6 @@ enum Role {
 }
 
 struct Case {
-    model: model::Model,
     forest: Forest,
     data: Vec<f64>,
     offsets: Vec<usize>,
@@ -112,7 +112,6 @@ fn case(seed: u64) -> Case {
         }))
         .collect();
     Case {
-        model: m,
         forest,
         data,
         offsets,
@@ -180,34 +179,6 @@ fn same(actual: &[f64], expected: &[f64], what: &str) {
     for (r, (a, e)) in actual.iter().zip(expected).enumerate() {
         assert_eq!(a.to_bits(), e.to_bits(), "{what}: row {r}: {a:e} != {e:e}");
     }
-}
-
-#[test]
-fn the_kernel_matches_the_full_walk_and_the_oracle() {
-    let (mut fixed, mut wide) = (0, 0);
-    for seed in 0..if MIRI { 4 } else { 40 } {
-        let c = case(0x5EED_0000 + seed);
-        let nf = c.forest.config().n_features();
-        let mut full = vec![f64::NAN; c.data.len() / nf];
-        c.forest.predict_full_walk(&c.data, &mut full);
-        let production = kernel(&c, None, Options::default());
-        same(&production, &full, &format!("case {seed}: the full walk"));
-        // The generator's own evaluation of each row, summed by the big-integer oracle.
-        let expected: Vec<f64> = c
-            .data
-            .chunks_exact(nf)
-            .map(|row| c.model.predict(row))
-            .collect();
-        same(&production, &expected, &format!("case {seed}: the oracle"));
-        match c.forest.model.plan {
-            crate::exact::Plan::Fixed(_) => fixed += 1,
-            crate::exact::Plan::Wide(_) => wide += 1,
-        }
-    }
-    assert!(
-        MIRI || (fixed > 10 && wide > 3),
-        "{fixed} with i128 sums, {wide} wide"
-    );
 }
 
 #[test]
@@ -482,4 +453,109 @@ fn precomputed_masks_match_the_float_predicates() {
         "{checked} groups; models with categorical predicates {categorical}, monotonic \
          numeric ones {monotonic}, float32 thresholds {f32}"
     );
+}
+
+/// Stumps enough that a pass over one item per tree prefetches at the longest distance:
+/// `rules::pass_distance` gives a pass of `n` items at most `n / lanes / 2`.
+const STUMPS: usize = 2 * super::walk::MAX_DISTANCE * super::walk::MAX_LANES;
+
+/// `STUMPS` stumps, every 7th on the varying feature 0 and the others on feature 1,
+/// which is constant in each group, so that a group's first pass and a single row's
+/// walk hold one item per tree; groups of 1, 2, 33, 65 and 1 rows, whose walks take
+/// `u32` items, items carrying masks by value and items carrying arena handles.
+fn stumps() -> (Case, model::Model) {
+    use model::{Node, Op, Task, Tree};
+    let leaf = |value| Node::Leaf {
+        value,
+        count: Some(1),
+    };
+    let trees = (0..STUMPS)
+        .map(|t| Tree {
+            nodes: vec![
+                Node::Numeric {
+                    feature: usize::from(t % 7 != 0),
+                    op: Op::Le,
+                    threshold: (t % 5) as f64 - 1.5,
+                    default_left: t % 3 == 0,
+                    left: 1,
+                    right: 2,
+                    count: Some(3),
+                },
+                leaf((t % 11) as f64 / 8.0),
+                leaf(-((t % 13) as f64) / 16.0),
+            ],
+        })
+        .collect();
+    let m = model::Model {
+        precision: Precision::F64,
+        n_features: 2,
+        trees,
+        average: false,
+        base_score: 0.0,
+        sigmoid: None,
+        task: Task::Regressor,
+    };
+    let bytes = m.to_binary(&mut Rng::new(7));
+    let sizes = [1, 2, 33, 65, 1];
+    let config = WalkerConfig::builder(2)
+        .max_group_width(65)
+        .varying([0])
+        .build()
+        .expect("a valid configuration");
+    // No prefix groups: every tree's root is an item of the first pass.
+    let choices = Choices {
+        tree_ordering: true,
+        bitset_intern: true,
+        prefix: Prefix::Depth(0),
+        predicate_dedup: true,
+    };
+    let forest = Forest::from_reader_with(
+        std::io::Cursor::new(&bytes),
+        ModelFormat::TreeliteBinaryV4,
+        config,
+        &LoadOptions::default(),
+        &choices,
+    )
+    .expect("load");
+    let data: Vec<f64> = sizes
+        .iter()
+        .enumerate()
+        .flat_map(|(g, &n)| {
+            let constant = (g % 4) as f64 - 1.0;
+            (0..n).flat_map(move |r| [(r % 6) as f64 - 2.0, constant])
+        })
+        .collect();
+    let offsets = std::iter::once(0)
+        .chain(sizes.iter().scan(0, |end, &n| {
+            *end += n;
+            Some(*end)
+        }))
+        .collect();
+    let case = Case {
+        forest,
+        data,
+        offsets,
+    };
+    (case, m)
+}
+
+#[test]
+fn prefetching_walks() {
+    // Under Miri, the walks' prefetch addresses and their padding: the rule's choices,
+    // then the shortest and the longest distance and, for the walk without varying
+    // stops, a prefetch every 4 rounds.
+    let (c, m) = stumps();
+    let reference = kernel(&c, None, Options::default());
+    let expected: Vec<f64> = c.data.chunks_exact(2).map(|row| m.predict(row)).collect();
+    same(&reference, &expected, "the oracle");
+    let longest = super::walk::MAX_DISTANCE;
+    for (distance, rate) in [(1, 1), (longest, 1), (longest, 4)] {
+        let o = Options {
+            distance: Some(distance),
+            rate: Some(rate),
+            ..Options::default()
+        };
+        let what = format!("distance {distance}, rate {rate}");
+        same(&kernel(&c, Some(1 << 20), o), &reference, &what);
+    }
 }

@@ -207,8 +207,8 @@ impl RunSink for Record {
         self.writes.push((at, -v));
     }
 
-    fn add_all(&mut self, (): &mut (), v: i64) {
-        self.writes.push((0, v));
+    fn add_all_of(&mut self, (): &mut (), values: impl Iterator<Item = i64>) {
+        self.writes.extend(values.map(|v| (0, v)));
     }
 
     fn flush(&mut self, (): ()) {}
