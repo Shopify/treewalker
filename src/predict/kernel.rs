@@ -20,9 +20,9 @@ use super::mask::rows::{self, Unit};
 use super::mask::{Mask, Wide};
 use super::passes::{Pass, Walks, walk_with};
 use super::precompute::{Lefts, Rows, SWEEP_TURNS};
-use super::resolve::{Carrier, Handle};
+use super::resolve::{Carrier, Handle, Slot};
 use super::scan::{NoScan, Scanner, Scans};
-use super::scratch::{Common, Queues, Scratch, Sums, Width, Words, view};
+use super::scratch::{Common, Queues, Scratch, Sums, WIDE_ROWS, Width, Words, view};
 use super::walk::{self, MAX_PAD, Pools, Steps};
 use super::{Groups, WorkCounters};
 use crate::exact::{self, Plan, WIDE_SUMS, WideRuns};
@@ -126,6 +126,7 @@ impl Model {
                 };
             }
             match Width::of(held) {
+                _ if held > WIDE_ROWS => group!(Unit, Slot, &mut s.slots, rows::units(held)),
                 Width::W32 if constant => {
                     self.constant_group::<STATS, ABLATE>(results, c, options, stats);
                 }

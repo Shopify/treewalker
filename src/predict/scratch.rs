@@ -5,7 +5,7 @@
 use super::mask::rows::{self, Unit};
 use super::mask::{Mask, Wide};
 use super::precompute::SWEEP_TURNS;
-use super::resolve::{Carrier, Handle};
+use super::resolve::{Carrier, Handle, Slot};
 use super::walk::{Item, MAX_PAD};
 use crate::exact::{self, Plan, WIDE_SUMS};
 use crate::load::layout::Need;
@@ -230,6 +230,7 @@ pub(super) struct Scratch {
     pub(super) q32: Queues<u32>,
     pub(super) q64: Queues<u64>,
     pub(super) handles: Queues<Handle>,
+    pub(super) slots: Queues<Slot>,
 }
 
 impl Scratch {
@@ -276,6 +277,7 @@ impl Scratch {
         let leaves_of = |w: Width| most(&|x| x == w, |c| c.leaves);
         let max_leaves = most(&|_| true, |c| c.leaves).max(constant_leaves);
         let handle_leaves = most(&|w| w.handles() && !w.runtime(), |c| c.leaves);
+        let slot_leaves = most(&Width::runtime, |c| c.leaves);
         let arena_bytes = widths
             .iter()
             .zip(&chunks)
@@ -300,10 +302,11 @@ impl Scratch {
             },
         };
         let queues = |leaves: usize| (leaves + MAX_PAD + 1, leaves + 1);
-        let ((i32s, l32s), (i64s, l64s), (ihs, lhs)) = (
+        let ((i32s, l32s), (i64s, l64s), (ihs, lhs), (iss, lss)) = (
             queues(leaves_of(Width::W32)),
             queues(leaves_of(Width::W64)),
             queues(handle_leaves),
+            queues(slot_leaves),
         );
         let scratch = Self {
             common: Common {
@@ -337,6 +340,7 @@ impl Scratch {
             q32: Queues::new(0, i32s, l32s, 0),
             q64: Queues::new(0, i64s, l64s, 0),
             handles: Queues::new(<Handle as Carrier<Wide<2>>>::NONE, ihs, lhs, lhs),
+            slots: Queues::new(<Slot as Carrier<Unit>>::NONE, iss, lss, 0),
         };
         // Checked once the buffers are reserved: a width past it needs over 13 TiB of
         // them, which the allocator refuses first.

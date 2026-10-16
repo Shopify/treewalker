@@ -277,6 +277,176 @@ macro_rules! impl_handle {
 
 impl_handle!(2, 4, 8, 16);
 
+/// A slot of the group's mask arena of runtime-width masks, as the unit where it
+/// starts, so that neither reading a slot nor taking the next free one multiplies. A
+/// slot is a header unit, which holds its mask's row span ([`Span`]) as two words,
+/// then the mask's `u` units, of which only the span's are read or written: a split
+/// reads and writes only its rows' units, and a leaf entry adds only its rows' words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Slot(u32);
+
+impl Slot {
+    /// The slot's mask.
+    ///
+    /// # Safety
+    ///
+    /// `arena` holds the slot.
+    #[inline(always)]
+    const unsafe fn at(self, arena: *const Unit) -> *const Unit {
+        // SAFETY: the caller guarantees the slot, whose mask follows its header.
+        unsafe { arena.add(self.0 as usize + 1) }
+    }
+
+    /// The span of the slot's mask.
+    ///
+    /// # Safety
+    ///
+    /// `arena` holds the slot, written.
+    #[inline(always)]
+    const unsafe fn span(self, arena: *const Unit) -> Span {
+        // SAFETY: the caller guarantees the slot's header.
+        let [lo, hi] = unsafe { (*arena.add(self.0 as usize)).0 };
+        Span {
+            lo: lo as usize,
+            hi: hi as usize,
+        }
+    }
+
+    /// Writes span `s` into the header of the slot at unit `at`.
+    ///
+    /// # Safety
+    ///
+    /// `arena` holds the slot.
+    #[inline(always)]
+    const unsafe fn set_span(arena: *mut Unit, at: usize, s: Span) {
+        // SAFETY: the caller guarantees the slot's header.
+        unsafe { *arena.add(at) = Wide([s.lo as u64, s.hi as u64]) };
+    }
+}
+
+impl Carrier<Unit> for Slot {
+    const ARENA: bool = true;
+    const RUNTIME: bool = true;
+    const NONE: Self = Self(0);
+    type Side = *const Unit;
+
+    #[inline(always)]
+    fn slot_units(u: usize) -> usize {
+        u + 1
+    }
+
+    #[inline(always)]
+    unsafe fn root(arena: *mut Unit, n: usize, u: usize) -> Self {
+        // SAFETY: the caller guarantees slot 0, a header and u units.
+        unsafe {
+            Self::set_span(arena, 0, Span::first(n));
+            rows::first(std::slice::from_raw_parts_mut(arena.add(1), u), n);
+        }
+        Self(0)
+    }
+
+    #[inline(always)]
+    unsafe fn side(masks: *const Unit, field: usize, u: usize) -> *const Unit {
+        // SAFETY: the caller guarantees the mask exists.
+        unsafe { masks.add(field * u) }
+    }
+
+    /// Scans only the span's units, the ones a split reads.
+    #[inline(always)]
+    unsafe fn scan_side(
+        self,
+        arena: *const Unit,
+        pred: usize,
+        right: bool,
+        scan: &mut impl Scan<Unit>,
+        scratch: *mut Unit,
+        _: usize,
+    ) -> *const Unit {
+        // SAFETY: the caller guarantees the slot, written.
+        let units = unsafe { self.span(arena) }.units();
+        // SAFETY: as above, and the scratch, which no slot overlaps, has room for a
+        // mask's units, the span's among them.
+        let (rows, left) = unsafe {
+            (
+                std::slice::from_raw_parts(self.at(arena).add(units.start), units.len()),
+                std::slice::from_raw_parts_mut(scratch.add(units.start), units.len()),
+            )
+        };
+        scan.left_rows(pred, rows, left, units.start);
+        if right {
+            for x in left {
+                *x = x.xor(Unit::ones_if(true));
+            }
+        }
+        scratch
+    }
+
+    /// Unlike [`Handle`]'s, which selects the continuing side's mask, the heavy side is
+    /// written over the slot as it is read, and the light side to a new slot, which
+    /// the split takes when the light side has rows; on the shared root slot, both
+    /// go to new slots, which a real split takes. Both sides lie within the slot's
+    /// span, so the split reads and writes only its units, and each side's header
+    /// gets its own span.
+    #[inline(always)]
+    unsafe fn split(
+        self,
+        side: *const Unit,
+        force: bool,
+        arena: *mut Unit,
+        next: &mut usize,
+        u: usize,
+    ) -> (Self, Self, bool, bool) {
+        let stride = Self::slot_units(u);
+        let root = self.0 == 0;
+        let keep = select_unpredictable(root, *next as u32, self.0);
+        let fresh = *next as u32 + select_unpredictable(root, stride as u32, 0);
+        // SAFETY: the caller guarantees self is written and two slots past *next
+        // exist; keep is self or a new slot, and fresh a new slot past keep.
+        let (heavy, light) = unsafe {
+            let (k, f) = (Self(keep), Self(fresh));
+            let spans = rows::split(
+                self.at(arena),
+                side,
+                k.at(arena).cast_mut(),
+                f.at(arena).cast_mut(),
+                self.span(arena),
+            );
+            Self::set_span(arena, keep as usize, spans.0);
+            Self::set_span(arena, fresh as usize, spans.1);
+            spans
+        };
+        let (h, l) = (!heavy.is_empty(), !light.is_empty());
+        let split = (h & l) | force;
+        let unsplit_root = root && !split;
+        let taken = select_unpredictable(root, 2 * usize::from(split), usize::from(l | force));
+        *next += taken * stride;
+        (
+            Self(select_unpredictable(unsplit_root, 0, keep)),
+            Self(select_unpredictable(unsplit_root, 0, fresh)),
+            h,
+            l,
+        )
+    }
+
+    #[inline(always)]
+    unsafe fn add_runs<S: RunSink + ?Sized>(
+        &self,
+        arena: *const Unit,
+        v: S::Value,
+        sink: &mut S,
+        _: usize,
+    ) {
+        // SAFETY: the caller guarantees self is a written slot, whose span's words
+        // lie in its mask.
+        let (w, lo) = unsafe {
+            let s = self.span(arena);
+            let words = self.at(arena).cast::<u64>().add(s.lo);
+            (std::slice::from_raw_parts(words, s.hi - s.lo), s.lo)
+        };
+        rows::add_runs(w, lo, v, sink);
+    }
+}
+
 /// What the counted resolve passes saw.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Splits {

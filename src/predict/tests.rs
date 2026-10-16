@@ -38,7 +38,7 @@ struct Case {
 /// Under Miri, which checks the unsafe code, a few small models and groups.
 const MIRI: bool = cfg!(miri);
 
-const SIZES: [usize; 12] = [1, 1, 2, 17, 32, 33, 64, 65, 129, 257, 513, 1024];
+const SIZES: [usize; 14] = [1, 1, 2, 17, 32, 33, 64, 65, 129, 257, 513, 1024, 1025, 1100];
 
 fn case(seed: u64) -> Case {
     let mut rng = Rng::new(seed);
@@ -76,7 +76,7 @@ fn case(seed: u64) -> Case {
     let roles_ref = &roles;
     let with = |role| (0..m.n_features).filter(move |&f| roles_ref[f] == role);
     let config = WalkerConfig::builder(m.n_features)
-        .max_group_width(widest.max(*rng.pick(&[1, 64, 1024])))
+        .max_group_width(widest.max(*rng.pick(&[1, 64, 2048])))
         .varying(with(Role::Varying))
         .increasing(with(Role::Increasing))
         .decreasing(with(Role::Decreasing))
