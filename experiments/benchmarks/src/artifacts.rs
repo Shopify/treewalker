@@ -15,6 +15,7 @@ use treewalker_gbdt::research::LoadAblation;
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
 use crate::data;
+use crate::schedule::GroupOrder;
 
 /// The execution manifest's schema version this runner reads.
 pub const MANIFEST_SCHEMA: u64 = 3;
@@ -438,6 +439,11 @@ impl Cell {
         };
         let id = str_field(&doc, "id").to_string();
         Self::slug(&id).with_context(|| format!("{}", doc_path.display()))?;
+        match doc.get("row_order") {
+            None | Some(Value::Null) => {}
+            Some(Value::String(o)) if o == "independent" || o == "file" => {}
+            Some(o) => bail!("{}: unknown row order {o}", doc_path.display()),
+        }
         Ok(Self {
             id,
             dir: dir.to_path_buf(),
@@ -509,6 +515,16 @@ impl Cell {
             );
         }
         Ok(())
+    }
+
+    /// The order the runner times the groups in. A cell with a row order (the
+    /// single-row cells) holds its rows in the order to time them, a fixed-seed
+    /// shuffle or the source's order; every other cell gets the seeded order.
+    pub fn group_order(&self) -> GroupOrder {
+        match self.doc.get("row_order") {
+            None | Some(Value::Null) => GroupOrder::Seeded,
+            Some(_) => GroupOrder::File,
+        }
     }
 
     pub const fn n_groups(&self) -> usize {

@@ -18,6 +18,7 @@ pub mod artifacts;
 pub mod data;
 pub mod driver;
 pub mod external;
+pub mod memory;
 pub mod methods;
 pub mod output;
 pub mod pmu;
