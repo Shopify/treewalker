@@ -138,7 +138,7 @@ impl WalkerConfig {
         if bytes.len() > 65_536 {
             return Err(LoadError::Limit("configuration exceeds 64 KiB".into()));
         }
-        crate::parser::validate_json_depth(bytes)
+        crate::legacy::parser::validate_json_depth(bytes)
             .map_err(|e| LoadError::MalformedConfig(e.to_string()))?;
         let mut data = bytes.to_vec();
         let f: WalkerConfigFile = simd_json::serde::from_slice(&mut data)

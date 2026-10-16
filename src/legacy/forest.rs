@@ -34,7 +34,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::{LoadOptions, WalkerConfig};
-use crate::parser;
+use crate::legacy::parser;
 use crate::{LoadError, ModelFormat};
 use std::io::{Cursor, Read};
 

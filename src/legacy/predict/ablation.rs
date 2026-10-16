@@ -2,8 +2,8 @@
 //! used when precompute is disabled.
 
 use super::WorkCounters;
-use crate::forest::{Model, Node, threshold_go_left};
-use crate::mask::RowMask;
+use crate::legacy::forest::{Model, Node, threshold_go_left};
+use crate::legacy::mask::RowMask;
 
 impl Model {
     /// Brute-force O(P × n) precompute — evaluates each predicate against every row.
@@ -214,7 +214,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::WorkCounters;
-    use crate::forest::{Model, Node};
+    use crate::legacy::forest::{Model, Node};
 
     fn num_node(threshold: f64, default_left: bool) -> Node {
         Node {
