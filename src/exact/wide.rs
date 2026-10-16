@@ -344,7 +344,7 @@ fn nearest(magnitude: u128, sticky: bool, k: i32, negative: bool) -> f64 {
 /// layout's span, so at most `trees × 2^29`; with the carries, every slot stays
 /// below `(3 × trees + 3) × 2^29`.
 ///
-/// Sums of every row ([`RunSink::add_all`]) take turns among [`WIDE_SUMS`]
+/// Sums of every row ([`RunSink::add_all_of`]) take turns among [`WIDE_SUMS`]
 /// accumulators, which [`RunSink::flush`] adds to entry 0 and clears: consecutive
 /// leaves mostly share their slots, and an add to the slots the previous add wrote
 /// would wait for its stores.
@@ -447,15 +447,6 @@ impl RunSink for WideRuns<'_> {
         debug_assert!(at < self.entries && v.first as usize + LEAF_DIGITS <= self.n);
         // SAFETY: as above.
         unsafe { v.sub_from(self.limbs.as_mut_ptr().add(at * self.n)) };
-    }
-
-    #[inline]
-    fn add_all(&mut self, turn: &mut usize, v: WideLeaf) {
-        assert!(!self.sums.is_empty(), "a sink without sums of every row");
-        debug_assert!(v.first as usize + LEAF_DIGITS <= self.n);
-        // SAFETY: the sums are WIDE_SUMS accumulators, and `v` is a leaf of the layout.
-        unsafe { v.add_to(self.sums.as_mut_ptr().add(*turn % WIDE_SUMS * self.n)) };
-        *turn += 1;
     }
 
     #[inline]
