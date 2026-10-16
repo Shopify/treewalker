@@ -90,20 +90,21 @@ for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids
 done
 ```
 
-Optionally, Miri checks the unsafe code of the kernel and the masks on small cases,
-with a nightly toolchain (`rustup +nightly component add miri`). The x86-64 runs take
-the SSE2 and AVX2 masks, the RISC-V run the plain-word fallback; on AArch64, Miri
-lacks a NEON intrinsic the masks use. Miri perturbs `exp` unless floats are
+Optionally, Miri checks the unsafe code on small production-shaped cases
+(`tests/miri.rs` and the lib's `prefetching_walks`), each of which runs every kind of
+unsafe operation of its path once, with a nightly toolchain (`rustup +nightly component
+add miri`). The x86-64 runs take the SSE2 and AVX2 masks, the RISC-V run the plain-word
+fallback; on AArch64, Miri lacks a NEON intrinsic the masks use. Miri perturbs `exp` unless floats are
 deterministic, and the sigmoid would then differ between two calls of the same
 prediction. An empty `RUSTFLAGS` replaces the repository's `target-cpu=native`:
 
 ```bash
 export MIRIFLAGS=-Zmiri-deterministic-floats
 for cpu in x86-64 x86-64-v3; do
-  RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- mask:: predict::
+  RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- prefetching_walks
   RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --test miri
 done
-RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --lib -- mask:: predict::
+RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --lib -- prefetching_walks
 RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --test miri
 ```
 

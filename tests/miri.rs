@@ -1,15 +1,21 @@
-//! Small cases that run every path of the kernel, sized for Miri, which checks the
-//! unsafe code in the walk, the resolve passes, the leaf pass and the masks. The
-//! README's development checks list the commands: x86-64 with and without AVX2, and
-//! RISC-V for the plain-word fallback. Miri perturbs `exp` unless floats are
-//! deterministic (`-Zmiri-deterministic-floats`), and the sigmoid would then differ
-//! between two calls; on AArch64 it lacks a NEON intrinsic the masks use.
+//! Small production-shaped cases for Miri, which checks the unsafe code: each runs every
+//! kind of unsafe operation of its path once. The README's development checks list the
+//! commands: x86-64 with SSE2 and with AVX2, and RISC-V for the plain-word fallback; the
+//! lib's `predict::tests::prefetching_walks` adds the walks that prefetch. Miri perturbs
+//! `exp` unless floats are deterministic (`-Zmiri-deterministic-floats`), and the
+//! sigmoid would then differ between two calls; on AArch64 it lacks a NEON intrinsic
+//! the masks use. Whether the kernel is right on every path is the property tests'
+//! question (`tests/property.rs`); natively these cases run once, as under Miri.
 //!
-//! Each shape is a list of group sizes: single rows (the constant path), masks of 32
-//! and 64 bits carried by value, wider masks in the arena, and a group past 1,024 rows
-//! at a runtime mask width. Each runs on models with ordinary leaves and with leaves past the
-//! 126-bit rule, with every feature varying and with most features constant. Outside
-//! Miri the same shapes run on more seeds.
+//! Each case is a list of group sizes on one generated model:
+//!
+//! - `single_rows`: the constant walk, and wide leaves summed in turns;
+//! - `masks_by_value`: masks of 32 and 64 bits in registers, and `i128` leaf runs;
+//! - `masks_in_the_arena`: fixed-width masks of 128 and 256 bits in the arena, their
+//!   SIMD loads and stores, resolve's lists, and wide leaf runs;
+//! - `widest_masks`: masks of 512 and 1,024 bits;
+//! - `runtime_width_*`: a group past 1,024 rows on runtime-width masks, with most
+//!   features constant and with every feature varying.
 #![expect(clippy::float_cmp, reason = "the generator's exact category test")]
 
 mod common;
@@ -19,8 +25,6 @@ use common::rng::{Rng, mix};
 use treewalker_gbdt::research::LoadAblation;
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
-const MIRI: bool = cfg!(miri);
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Role {
     Constant,
@@ -29,10 +33,12 @@ enum Role {
     Decreasing,
 }
 
-/// Generate a case for `sizes` and check every call against the exact full walk.
-/// With `chained`, categorical features take nested sets, and a model without a
-/// chain of two or more sets is skipped; returns whether the case ran.
-fn check(seed: u64, sizes: &[usize], wide: bool, all_varying: bool, chained: bool) -> bool {
+/// Generate the case `name` for `sizes`, with ordinary leaves or leaves past the
+/// 126-bit rule (`wide`), and most features constant or all varying; check every row
+/// against the exact full walk, bit for bit. The seed comes from `name`.
+fn check(name: &str, sizes: &[usize], wide: bool, all_varying: bool) {
+    let base = name.bytes().fold(0u64, |h, b| mix(h ^ u64::from(b)));
+    let seed = mix(base ^ (u64::from(wide) << 1 | u64::from(all_varying)));
     let mut rng = Rng::new(seed);
     let settings = Settings {
         max_trees: 6,
@@ -41,7 +47,7 @@ fn check(seed: u64, sizes: &[usize], wide: bool, all_varying: bool, chained: boo
         categorical: 0.4,
         wide: false,
         max_depth: 12,
-        nested: if chained { 1.0 } else { 0.0 },
+        nested: 0.0,
     };
     // Few features keep the masks' threshold sweep small.
     let (m, features) = loop {
@@ -89,11 +95,7 @@ fn check(seed: u64, sizes: &[usize], wide: bool, all_varying: bool, chained: boo
         &LoadOptions::default(),
         &ablation,
     )
-    .unwrap_or_else(|e| panic!("seed {seed:#x}: load: {e}"));
-    let stats = forest.layout_stats();
-    if chained && stats.chain_sets <= stats.chain_slots {
-        return false;
-    }
+    .unwrap_or_else(|e| panic!("{name}: load: {e}"));
     let data: Vec<f64> = sizes
         .iter()
         .flat_map(|&n| group(&mut rng, &features, &roles, m.precision, n))
@@ -108,22 +110,14 @@ fn check(seed: u64, sizes: &[usize], wide: bool, all_varying: bool, chained: boo
         }))
         .collect();
     let mut out = vec![f64::NAN; n];
-    let mut predictor = forest.predictor();
-    predictor.predict_groups(&data, &offsets, &mut out);
+    forest.predictor().predict_groups(&data, &offsets, &mut out);
     for (r, (a, e)) in out.iter().zip(&full).enumerate() {
         assert_eq!(
             a.to_bits(),
             e.to_bits(),
-            "seed {seed:#x} sizes {sizes:?}: row {r}: {a:e} != {e:e}"
+            "{name} sizes {sizes:?}: row {r}: {a:e} != {e:e}"
         );
     }
-    // The first group again on its own, through the same scratch.
-    let mut first = vec![f64::NAN; sizes[0]];
-    predictor.predict_group(&data[..sizes[0] * nf], &mut first);
-    for (r, (a, e)) in first.iter().zip(&full).enumerate() {
-        assert_eq!(a.to_bits(), e.to_bits(), "seed {seed:#x}: alone, row {r}");
-    }
-    true
 }
 
 /// One group's rows: constant features equal in every row, monotonic ones ordered.
@@ -159,72 +153,33 @@ fn group(
         .collect()
 }
 
-/// Run `sizes` on every combination of leaves and roles, `seeds` times each.
-fn shape(name: &str, sizes: &[usize]) {
-    let seeds = if MIRI { 1 } else { 40 };
-    let base = name.bytes().fold(0u64, |h, b| mix(h ^ u64::from(b)));
-    for s in 0..seeds {
-        for (k, (wide, all_varying)) in [(false, false), (false, true), (true, false), (true, true)]
-            .into_iter()
-            .enumerate()
-        {
-            check(
-                mix(base ^ (s << 2 | k as u64)),
-                sizes,
-                wide,
-                all_varying,
-                false,
-            );
-        }
-    }
-}
-
-#[test]
-fn chained_categories() {
-    // Features whose splits' sets nest take chains of several sets: rank tables in
-    // the bins and rank counts in the precompute, for a single row, masks by value
-    // and in the arena.
-    let base = mix(0x9001);
-    let want = if MIRI { 2 } else { 20 };
-    let mut ran = 0;
-    for attempt in 0..2000 {
-        let all_varying = attempt % 2 == 1;
-        ran += usize::from(check(
-            mix(base ^ attempt),
-            &[1, 33, 65],
-            false,
-            all_varying,
-            true,
-        ));
-        if ran == want {
-            return;
-        }
-    }
-    panic!("{ran} models with chained categories");
-}
-
 #[test]
 fn single_rows() {
-    shape("single_rows", &[1, 1, 1]);
+    check("single_rows", &[1, 1, 1], true, false);
 }
 
 #[test]
 fn masks_by_value() {
-    shape("masks_by_value", &[2, 31, 32, 33, 64]);
+    check("masks_by_value", &[2, 31, 32, 33, 64], false, false);
 }
 
 #[test]
 fn masks_in_the_arena() {
-    shape("masks_in_the_arena", &[65, 128, 129]);
+    check("masks_in_the_arena", &[65, 128, 129], true, false);
 }
 
 #[test]
 fn widest_masks() {
-    shape("widest_masks", &[257, 513]);
+    check("widest_masks", &[257, 513], false, true);
+}
+
+// Seeded by the shape's former name, "pieces".
+#[test]
+fn runtime_width_mostly_constant() {
+    check("pieces", &[1025], false, false);
 }
 
 #[test]
-fn runtime_width() {
-    // Seeded by the test's former name, "pieces", so that it keeps its cases.
-    shape("pieces", &[1025]);
+fn runtime_width_all_varying() {
+    check("pieces", &[1025], false, true);
 }
