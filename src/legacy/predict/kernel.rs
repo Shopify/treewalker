@@ -2,10 +2,10 @@
 //! evaluation, and the sorted-threshold sweep that precomputes varying masks.
 
 use super::{Ablation, EvalCtx, WorkCounters};
-use crate::forest::{
+use crate::legacy::forest::{
     Model, Node, PrefixGroup, SPLIT_MONO_DEC, SPLIT_MONO_INC, VaryingPredicate, threshold_go_left,
 };
-use crate::mask::RowMask;
+use crate::legacy::mask::RowMask;
 
 impl Model {
     // -----------------------------------------------------------------------
@@ -390,7 +390,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use crate::config::WalkerConfig;
-    use crate::forest::{FeatureRange, Model, ThresholdType, VaryingPredicate};
+    use crate::legacy::forest::{FeatureRange, Model, ThresholdType, VaryingPredicate};
 
     /// Row-major rows from width-32 feature columns.
     fn rows_from_columns(cols: &[[f64; 32]; 64], n_rows: usize, n_features: usize) -> Vec<f64> {
@@ -403,10 +403,10 @@ mod tests {
 
     fn sweep_forest(preds: Vec<VaryingPredicate>, ranges: Vec<FeatureRange>) -> Model {
         Model {
-            output: crate::parser::Output {
+            output: crate::legacy::parser::Output {
                 base_score: 0.0,
                 divisor: 1.0,
-                postprocessor: crate::parser::Postprocessor::Sigmoid(1.0),
+                postprocessor: crate::legacy::parser::Postprocessor::Sigmoid(1.0),
             },
             trees: Vec::new(),
             config: WalkerConfig::builder(64)
@@ -428,7 +428,7 @@ mod tests {
     fn num_pred(feature: u16, threshold: f64, default_left: bool) -> VaryingPredicate {
         VaryingPredicate::Num {
             feature,
-            threshold: crate::forest::Threshold(threshold),
+            threshold: crate::legacy::forest::Threshold(threshold),
             default_left,
         }
     }

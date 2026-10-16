@@ -26,11 +26,11 @@
 //! forest.predict_full_walk(&rows, &mut reference); // every tree, row by row
 //! ```
 
-use crate::forest::{Forest, Model};
-use crate::predict::{Groups, Predictor};
+use crate::legacy::forest::{Forest, Model};
+use crate::legacy::predict::{Groups, Predictor};
 
-pub use crate::forest::{Node, ThresholdType, Tree};
-pub use crate::predict::{Ablation, COUNTERS_VERSION, WorkCounters};
+pub use crate::legacy::forest::{Node, ThresholdType, Tree};
+pub use crate::legacy::predict::{Ablation, COUNTERS_VERSION, WorkCounters};
 
 /// The three stages of a prediction, one value per row.
 ///

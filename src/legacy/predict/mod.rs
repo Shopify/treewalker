@@ -40,8 +40,8 @@ pub use counters::WorkCounters;
 
 use std::sync::Arc;
 
-use crate::forest::{Forest, Model, ThresholdType};
-use crate::mask::{Bits, RowMask};
+use crate::legacy::forest::{Forest, Model, ThresholdType};
+use crate::legacy::mask::{Bits, RowMask};
 
 /// Runtime ablation flags: each disables one optimization of the predict path.
 ///
@@ -433,8 +433,8 @@ impl Model {
     #[inline(always)]
     pub(crate) fn apply_link(&self, values: &mut [f64]) {
         match self.output.postprocessor {
-            crate::parser::Postprocessor::Identity => {}
-            crate::parser::Postprocessor::Sigmoid(alpha) => {
+            crate::legacy::parser::Postprocessor::Identity => {}
+            crate::legacy::parser::Postprocessor::Sigmoid(alpha) => {
                 if alpha != 1.0 {
                     for v in &mut *values {
                         *v *= alpha;

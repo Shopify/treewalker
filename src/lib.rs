@@ -75,18 +75,16 @@ mod error;
 // Until the new kernel uses them, the wide accumulator and the runs are unused.
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod exact;
-mod forest;
-mod mask;
-mod parser;
-mod predict;
+mod legacy;
 #[cfg(feature = "research")]
+#[path = "legacy/research.rs"]
 pub mod research;
 
 pub use config::{LoadOptions, WalkerConfig, WalkerConfigBuilder};
 pub use error::LoadError;
-pub use forest::Forest;
-pub use parser::ModelFormat;
-pub use predict::Predictor;
+pub use legacy::forest::Forest;
+pub use legacy::parser::ModelFormat;
+pub use legacy::predict::Predictor;
 
 // The README's and the loading guide's Rust examples compile as doctests.
 #[cfg(doctest)]

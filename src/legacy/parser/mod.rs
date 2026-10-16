@@ -44,7 +44,7 @@ use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;
 
 use crate::config::{LoadOptions, WalkerConfig};
-use crate::forest::{FeatureRange, Node, PrefixGroup, Threshold, Tree, VaryingPredicate};
+use crate::legacy::forest::{FeatureRange, Node, PrefixGroup, Threshold, Tree, VaryingPredicate};
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -571,7 +571,8 @@ mod limit_tests {
             skip: 1,
             varying_pred_id: u16::MAX,
             feature: 0,
-            flags: crate::forest::SPLIT_NON_MONO << crate::forest::FLAG_VARYING_TYPE_SHIFT,
+            flags: crate::legacy::forest::SPLIT_NON_MONO
+                << crate::legacy::forest::FLAG_VARYING_TYPE_SHIFT,
             cat_n_words: 0,
         };
         let mut nodes: Vec<_> = (0..=usize::from(u16::MAX)).map(make).collect();

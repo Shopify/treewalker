@@ -1,5 +1,5 @@
 //! Shared semantic validation and bounded import policy.
-use crate::forest::{Node, ThresholdType, Tree};
+use crate::legacy::forest::{Node, ThresholdType, Tree};
 use crate::{LoadError, WalkerConfig};
 
 pub(super) const MAX_TREES: usize = 1_000_000;
