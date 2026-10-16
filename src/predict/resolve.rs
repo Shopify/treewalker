@@ -473,6 +473,19 @@ pub(super) struct Resolve<M, C> {
     pub(super) listed: *mut u32,
 }
 
+/// Whether resolve lists fixed-width handles' varying stops with AVX-512's compress
+/// (`list_avx512`, x86-64-v4) rather than item by item.
+pub(super) const COMPRESS: bool = cfg!(all(
+    target_arch = "x86_64",
+    target_feature = "avx512f",
+    target_feature = "avx512vl"
+));
+
+/// Entries past the last that listing fixed-width handles' varying stops may write, in
+/// `leaves` and in `listed`: `list_avx512` stores a block of 8 whole; 0 for the
+/// loop item by item.
+pub(super) const LISTED_SLACK: usize = if COMPRESS { 7 } else { 0 };
+
 /// Turn a pass's stops into the next pass's items, returned as a count, and leaf
 /// entries.
 ///
@@ -482,8 +495,9 @@ pub(super) struct Resolve<M, C> {
 /// `n_items` items `pass.items`. `pass.masks` holds the all-rows mask, then every
 /// predicate's left and right masks, `pass.out` has room for two items per item plus one and
 /// `pass.leaves` for one entry per leaf plus one, `pass.scratch` for one mask, the
-/// arena as [`Carrier::split`] requires, and for fixed-width handles `pass.listed`
-/// has room for `n_items` positions.
+/// arena as [`Carrier::split`] requires, and for fixed-width handles `pass.leaves` has
+/// [`LISTED_SLACK`] more entries and `pass.listed` room for `n_items` positions plus
+/// [`LISTED_SLACK`].
 #[inline(always)]
 pub(super) unsafe fn resolve<
     M: Mask,
@@ -501,21 +515,17 @@ pub(super) unsafe fn resolve<
         // SAFETY: the caller guarantees the bounds above.
         return unsafe { resolve_listed::<M, C, SCAN, EMPTY, STATS>(pass, n_items, scan, seen) };
     }
-    let mut n = 0usize;
     let u = pass.units;
-    // SAFETY: the caller guarantees the bounds above.
-    unsafe {
-        for j in 0..n_items {
-            let w1 = *pass.words.add(j);
-            let carry = (*pass.items.add(j)).carry;
-            let child = w1 as u32;
-            let is_leaf = w1 & FLAG_LEAF != 0;
-            *pass.leaves.add(pass.n_leaves) = Item { node: child, carry };
-            pass.n_leaves += usize::from(is_leaf);
+    // The split of an item, given its word 1, carry and kind, as (heavy, light,
+    // has_heavy, has_light), counted with `STATS`. Leaves read entry 0, the all-rows
+    // mask; a split on varying predicate i reads its heavy side's, 2i + 1 for the left
+    // and 2i + 2 for the right. A leaf passes on no side. By value its split is a few
+    // instructions and needs no branch; a slot's would read and write the arena (see
+    // the module docs).
+    macro_rules! split_of {
+        ($w1:expr, $carry:expr, $is_leaf:expr) => {{
+            let (w1, carry, is_leaf) = ($w1, $carry, $is_leaf);
             let is_varying = !is_leaf;
-            let node = *pass.stops.add(j);
-            // Leaves read entry 0, the all-rows mask; a split on varying predicate i
-            // reads its heavy side's, 2i + 1 for the left and 2i + 2 for the right.
             let field = ((w1 >> MASK_SHIFT) & MASK_FIELD) as usize;
             let side = if SCAN && is_varying {
                 let (pred, right) = ((field - 1) / 2, field.is_multiple_of(2));
@@ -523,9 +533,6 @@ pub(super) unsafe fn resolve<
             } else {
                 C::side(pass.masks, field, u)
             };
-            // A leaf passes on no side. By value its split is a few instructions and
-            // needs no branch; a slot's would read and write the arena (see the
-            // module docs).
             let (heavy, light, has_heavy, has_light) = if C::RUNTIME && is_leaf {
                 (carry, carry, false, false)
             } else {
@@ -537,6 +544,58 @@ pub(super) unsafe fn resolve<
                     seen.empty_sides += u64::from(!has_heavy) + u64::from(!has_light);
                 }
             }
+            (heavy, light, has_heavy, has_light)
+        }};
+    }
+    if cfg!(target_arch = "x86_64") && !C::RUNTIME {
+        // On x86-64, for carriers by value, cursors through the items, words, stops,
+        // leaf entries and items written, rather than indices beside their bases:
+        // three fewer live registers, which keeps the loop's bases out of stack
+        // reloads (a runtime-width slot's frame grew instead).
+        // SAFETY: the caller guarantees the bounds above; the cursors advance by one
+        // item per item, and the outputs' by at most what the indices would.
+        unsafe {
+            let (mut w, mut it, mut st) = (pass.words, pass.items, pass.stops);
+            let end = w.add(n_items);
+            let (mut leaf_at, mut out) = (pass.leaves.add(pass.n_leaves), pass.out);
+            while w < end {
+                let (w1, carry, node) = (*w, (*it).carry, *st);
+                (w, it, st) = (w.add(1), it.add(1), st.add(1));
+                let child = w1 as u32;
+                let is_leaf = w1 & FLAG_LEAF != 0;
+                *leaf_at = Item { node: child, carry };
+                leaf_at = leaf_at.add(usize::from(is_leaf));
+                let is_varying = !is_leaf;
+                let (heavy, light, has_heavy, has_light) = split_of!(w1, carry, is_leaf);
+                let (pass_heavy, pass_light) = (has_heavy | EMPTY, has_light | EMPTY);
+                *out = Item {
+                    node: node + 1,
+                    carry: heavy,
+                };
+                out = out.add(usize::from(is_varying & pass_heavy));
+                *out = Item {
+                    node: child,
+                    carry: light,
+                };
+                out = out.add(usize::from(is_varying & pass_light));
+            }
+            pass.n_leaves = leaf_at.offset_from_unsigned(pass.leaves);
+            return out.offset_from_unsigned(pass.out);
+        }
+    }
+    let mut n = 0usize;
+    // SAFETY: the caller guarantees the bounds above.
+    unsafe {
+        for j in 0..n_items {
+            let w1 = *pass.words.add(j);
+            let carry = (*pass.items.add(j)).carry;
+            let child = w1 as u32;
+            let is_leaf = w1 & FLAG_LEAF != 0;
+            *pass.leaves.add(pass.n_leaves) = Item { node: child, carry };
+            pass.n_leaves += usize::from(is_leaf);
+            let is_varying = !is_leaf;
+            let node = *pass.stops.add(j);
+            let (heavy, light, has_heavy, has_light) = split_of!(w1, carry, is_leaf);
             *pass.out.add(n) = Item {
                 node: node + 1,
                 carry: heavy,
@@ -575,46 +634,74 @@ unsafe fn resolve_listed<
     seen: &mut Splits,
 ) -> usize {
     let u = pass.units;
-    let mut listed = 0usize;
-    // SAFETY: the caller guarantees the bounds of [`resolve`]; `listed` stays at or
-    // below `j`, so the list's writes stay below `n_items`.
-    unsafe {
-        for j in 0..n_items {
-            let w1 = *pass.words.add(j);
+    // SAFETY: the caller guarantees the bounds of [`resolve`], with the slack.
+    let (n_leaves, listed) = unsafe {
+        list(
+            pass.words,
+            pass.items,
+            n_items,
+            pass.leaves,
+            pass.n_leaves,
+            pass.listed,
+        )
+    };
+    pass.n_leaves = n_leaves;
+    // The split of listed position `$j`, binding its word 1, node, sides and whether
+    // each side has rows.
+    macro_rules! split {
+        ($j:expr => $w1:ident, $node:ident, $heavy:ident, $light:ident, $has_heavy:ident, $has_light:ident) => {
+            let j = $j;
+            let $w1 = *pass.words.add(j);
             let carry = (*pass.items.add(j)).carry;
-            let is_leaf = w1 & FLAG_LEAF != 0;
-            *pass.leaves.add(pass.n_leaves) = Item {
-                node: w1 as u32,
-                carry,
-            };
-            pass.n_leaves += usize::from(is_leaf);
-            *pass.listed.add(listed) = j as u32;
-            listed += usize::from(!is_leaf);
-        }
-    }
-    let mut n = 0usize;
-    // SAFETY: as above; every listed position is an item's, below `n_items`.
-    unsafe {
-        for i in 0..listed {
-            let j = *pass.listed.add(i) as usize;
-            let w1 = *pass.words.add(j);
-            let carry = (*pass.items.add(j)).carry;
-            let node = *pass.stops.add(j);
-            let field = ((w1 >> MASK_SHIFT) & MASK_FIELD) as usize;
+            let $node = *pass.stops.add(j);
+            let field = (($w1 >> MASK_SHIFT) & MASK_FIELD) as usize;
             let side = if SCAN {
                 let (pred, right) = ((field - 1) / 2, field.is_multiple_of(2));
                 carry.scan_side(pass.arena, pred, right, scan, pass.scratch, u)
             } else {
                 C::side(pass.masks, field, u)
             };
-            let (heavy, light, has_heavy, has_light) =
+            let ($heavy, $light, $has_heavy, $has_light) =
                 carry.split(side, EMPTY, pass.arena, &mut pass.next_slot, u);
             if STATS {
-                seen.splits += u64::from(has_heavy & has_light);
+                seen.splits += u64::from($has_heavy & $has_light);
                 if EMPTY {
-                    seen.empty_sides += u64::from(!has_heavy) + u64::from(!has_light);
+                    seen.empty_sides += u64::from(!$has_heavy) + u64::from(!$has_light);
                 }
             }
+        };
+    }
+    if cfg!(target_arch = "x86_64") {
+        // On x86-64, a cursor through the list and one through the items written,
+        // rather than an index into each beside their bases: two fewer live registers,
+        // which keeps the loop's state off the stack.
+        // SAFETY: as above; every listed position is an item's, below `n_items`, and
+        // the list holds `listed` of them.
+        unsafe {
+            let (mut at, end, mut out) =
+                (pass.listed.cast_const(), pass.listed.add(listed), pass.out);
+            while at.cast_mut() < end {
+                split!(*at as usize => w1, node, heavy, light, has_heavy, has_light);
+                at = at.add(1);
+                *out = Item {
+                    node: node + 1,
+                    carry: heavy,
+                };
+                out = out.add(usize::from(has_heavy | EMPTY));
+                *out = Item {
+                    node: w1 as u32,
+                    carry: light,
+                };
+                out = out.add(usize::from(has_light | EMPTY));
+            }
+            return out.offset_from_unsigned(pass.out);
+        }
+    }
+    let mut n = 0usize;
+    // SAFETY: as above; every listed position is an item's, below `n_items`.
+    unsafe {
+        for i in 0..listed {
+            split!(*pass.listed.add(i) as usize => w1, node, heavy, light, has_heavy, has_light);
             *pass.out.add(n) = Item {
                 node: node + 1,
                 carry: heavy,
@@ -628,4 +715,287 @@ unsafe fn resolve_listed<
         }
     }
     n
+}
+
+/// Resolve's first loop for fixed-width handles: writes the leaf entries of
+/// `items[..n_items]` from `n_leaves` on and the positions of their varying stops to
+/// `listed`, and returns both counts. With AVX-512, items of 4-byte carriers go 8
+/// at a time (`list_avx512`).
+///
+/// # Safety
+///
+/// `words` and `items` hold `n_items` entries; `leaves` has room for the leaf entries
+/// past `n_leaves` plus 1 + [`LISTED_SLACK`], and `listed` for `n_items` +
+/// [`LISTED_SLACK`] positions.
+#[inline(always)]
+unsafe fn list<C: Copy>(
+    words: *const u64,
+    items: *const Item<C>,
+    n_items: usize,
+    leaves: *mut Item<C>,
+    n_leaves: usize,
+    listed: *mut u32,
+) -> (usize, usize) {
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx512f",
+        target_feature = "avx512vl"
+    ))]
+    if size_of::<C>() == 4 {
+        // SAFETY: the caller guarantees the bounds, and the carrier's size.
+        return unsafe { list_avx512(words, items, n_items, leaves, n_leaves, listed) };
+    }
+    // SAFETY: the caller guarantees the bounds.
+    unsafe { list_scalar(words, items, n_items, leaves, n_leaves, listed) }
+}
+
+/// [`list`] item by item, without branches: every item writes a leaf entry and a
+/// position, and the counts advance by its kind.
+///
+/// # Safety
+///
+/// As for [`list`], without the slack.
+#[inline(always)]
+unsafe fn list_scalar<C: Copy>(
+    words: *const u64,
+    items: *const Item<C>,
+    n_items: usize,
+    leaves: *mut Item<C>,
+    mut n_leaves: usize,
+    listed: *mut u32,
+) -> (usize, usize) {
+    let mut n_listed = 0usize;
+    // SAFETY: the caller guarantees the bounds; `n_listed` stays at or below `j`, so
+    // the list's writes stay below `n_items`.
+    unsafe {
+        for j in 0..n_items {
+            let w1 = *words.add(j);
+            let carry = (*items.add(j)).carry;
+            let is_leaf = w1 & FLAG_LEAF != 0;
+            *leaves.add(n_leaves) = Item {
+                node: w1 as u32,
+                carry,
+            };
+            n_leaves += usize::from(is_leaf);
+            *listed.add(n_listed) = j as u32;
+            n_listed += usize::from(!is_leaf);
+        }
+    }
+    (n_leaves, n_listed)
+}
+
+/// [`list`] for 4-byte carriers, 8 items at a time: a mask of the leaves by
+/// `vptestmq`, the entries (word 1's low half, the item's carry) by a bitwise select,
+/// then the leaves' entries and the varying stops' positions compressed into
+/// registers by `vpcompressq` and `vpcompressd`, stored whole, and the counts
+/// advanced by the masks' populations. The register form and a plain store, because
+/// the compress to memory is microcoded on Zen 4. A last block of fewer than 8 items
+/// loads under a mask of them. Items and entries come out in the order of [`list_scalar`].
+///
+/// # Safety
+///
+/// As for [`list`], and `C` is 4 bytes, so that an item is its node's 4 bytes then the
+/// carry's.
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx512f",
+    target_feature = "avx512vl"
+))]
+#[inline(always)]
+unsafe fn list_avx512<C: Copy>(
+    words: *const u64,
+    items: *const Item<C>,
+    n_items: usize,
+    leaves: *mut Item<C>,
+    mut n_leaves: usize,
+    listed: *mut u32,
+) -> (usize, usize) {
+    use std::arch::x86_64::{
+        __m256i, __m512i, __mmask8, _mm256_add_epi32, _mm256_maskz_compress_epi32,
+        _mm256_set1_epi32, _mm256_setr_epi32, _mm256_storeu_si256, _mm512_maskz_compress_epi64,
+        _mm512_maskz_loadu_epi64, _mm512_set1_epi64, _mm512_storeu_si512,
+        _mm512_ternarylogic_epi64, _mm512_test_epi64_mask,
+    };
+    /// `!leaf & block` by one `kandnb` (AVX512DQ), a mask-register instruction on
+    /// port 0. Written in Rust, LLVM folds the complement into a second test of the
+    /// words (`vptestnmq`), a port-5 µop beside the test's and the compresses'.
+    #[inline(always)]
+    fn others(leaf: __mmask8, block: __mmask8) -> __mmask8 {
+        #[cfg(target_feature = "avx512dq")]
+        {
+            let out: __mmask8;
+            // SAFETY: AVX512DQ is enabled at build time; the instruction reads and
+            // writes mask registers only.
+            unsafe {
+                std::arch::asm!(
+                    "kandnb {o}, {l}, {b}",
+                    l = in(kreg) leaf,
+                    b = in(kreg) block,
+                    o = lateout(kreg) out,
+                    options(pure, nomem, nostack, preserves_flags),
+                );
+            }
+            out
+        }
+        #[cfg(not(target_feature = "avx512dq"))]
+        {
+            !leaf & block
+        }
+    }
+    debug_assert_eq!(size_of::<Item<C>>(), 8);
+    let mut n_listed = 0usize;
+    // SAFETY: the caller guarantees the bounds, with the slack: a block's stores write
+    // 8 entries from `n_leaves` and 8 positions from `n_listed`, which then advance by
+    // at most 8, and loads read only the block's items below `n_items` (masked loads
+    // do not touch the lanes they leave out).
+    unsafe {
+        let flag = _mm512_set1_epi64(FLAG_LEAF as i64);
+        // Each item's low dword, from word 1, by a bitwise select on this rather than
+        // a dword blend under a mask register, which LLVM rebuilt in every block.
+        let low = _mm512_set1_epi64(0xFFFF_FFFF);
+        let mut positions = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        // One block of 8 items from `j`, of which the `count` in `block` are loaded.
+        let mut list_block = |j: usize, block: u8, count: usize| {
+            let w = _mm512_maskz_loadu_epi64(block, words.add(j).cast());
+            let it = _mm512_maskz_loadu_epi64(block, items.add(j).cast());
+            let leaf = _mm512_test_epi64_mask(w, flag);
+            let varying = others(leaf, block);
+            // Odd dwords, the items' high halves, are the carries: `low ? w : it`.
+            let entries: __m512i = _mm512_ternarylogic_epi64::<0xCA>(low, w, it);
+            _mm512_storeu_si512(
+                leaves.add(n_leaves).cast(),
+                _mm512_maskz_compress_epi64(leaf, entries),
+            );
+            let at: __m256i = _mm256_maskz_compress_epi32(varying, positions);
+            _mm256_storeu_si256(listed.add(n_listed).cast(), at);
+            let leaf_count = leaf.count_ones() as usize;
+            n_leaves += leaf_count;
+            n_listed += count - leaf_count;
+            positions = _mm256_add_epi32(positions, _mm256_set1_epi32(8));
+        };
+        let full = n_items - n_items % 8;
+        let mut j = 0usize;
+        while j < full {
+            list_block(j, u8::MAX, 8);
+            j += 8;
+        }
+        if full < n_items {
+            let rest = n_items - full;
+            list_block(full, (1u8 << rest) - 1, rest);
+        }
+    }
+    (n_leaves, n_listed)
+}
+
+/// `list_avx512` against [`list_scalar`]. These run only where the build enables
+/// AVX-512F and VL (`-C target-cpu=x86-64-v4`, or `native` on such a CPU): first run
+/// on GCE, since neither Rosetta nor Miri executes AVX-512.
+#[cfg(all(
+    test,
+    target_arch = "x86_64",
+    target_feature = "avx512f",
+    target_feature = "avx512vl"
+))]
+mod tests {
+    use super::{FLAG_LEAF, Handle, Item, LISTED_SLACK, list_avx512, list_scalar};
+
+    /// A guard value past the slack, which neither loop may write.
+    const GUARD: u32 = 0xDEAD_BEEF;
+
+    struct Lists {
+        n_leaves: usize,
+        n_listed: usize,
+        leaves: Vec<Item<Handle>>,
+        listed: Vec<u32>,
+    }
+
+    /// Both loops over the same input, each into buffers sized as [`super::list`]
+    /// requires, with a guard past them.
+    fn lists(words: &[u64], items: &[Item<Handle>], n_leaves: usize, avx512: bool) -> Lists {
+        let n = words.len();
+        let guard = Item {
+            node: GUARD,
+            carry: Handle(GUARD),
+        };
+        let mut leaves = vec![guard; n_leaves + n + 1 + LISTED_SLACK + 8];
+        let mut listed = vec![GUARD; n + LISTED_SLACK + 8];
+        let f = if avx512 {
+            list_avx512::<Handle>
+        } else {
+            list_scalar::<Handle>
+        };
+        // SAFETY: the buffers are sized as `list` requires, and a handle is 4 bytes.
+        let (end, n_listed) = unsafe {
+            f(
+                words.as_ptr(),
+                items.as_ptr(),
+                n,
+                leaves.as_mut_ptr(),
+                n_leaves,
+                listed.as_mut_ptr(),
+            )
+        };
+        let written = n_leaves + n + 1 + LISTED_SLACK;
+        assert!(
+            leaves[written..]
+                .iter()
+                .all(|e| e.node == GUARD && e.carry.0 == GUARD)
+        );
+        assert!(listed[n + LISTED_SLACK..].iter().all(|&p| p == GUARD));
+        Lists {
+            n_leaves: end,
+            n_listed,
+            leaves,
+            listed,
+        }
+    }
+
+    #[test]
+    fn compressed_lists_match_the_loop_item_by_item() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for n in (0..=70).chain([127, 128, 129, 1000, 1023]) {
+            for case in 0..8 {
+                // Leaf shares from none to all; word 1's other bits random.
+                let share = case % 5;
+                let words: Vec<u64> = (0..n)
+                    .map(|_| {
+                        let w = next() & !FLAG_LEAF;
+                        if next() % 4 < share { w | FLAG_LEAF } else { w }
+                    })
+                    .collect();
+                let items: Vec<Item<Handle>> = (0..n)
+                    .map(|_| {
+                        let r = next();
+                        Item {
+                            node: r as u32,
+                            carry: Handle((r >> 32) as u32),
+                        }
+                    })
+                    .collect();
+                let start = (next() % 9) as usize;
+                let (a, b) = (
+                    lists(&words, &items, start, false),
+                    lists(&words, &items, start, true),
+                );
+                assert_eq!(
+                    (a.n_leaves, a.n_listed),
+                    (b.n_leaves, b.n_listed),
+                    "{n} {case}"
+                );
+                for (x, y) in a.leaves[start..a.n_leaves]
+                    .iter()
+                    .zip(&b.leaves[start..b.n_leaves])
+                {
+                    assert_eq!((x.node, x.carry), (y.node, y.carry), "{n} {case}");
+                }
+                assert_eq!(a.listed[..a.n_listed], b.listed[..b.n_listed], "{n} {case}");
+            }
+        }
+    }
 }

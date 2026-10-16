@@ -58,11 +58,11 @@ pub(crate) const RATES: [usize; 3] = [1, 2, 4];
 /// `examples/walk_asm.rs` (rustc 1.97.1), not tuned:
 ///
 /// - AArch64 (apple-m4, 8 lanes): 3 of 16.
-/// - x86-64 (8 lanes): 24 of the 219 instructions of a round of 8 lane steps on
-///   emeraldrapids (223 on x86-64-v4; 3 of 23 at 2 lanes); the round at 8 lanes also
+/// - x86-64 (8 lanes): 24 of the 202 instructions of a round of 8 lane steps on
+///   emeraldrapids (213 on x86-64-v4; 3 of 22 at 2 lanes); the round at 8 lanes also
 ///   reloads and stores its spilled values.
 #[cfg(target_arch = "x86_64")]
-const PREFETCH_SHARE: f64 = 24.0 / 219.0;
+const PREFETCH_SHARE: f64 = 24.0 / 202.0;
 #[cfg(not(target_arch = "x86_64"))]
 const PREFETCH_SHARE: f64 = 3.0 / 16.0;
 
