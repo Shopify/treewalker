@@ -109,6 +109,31 @@ impl Default for LoadOptions {
     }
 }
 
+/// The layout choices a load makes, all on in production; the research module's
+/// `LoadAblation` turns each off to measure it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Choices {
+    /// Sort trees by their heavy paths.
+    pub(crate) tree_ordering: bool,
+    /// Pool identical category lists once.
+    pub(crate) bitset_intern: bool,
+    /// How prefix groups are formed.
+    pub(crate) prefix: crate::rules::Prefix,
+    /// Share one predicate between identical varying splits.
+    pub(crate) predicate_dedup: bool,
+}
+
+impl Default for Choices {
+    fn default() -> Self {
+        Self {
+            tree_ordering: true,
+            bitset_intern: true,
+            prefix: crate::rules::Prefix::Rule,
+            predicate_dedup: true,
+        }
+    }
+}
+
 /// A set of feature indices: every feature, or the set bits of `words`, which has
 /// no trailing zero word. Canonical, so equal sets compare equal.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -296,7 +321,7 @@ impl WalkerConfig {
                 options.max_config_bytes
             )));
         }
-        crate::legacy::parser::validate_json_depth(bytes)
+        crate::load::parse::validate_json_depth(bytes, options.max_json_nesting)
             .map_err(|e| LoadError::MalformedConfig(e.to_string()))?;
         let mut data = bytes.to_vec();
         let f: WalkerConfigFile = simd_json::serde::from_slice(&mut data)
