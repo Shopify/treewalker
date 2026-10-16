@@ -29,6 +29,9 @@ def peak_rss_bytes() -> int:
     return rss if sys.platform == "darwin" else rss * 1024
 
 
+# --- models --------------------------------------------------------------------------
+
+
 # The version of the rules behind every derived record: a model's limits and
 # JSON export, a cell's status, contract checks and preflight warnings. Cell
 # keys include it and model.json records it, so a change to the rules
@@ -38,8 +41,9 @@ def peak_rss_bytes() -> int:
 # model statistics (model_stats).
 PREP_POLICY = 4
 
-
-# replicate: a seed replicate's entity sample; missing_values: expedia-filled's encoding.
+# Fields only some models' identities have (TrainData.identity), added only when present,
+# so every other model keeps its key. replicate: a seed replicate's entity sample;
+# missing_values: expedia-filled's encoding.
 IDENTITY_EXTRAS = ("replicate", "missing_values")
 
 
@@ -75,7 +79,7 @@ def ensure_model(ctx: Context, model: Model, fw: str, td: TrainData, force: bool
     doc_path = fw_dir / "model.json"
     if not force and doc_path.exists():
         doc = fm.read_json(doc_path)
-        if doc.get("key") == key and files_match(fw_dir, model_files(doc)):
+        if doc.get("key") == key and files_match(fw_dir, doc["files"]):
             log(f"  {model.id}/{fw}: model matches its manifest, reused")
             return refresh_model(fw_dir, doc, json)
         log(f"  {model.id}/{fw}: manifest differs, retraining")
@@ -121,12 +125,6 @@ def ensure_model(ctx: Context, model: Model, fw: str, td: TrainData, force: bool
     return doc
 
 
-def model_files(doc: dict[str, Any]) -> dict[str, dict[str, str]]:
-    """The files that make the model. The JSON dump is derived from the
-    binary export and tracked on its own."""
-    return {k: v for k, v in doc["files"].items() if k != "treelite_json"}
-
-
 def json_record(fw_dir: Path, size: int | None) -> dict[str, Any]:
     if size is None:
         return {"status": "skipped: not a test model"}
@@ -135,6 +133,9 @@ def json_record(fw_dir: Path, size: int | None) -> dict[str, Any]:
         log(f"    JSON export skipped: {size} bytes, over the loader's limit")
         return {"bytes": size, "status": f"skipped: over the loader's limit of {tr.MAX_JSON_BYTES}"}
     return {"bytes": size, "status": "written", "path": path.name, "sha256": fm.sha256_file(path)}
+
+
+# --- model statistics -------------------------------------------------------------
 
 
 def model_stats(tl: Any, varying: set[int]) -> dict[str, Any]:
@@ -152,6 +153,8 @@ def config_varying(config: dict[str, Any]) -> set[int]:
     keys = ("varying_features", "mono_inc_features", "mono_dec_features")
     return {int(f) for k in keys for f in config[k]}
 
+
+# --- derived models ----------------------------------------------------------------
 
 # Models derived from a trained model by editing its Treelite export, for kernel
 # paths no trained model reaches. They have no native model, so only TreeWalker
@@ -259,17 +262,13 @@ def ensure_derived(
     return doc
 
 
-LEGACY_MODEL_FIELDS = ("treelite_json_bytes", "treelite_json_loadable")
-
-
 def refresh_model(fw_dir: Path, doc: dict[str, Any], json: bool) -> dict[str, Any]:
     """Bring a reused model's derived records up to the current policy without
     retraining: the import limits, and the JSON dump, which is exported from
     the binary when the model is listed and deleted when it is not."""
     new = {
-        **{k: v for k, v in doc.items() if k not in LEGACY_MODEL_FIELDS},
+        **doc,
         "prep_policy": PREP_POLICY,
-        "files": model_files(doc),
         "limits": tr.model_limits(doc["structure"]),
     }
     path = fw_dir / "model_treelite.json"

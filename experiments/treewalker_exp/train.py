@@ -10,16 +10,18 @@ from typing import Any
 
 import numpy as np
 
-FRAMEWORKS = ("lightgbm", "xgboost")
 NATIVE_NAME = {"lightgbm": "model_native.txt", "xgboost": "model_native.json"}
 LEARNING_RATE = 0.05
 TRAIN_SEED = 42
 
-# TreeWalker's import limits (src/parser/validation.rs, src/forest.rs).
-MAX_TREE_NODES = 32767  # the light-child index is an i16
+# The import limits behind prep policy 4's records (a model's limits, a cell's
+# predicate warning): TreeWalker 2.x's, whose light-child index was an i16 and whose
+# predicate IDs were u16 with u16::MAX the sentinel. The 3.0 loader takes wider models
+# (src/load/); these stay until a new PREP_POLICY, because the cells record them.
+MAX_TREE_NODES = 32767
 MAX_TOTAL_NODES = 32_000_000
-MAX_PREDICATES = 65535  # u16 ids 0..=65534; u16::MAX is the sentinel
-MAX_JSON_BYTES = 64 * 1024 * 1024  # the JSON loader's limit (src/parser/validation.rs)
+MAX_PREDICATES = 65535
+MAX_JSON_BYTES = 64 * 1024 * 1024  # LoadOptions::max_json_bytes's default (src/config.rs)
 
 
 def library_versions(framework: str) -> dict[str, str]:
@@ -310,7 +312,7 @@ def walk_shares(tl_model: Any, varying: set[int]) -> dict[str, Any]:
 
 def sum_headroom(tl_model: Any) -> int:
     """Bits to spare under TreeWalker's exact-sum rule (``scale`` in
-    src/exact.rs): the sum is exact in i128 when the leaves' span, from the
+    src/exact/mod.rs): the sum is exact in i128 when the leaves' span, from the
     highest set bit of any leaf to the lowest, plus the bits of the tree count
     is below 126. Positive within the rule, zero or negative past it."""
     import math

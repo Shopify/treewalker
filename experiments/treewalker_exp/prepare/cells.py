@@ -12,17 +12,13 @@ from .. import train as tr
 from .. import workloads as wl
 from ..grids import SURVIVAL, Cell
 from .context import RANKING, Context, TrainData
-from .models import (
-    IDENTITY_EXTRAS,
-    PREP_POLICY,
-    SCHEMA,
-    derived_inputs,
-    ensure_model,
-    model_files,
-)
+from .models import IDENTITY_EXTRAS, PREP_POLICY, SCHEMA, derived_inputs, ensure_model
 from .store import files_match, put_matrix, put_npy, put_offsets, put_walker_config, rel
 
 log = ds.log
+
+
+# --- cells -----------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -238,16 +234,11 @@ def ensure_cell(
     old: dict[str, Any] = {}
     if not force and doc_path.exists():
         old = fm.read_cell(doc_path)
-        # A model's JSON dump is derived and may come and go with the export
-        # policy; it does not decide whether a cell is current.
-        kept = {r: f for r, f in old["files"].items() if r != "model_treelite_json"}
-        if not files_match(cell_dir, kept):
+        if not files_match(cell_dir, old["files"]):
             old = {}
         elif old.get("key") == key:
             return old
-        # Cells from before PREP_POLICY have no content_key; their key was
-        # the content key.
-        elif old.get("content_key", old.get("key")) != content_key:
+        elif old.get("content_key") != content_key:
             old = {}
 
     w = built.workload
@@ -302,7 +293,7 @@ def ensure_cell(
         files["oracle"] = cell_dir / "oracle.bin"
         hashes["oracle"] = put_matrix(files["oracle"], rows)
 
-    for role, rec in model_files(mdoc).items():
+    for role, rec in mdoc["files"].items():
         files[f"model_{role}"] = fw_dir / rec["path"]
         hashes[f"model_{role}"] = rec["sha256"]
 

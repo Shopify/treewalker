@@ -381,7 +381,7 @@ def test_factorial_adds_the_replicates_and_expedia_filled():
     assert {(c.model.n_trees, c.model.max_depth) for c in filled} == {
         (t, d) for t in (50, 500, 1000, 2000) for d in (2, 4)
     }
-    assert all(s.plan_for(c)["methods"] == "factorial" for c in new)
+    assert all(s.plan_for(c).methods == "factorial" for c in new)
 
 
 @pytest.mark.parametrize(

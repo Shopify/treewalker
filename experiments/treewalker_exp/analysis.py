@@ -24,28 +24,44 @@ sensitivity checks:
   method's, is process 0's.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
 from . import formats as fm
 
+if TYPE_CHECKING:
+    import polars as pl
 
-def load(run_dir: Path, sample_columns: list[str] | None = None) -> dict[str, Any]:
-    """A packed run (treewalker-exp pack): run.json, three tables and the manifests;
-    ``sample_columns`` reads only those columns of the samples."""
+
+@dataclass(frozen=True, slots=True)
+class Run:
+    """A packed run: run.json, three of its tables, and each cell's manifest by ID."""
+
+    record: dict[str, Any]
+    samples: pl.DataFrame
+    groups: pl.DataFrame
+    hw: pl.DataFrame
+    manifests: dict[str, dict[str, Any]]
+
+
+def load(run_dir: Path, sample_columns: list[str] | None = None) -> Run:
+    """A packed run (treewalker-exp pack); ``sample_columns`` reads only those columns
+    of the samples."""
     import polars as pl
 
     from . import pack
 
     pack.require_packed(run_dir)
-    run = fm.read_json(run_dir / "run.json")
-    samples = pl.read_parquet(run_dir / "samples.parquet", columns=sample_columns)
-    groups = pl.read_parquet(run_dir / "groups.parquet")
-    hw = pl.read_parquet(run_dir / "hw.parquet")
-    manifests = fm.read_json(run_dir / pack.CELLS)
-    return {"run": run, "samples": samples, "groups": groups, "hw": hw, "manifests": manifests}
+    return Run(
+        record=fm.read_json(run_dir / "run.json"),
+        samples=pl.read_parquet(run_dir / "samples.parquet", columns=sample_columns),
+        groups=pl.read_parquet(run_dir / "groups.parquet"),
+        hw=pl.read_parquet(run_dir / "hw.parquet"),
+        manifests=fm.read_json(run_dir / pack.CELLS),
+    )
 
 
 def bootstrap_ratio(
@@ -131,7 +147,7 @@ def split_modes(values: np.ndarray, threshold: float, min_side: int = 2) -> np.n
     return labels
 
 
-def xgboost_block_table(samples: Any, hw: Any) -> Any:
+def xgboost_block_table(samples: pl.DataFrame, hw: pl.DataFrame) -> pl.DataFrame:
     """XGBoost's blocks in every cell and mode, every process: ticks, rows, batch,
     round and instructions (null where the block's counters were not read in
     full), sorted by cell, mode, process and block."""
@@ -160,7 +176,7 @@ def xgboost_block_table(samples: Any, hw: Any) -> Any:
     return blocks.sort(key)
 
 
-def xgboost_blocks(samples: Any, hw: Any, cell: str, mode: str) -> Any:
+def xgboost_blocks(samples: pl.DataFrame, hw: pl.DataFrame, cell: str, mode: str) -> pl.DataFrame:
     """XGBoost's blocks in one cell and mode (`xgboost_block_table`)."""
     import polars as pl
 
@@ -174,7 +190,9 @@ def xgboost_blocks(samples: Any, hw: Any, cell: str, mode: str) -> Any:
 SPLIT = float(np.log(1.02))
 
 
-def xgboost_faster_mode(blocks: Any, counters_required: bool = False) -> dict[str, Any] | None:
+def xgboost_faster_mode(
+    blocks: pl.DataFrame, counters_required: bool = False
+) -> dict[str, Any] | None:
     """XGBoost's two modes, batch by batch, and its faster one (no interval until PR 4).
 
     Every process times the same batches, the same groups in the same calls, so
@@ -223,8 +241,10 @@ def xgboost_faster_mode(blocks: Any, counters_required: bool = False) -> dict[st
         "blocks": len(blocks),
         "unread_blocks": len(blocks) - len(read),
         "processes": len(per_process),
-        "expected": float(per_process["tpr"].mean()),
-        "process0": float(p0["ticks"].sum() / p0["rows"].sum()) if len(p0) else None,
+        "expected": float(cast(float, per_process["tpr"].mean())),
+        "process0": float(cast(int, p0["ticks"].sum()) / cast(int, p0["rows"].sum()))
+        if len(p0)
+        else None,
     }
     if read.is_empty():
         return {**common, "outcome": "unverifiable" if counters_required else "no counters"}
@@ -320,7 +340,7 @@ def xgboost_faster_mode(blocks: Any, counters_required: bool = False) -> dict[st
     }
 
 
-def batch_weighted(per_batch: Any, weights: list[tuple[int, float]]) -> float:
+def batch_weighted(per_batch: pl.DataFrame, weights: list[tuple[int, float]]) -> float:
     """A method's ticks per row over the given batches, each weighted by its rows:
     ``per_batch`` holds each batch's pooled ticks and rows (columns batch, ticks,
     rows)."""
@@ -332,7 +352,7 @@ def batch_weighted(per_batch: Any, weights: list[tuple[int, float]]) -> float:
         ),
         on="batch",
     )
-    return float((w["w"] * w["ticks"] / w["rows"]).sum() / w["w"].sum())
+    return float(cast(float, (w["w"] * w["ticks"] / w["rows"]).sum()) / cast(float, w["w"].sum()))
 
 
 def xgboost_line(mode: str, r: dict[str, Any], us: float) -> str:
@@ -389,7 +409,7 @@ def xgboost_line(mode: str, r: dict[str, Any], us: float) -> str:
 
 # The faster-mode row is a sensitivity check beside process 0's main number.
 FASTER_MODE_NOTE = (
-    "the extra processes validate only their first 32 groups (driver.rs CHECK_GROUPS)"
+    "the extra processes validate only their first 32 groups (driver/processes.rs CHECK_GROUPS)"
 )
 
 
@@ -398,7 +418,11 @@ _BLOCK_BITS = _GROUP_BITS = 20
 
 
 def serving_intervals(
-    samples: Any, groups: Any, reference: str = "treewalker", n_boot: int = 1000, seed: int = 0
+    samples: pl.DataFrame,
+    groups: pl.DataFrame,
+    reference: str = "treewalker",
+    n_boot: int = 1000,
+    seed: int = 0,
 ) -> dict[tuple[str, str, str], tuple[float, float, float]]:
     """`bootstrap_ratio` of every serving method against ``reference`` (variant
     all-on), in every cell: {(cell, method, variant): (ratio, lo, hi)}.
@@ -417,7 +441,7 @@ def serving_intervals(
         return {}
     u64 = pl.UInt64
     cell_code = pl.col("cell").to_physical().cast(u64)
-    limit = max(int(srv["block"].max()), int(srv["group"].max()))
+    limit = max(int(cast(int, srv["block"].max())), int(cast(int, srv["group"].max())))
     if limit >= 1 << _BLOCK_BITS or int(srv.select(cell_code.max()).item()) >= 1 << 24:
         raise ValueError("a block, group or cell code does not fit the pairing key")
     key = (cell_code * (1 << _BLOCK_BITS) + pl.col("block").cast(u64)) * (
@@ -478,7 +502,7 @@ def serving_intervals(
     return out
 
 
-def refuse_untimed(samples: Any, manifests: dict[str, Any]) -> None:
+def refuse_untimed(samples: pl.DataFrame, manifests: dict[str, Any]) -> None:
     """Raise if any process's samples belong to a method a cell excludes or does not
     list as timed: such samples must never reach a published number."""
     import polars as pl
@@ -513,9 +537,7 @@ SAMPLE_COLUMNS = [
 ]
 
 
-def estimates(
-    d: dict[str, Any], reference: str = "treewalker", n_boot: int = 1000
-) -> dict[str, Any]:
+def estimates(d: Run, reference: str = "treewalker", n_boot: int = 1000) -> dict[str, Any]:
     """Every cell's estimates, for summarize and the paper's figures and tables.
 
     ``by_cell[cell]`` lists, per method, variant and mode (in mode order, then
@@ -533,9 +555,9 @@ def estimates(
     it has one. ``d`` is `load`'s, with at least `SAMPLE_COLUMNS`."""
     import polars as pl
 
-    hz = float(d["run"]["timer"]["calibration"]["hz"])
-    refuse_untimed(d["samples"], d["manifests"])
-    s = d["samples"].with_columns(us=pl.col("ticks") / hz * 1e6)
+    hz = float(d.record["timer"]["calibration"]["hz"])
+    refuse_untimed(d.samples, d.manifests)
+    s = d.samples.with_columns(us=pl.col("ticks") / hz * 1e6)
     if "process" in s.columns:
         s = s.filter(pl.col("process") == 0)
     keys = ["cell", "method", "variant", "mode"]
@@ -553,10 +575,10 @@ def estimates(
         .select(pl.col("cell", "mode").cast(pl.String), "per_row")
         .iter_rows()
     }
-    intervals = serving_intervals(s, d["groups"], reference, n_boot)
+    intervals = serving_intervals(s, d.groups, reference, n_boot)
     from . import estimand
 
-    blocks_est = estimand.block_estimates(s, d["groups"], d["manifests"], reference, n_boot)
+    blocks_est = estimand.block_estimates(s, d.groups, d.manifests, reference, n_boot)
     us = 1e6 / hz
     by_cell: dict[str, list[dict[str, Any]]] = {}
     for (cell,), g in (
@@ -597,7 +619,7 @@ def estimates(
         by_cell[cell] = sorted(rows, key=lambda x: (x["mode"], x["latency"]))
     blocks = {
         (cell, mode): g.drop("cell", "mode")
-        for (cell, mode), g in xgboost_block_table(d["samples"], d["hw"])
+        for (cell, mode), g in xgboost_block_table(d.samples, d.hw)
         .partition_by("cell", "mode", as_dict=True, maintain_order=True)
         .items()
     }
@@ -610,9 +632,9 @@ def estimates(
         .items()
     }
     # On the Linux VMs (x86 and Arm) XGBoost's counters are required.
-    required = (d["run"].get("host") or {}).get("os") == "linux"
+    required = (d.record.get("host") or {}).get("os") == "linux"
     xgb: dict[tuple[str, str], dict[str, Any]] = {}
-    for cell, m in d["manifests"].items():
+    for cell, m in d.manifests.items():
         for mode in m["stop"]:
             b = blocks.get((cell, mode))
             r = None if b is None else xgboost_faster_mode(b, counters_required=required)
@@ -630,15 +652,15 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
     probes and conversion, XGBoost's modes, and per method p50, p99, us/row and the
     speedup with its interval (`estimates`)."""
     d = load(run_dir, SAMPLE_COLUMNS)
-    timer = d["run"]["timer"]["calibration"]
+    timer = d.record["timer"]["calibration"]
     est = estimates(d, reference, n_boot)
     hz = est["hz"]
     lines = [
         f"run {run_dir.name}: timer {timer['counter']} at {hz:.0f} Hz ({timer['source']}), "
         f"read-pair overhead p50 {timer['overhead']['p50']} ticks",
     ]
-    lines += sentinel_lines(d["run"])
-    for cell, m in d["manifests"].items():
+    lines += sentinel_lines(d.record)
+    for cell, m in d.manifests.items():
         lines.append(f"\n{cell}: {m['groups']} groups, {m['rows']} rows")
         for e in m["excluded"]:
             lines.append(f"  excluded {e['method']}/{e['variant']}: {e['reason']}")
@@ -709,6 +731,88 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
                 f"{'':<17}{'-':>10}{r['faster'] / hz * 1e6:>10.4f}{r['faster'] / r['tw']:>9.3f}"
                 f"  sensitivity: {FASTER_MODE_NOTE}"
             )
+    return lines
+
+
+MIB = 1 << 20
+
+
+def _diff(a: dict[str, Any] | None, b: dict[str, Any], field: str) -> int | None:
+    x, y = (a or {}).get(field), b.get(field)
+    return None if x is None or y is None else int(x) - int(y)
+
+
+def memory_rows(m: dict[str, Any]) -> list[dict[str, Any]]:
+    """A cell's memory records (``manifest["memory"]["methods"]``), flat, in bytes:
+    the load and its seconds (``load_seconds``, for the loads that have them), the
+    peak during the load where it is the load's own and its rise over the resident
+    set before the load, and the resident (on macOS also footprint) deltas over the
+    load and over the first predictor. Empty for runs from before the memory columns."""
+    seconds = m.get("load_seconds") or {}
+    rows = []
+    for r in (m.get("memory") or {}).get("methods", []):
+        before, after, pred = r["before"], r["after_load"], r.get("after_predictor")
+        load = r["load"]
+        key = "" if load == "forest" else load.removeprefix("forest:")
+        peak = r.get("peak_load_bytes") if r.get("peak_attributable") else None
+        rss0 = before.get("rss_bytes")
+        rows.append(
+            {
+                "method": r["method"],
+                "variant": r["variant"],
+                "load": load,
+                "load_seconds": seconds.get(key) if load.startswith("forest") else None,
+                "peak_load_bytes": peak,
+                "peak_rise_bytes": None if peak is None or rss0 is None else peak - rss0,
+                "rss_after_load_bytes": after.get("rss_bytes"),
+                "load_rss_bytes": _diff(after, before, "rss_bytes"),
+                "predictor_rss_bytes": _diff(pred, after, "rss_bytes") if pred else None,
+                "load_footprint_bytes": _diff(after, before, "footprint_bytes"),
+                "predictor_footprint_bytes": (
+                    _diff(pred, after, "footprint_bytes") if pred else None
+                ),
+            }
+        )
+    return rows
+
+
+def _mib(x: int | None, sign: bool = False) -> str:
+    if x is None:
+        return "-"
+    return f"{x / MIB:+.1f}" if sign else f"{x / MIB:.1f}"
+
+
+def memory_lines(m: dict[str, Any]) -> list[str]:
+    """The cell's memory section for ``summarize``: one line per method, in MiB."""
+    rows = memory_rows(m)
+    if not rows:
+        return []
+    source = str((m.get("memory") or {}).get("source", "")).split(":", 1)[0]
+    footprint = any(r["load_footprint_bytes"] is not None for r in rows)
+    lines = [
+        f"  memory ({source}, MiB): the peak during the load where it is the load's own and "
+        "its rise over the resident set before it; the resident set after the load; "
+        "the deltas over the load and the first predictor"
+        + ("; the footprint's (fp)" if footprint else ""),
+        f"    {'method/variant':<40}{'load':<22}{'load ms':>9}{'peak':>9}{'rise':>8}"
+        f"{'rss':>9}{'+load':>8}{'+pred':>8}"
+        + (f"{'fp+load':>9}{'fp+pred':>9}" if footprint else ""),
+    ]
+    for r in rows:
+        name = f"{r['method']}/{r['variant']}"
+        ms = "-" if r["load_seconds"] is None else f"{r['load_seconds'] * 1e3:.1f}"
+        line = (
+            f"    {name[:39]:<40}{r['load'][:21]:<22}{ms:>9}"
+            f"{_mib(r['peak_load_bytes']):>9}{_mib(r['peak_rise_bytes'], True):>8}"
+            f"{_mib(r['rss_after_load_bytes']):>9}{_mib(r['load_rss_bytes'], True):>8}"
+            f"{_mib(r['predictor_rss_bytes'], True):>8}"
+        )
+        if footprint:
+            line += (
+                f"{_mib(r['load_footprint_bytes'], True):>9}"
+                f"{_mib(r['predictor_footprint_bytes'], True):>9}"
+            )
+        lines.append(line)
     return lines
 
 

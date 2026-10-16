@@ -18,14 +18,17 @@ Each section checks one assumption of the new protocol on a finished run:
 """
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from . import analysis
 
+if TYPE_CHECKING:
+    import polars as pl
 
-def round_zero(samples: Any) -> Any:
+
+def round_zero(samples: pl.DataFrame) -> pl.DataFrame:
     """Per cell, method, variant and mode (process 0): ticks per row in round 0
     over ticks per row in the later rounds."""
     import polars as pl
@@ -46,7 +49,7 @@ def round_zero(samples: Any) -> Any:
     )
 
 
-def position_profile(samples: Any) -> Any:
+def position_profile(samples: pl.DataFrame) -> pl.DataFrame:
     """Per cell, method and mode (process 0): the first timed batch's and the
     warm-up batch's (timed last) ticks per row against the method's median batch,
     net of the batches' content: each batch's time is first divided by the
@@ -83,7 +86,7 @@ def position_profile(samples: Any) -> Any:
     )
 
 
-def children(samples: Any, labels: Any) -> Any:
+def children(samples: pl.DataFrame, labels: pl.DataFrame) -> pl.DataFrame:
     """Per cell, mode and XGBoost child: its ticks per row over process 0's later
     rounds (a child's timed round follows a full untimed round), on the same
     batches and the same cluster of each batch (`analysis.xgboost_faster_mode`'s
@@ -118,7 +121,7 @@ def children(samples: Any, labels: Any) -> Any:
     )
 
 
-def process_zero_switches(labels: Any) -> bool:
+def process_zero_switches(labels: pl.DataFrame) -> bool:
     """Whether XGBoost's process 0 holds both modes inside any batch: its blocks
     split above `analysis.SPLIT` in log instructions per row, one block a side."""
     import polars as pl
@@ -209,8 +212,8 @@ def readout(run_dir: Path) -> list[str]:
     from . import budget as bg
 
     d = analysis.load(run_dir)
-    s, hw = d["samples"], d["hw"]
-    host = d["run"].get("host") or {}
+    s, hw = d.samples, d.hw
+    host = d.record.get("host") or {}
     lines = [f"validation readout {run_dir.name}: {host.get('arch')} {host.get('cpu')}"]
 
     xgb_results = {}
@@ -301,10 +304,10 @@ def readout(run_dir: Path) -> list[str]:
     )
     lines += children_out
 
-    lines += ["", *analysis.sentinel_lines(d["run"])]
+    lines += ["", *analysis.sentinel_lines(d.record)]
 
     lines.append("\nprobes with a margin under 2%:")
-    for cell, m in d["manifests"].items():
+    for cell, m in d.manifests.items():
         for mode, stop in m["stop"].items():
             for p in stop.get("probes", []):
                 if p.get("margin_pct") is not None and p["margin_pct"] < 2:
@@ -313,7 +316,7 @@ def readout(run_dir: Path) -> list[str]:
                     )
 
     lines.append("\ngroup samples (drawn against expected rows):")
-    for cell, m in d["manifests"].items():
+    for cell, m in d.manifests.items():
         sm = m.get("sample")
         if sm:
             lines.append(

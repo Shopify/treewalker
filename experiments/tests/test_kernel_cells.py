@@ -62,8 +62,8 @@ def test_the_kernel_suite_has_the_new_cells_only():
     for m in ("pooled", "wide"):
         for w in ("panel", "g1-independent"):
             assert f"support/nt500_md8_h16_{m}/lightgbm/{w}" in ids
-    assert {s.plan_for(c)["methods"] for c in s.cells} == {"treewalker"}
-    ids_of = {c.id: [grids._variant_id(v) for v in s.plan_for(c)["variants"]] for c in s.cells}
+    assert {s.plan_for(c).methods for c in s.cells} == {"treewalker"}
+    ids_of = {c.id: [v.id for v in s.plan_for(c).variants] for c in s.cells}
     policy = ["all-on", "lanes=4", "lanes=8"]
     assert ids_of["support/nt500_md8_h16/lightgbm/panel-share45"] == policy
     assert ids_of["credit/nt500_md8/xgboost/g1-file"] == [*policy, "disable_g1_constant"]
@@ -96,7 +96,7 @@ def test_derived_models_plan_treewalker_in_any_suite():
     doc = grids.load(GRIDS)
     doc["suites"]["x"] = {"description": "", "modes": ["serving"], "workloads": ["kernel-derived"]}
     s = grids.suite(doc, "x")
-    assert {s.plan_for(c)["methods"] for c in s.cells} == {"treewalker"}
+    assert {s.plan_for(c).methods for c in s.cells} == {"treewalker"}
 
 
 @pytest.mark.parametrize(

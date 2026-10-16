@@ -16,7 +16,7 @@ def doc():
 
 def test_ablation_variants_cross_only_at_the_interaction_anchors(doc):
     s = grids.suite(doc, "ablation")
-    sizes = {c.id: len(s.plan[c.id]["variants"]) for c in s.cells}
+    sizes = {c.id: len(s.plan[c.id].variants) for c in s.cells}
     # 6 runtime variants, 6 kernel variants and 4 load flags alone; at the
     # interaction anchors every runtime variant crosses the 8 combinations of the
     # first three load flags. Single rows' constant walk only at G = 1.
@@ -28,32 +28,27 @@ def test_ablation_variants_cross_only_at_the_interaction_anchors(doc):
     assert sizes["expedia/nt500_md8/lightgbm/sessions"] == 55
     assert sizes["expedia/nt50_md4/lightgbm/sessions"] == 16
     assert sum(sizes.values()) == 1048  # 948 before the kernel variants
-    g1 = [v for v in s.plan["support/nt50_md4_h1/xgboost/panel"]["variants"] if v["runtime"]]
-    assert {"runtime": ["disable_g1_constant"], "load": []} in g1
-    kernel = [v for v in s.plan["expedia/nt500_md8/xgboost/sessions"]["variants"] if v["load"]]
-    assert not [v for v in kernel if any("=" in f or "dispatch" in f for f in v["runtime"])]
+    g1 = [v for v in s.plan["support/nt50_md4_h1/xgboost/panel"].variants if v.runtime]
+    assert grids.Variant(("disable_g1_constant",)) in g1
+    kernel = [v for v in s.plan["expedia/nt500_md8/xgboost/sessions"].variants if v.load]
+    assert not [v for v in kernel if any("=" in f or "dispatch" in f for f in v.runtime)]
     plan = s.plan["support/nt500_md8_h16/lightgbm/panel"]
-    assert plan["methods"] == "ablation"
-    dedup = [v for v in plan["variants"] if "disable_predicate_dedup" in v["load"]]
-    assert dedup == [{"runtime": [], "load": ["disable_predicate_dedup"]}]
+    assert plan.methods == "ablation"
+    dedup = [v for v in plan.variants if "disable_predicate_dedup" in v.load]
+    assert dedup == [grids.Variant((), ("disable_predicate_dedup",))]
 
 
 def test_variant_ids_match_the_runner():
     v = grids.variant(["disable_unsplit", "disable_monotonic"], ["disable_tree_ordering"])
-    assert grids._variant_id(v) == "disable_monotonic+disable_unsplit|disable_tree_ordering"
-    assert grids._variant_id(grids.variant()) == "all-on"
-    assert (
-        grids._variant_id(grids.variant((), ["disable_bitset_intern"])) == "|disable_bitset_intern"
-    )
+    assert v.id == "disable_monotonic+disable_unsplit|disable_tree_ordering"
+    assert grids.variant().id == "all-on"
+    assert grids.variant((), ["disable_bitset_intern"]).id == "|disable_bitset_intern"
     with pytest.raises(ValueError):
         grids.variant(["disable_everything"])
     # The kernel's tokens sort as Ablation::id() sorts them.
     v = grids.variant(["lanes=4", "disable_unsplit"])
-    assert grids._variant_id(v) == "disable_unsplit+lanes=4"
-    assert (
-        grids._variant_id(grids.variant(["lanes=3", "disable_monotonic"]))
-        == "disable_monotonic+lanes=3"
-    )
+    assert v.id == "disable_unsplit+lanes=4"
+    assert grids.variant(["lanes=3", "disable_monotonic"]).id == "disable_monotonic+lanes=3"
     for bad in (
         ["lanes=13"],
         ["distance=4"],
@@ -72,16 +67,16 @@ def test_acceptance_plans_the_cells_and_fixtures(doc):
     assert "support/nt500_md4_h16/lightgbm/panel" in ids
     assert "fixtures/average_base/treelite/import" in ids
     lgb = s.plan_for(next(c for c in s.cells if c.id.startswith("support") and "lightgbm" in c.id))
-    assert lgb["methods"] == "factorial"
-    assert len(lgb["variants"]) == 2
+    assert lgb.methods == "factorial"
+    assert len(lgb.variants) == 2
     fixture = s.plan_for(next(c for c in s.cells if c.generator == "fixture-v1"))
-    assert fixture["methods"] == "treewalker"
+    assert fixture.methods == "treewalker"
 
 
 def test_factorial_cells_default_to_every_method(doc):
     s = grids.suite(doc, "factorial")
     c = s.cells[0]
-    assert s.plan_for(c) == {
+    assert s.plan_for(c).to_json() == {
         "methods": "factorial",
         "variants": [],
         "modes": ["serving"],
@@ -95,7 +90,7 @@ def test_suites_declare_their_modes(doc):
         s = grids.suite(doc, name)
         ablation = name in ("ablation", "camera-ready-ablation")
         want = ["serving", "batch"] if ablation else ["serving"]
-        assert {tuple(s.plan_for(c)["modes"]) for c in s.cells} == {tuple(want)}, name
+        assert {s.plan_for(c).modes for c in s.cells} == {tuple(want)}, name
     for bad in ({}, {"modes": []}, {"modes": ["warm"]}, {"modes": ["batch", "batch"]}):
         with pytest.raises(ValueError):
             grids.suite_modes("x", bad)
@@ -161,7 +156,7 @@ def test_the_sentinel_resolves_against_the_artifacts(doc, tmp_path):
         "dir": "support/nt500_md4_h16/lightgbm/cells/panel",
         "status": "ready",
         "key": "k1",
-        **mf.SENTINEL_PLAN,
+        **mf.SENTINEL_PLAN.to_json(),
     }
     # A ready cell whose recorded file no longer has its hash is stale.
     fm.write_cell(
@@ -193,11 +188,11 @@ def test_camera_ready_suites_turn_exact_sums_off_and_keep_the_factorial():
     assert ab.name == "camera-ready-ablation"
     assert {c.id for c in ab.cells} == {c.id for c in grids.suite(doc, "ablation").cells}
     for plan in ab.plan.values():
-        assert plan["methods"] == "ablation"
-        assert not any("disable_exact_sums" in v["runtime"] for v in plan["variants"])
+        assert plan.methods == "ablation"
+        assert not any("disable_exact_sums" in v.runtime for v in plan.variants)
     sc = grids.suite(doc, "scenario-v1")
     assert len(sc.cells) == 16
-    assert {tuple(v["runtime"]) for p in sc.plan.values() for v in p["variants"]} == {
+    assert {v.runtime for p in sc.plan.values() for v in p.variants} == {
         (),
         ("disable_varying_precompute",),
     }

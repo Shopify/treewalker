@@ -24,7 +24,7 @@ REPLICABLE = {"panel-v2", "ranking-sessions-v2", "ranking-cohort-v2", "whatif-v2
 # fixed-seed shuffle of the source's rows; file order keeps the source's order.
 ROW_ORDERS = ("independent", "file")
 # Models derived from a trained one by editing its Treelite export, with the
-# suffix their names get. See prepare.DERIVATIONS.
+# suffix their names get. See prepare.models.DERIVATIONS.
 DERIVED = {"pooled-categories": "pooled", "wide-sums": "wide"}
 # The load-time ablations a variant can turn on (treewalker_gbdt::research::
 # LoadAblation); prefix grouping off is prefix depth 0.
@@ -143,33 +143,70 @@ class Cell:
         return self.model.dir(artifacts) / self.framework / "cells" / self.workload_id
 
 
+@dataclass(frozen=True, slots=True)
+class Variant:
+    """A research variant: runtime ablation tokens and load flags, each sorted."""
+
+    runtime: tuple[str, ...] = ()
+    load: tuple[str, ...] = ()
+
+    @property
+    def id(self) -> str:
+        """The runner's variant ID: runtime tokens, then load flags after ``|``."""
+        rt, ld = "+".join(self.runtime), "+".join(self.load)
+        return f"{rt}|{ld}" if ld else (rt or "all-on")
+
+    def to_json(self) -> dict[str, list[str]]:
+        return {"runtime": list(self.runtime), "load": list(self.load)}
+
+
+@dataclass(frozen=True, slots=True)
+class Plan:
+    """What the runner times on a cell: its method set, research variants and modes;
+    ablation cells also say whether they sit at an interaction anchor."""
+
+    methods: str = "factorial"
+    variants: tuple[Variant, ...] = ()
+    modes: tuple[str, ...] = ("serving",)
+    interaction: bool | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        """The manifest entry's fields, in the manifest's order."""
+        out: dict[str, Any] = {
+            "methods": self.methods,
+            "variants": [v.to_json() for v in self.variants],
+            "modes": list(self.modes),
+        }
+        if self.interaction is not None:
+            out["interaction"] = self.interaction
+        return out
+
+
 @dataclass(slots=True)
 class Suite:
     name: str
     description: str
     cells: list[Cell]
     extra: dict[str, Any] = field(default_factory=dict)
-    # Per cell ID: what the runner times, {"methods", "variants", "modes"}.
-    plan: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Per cell ID: what the runner times.
+    plan: dict[str, Plan] = field(default_factory=dict)
     # Per cell ID, every workload that names the cell, in grids.toml's order. A
     # cell shared by overlapping workloads keeps the first as its own (part of
     # its identity); a workload filter matches any of them.
     memberships: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
-    def plan_for(self, cell: Cell) -> dict[str, Any]:
-        default = {
-            "methods": "factorial",
-            "variants": [],
-            "modes": ["serving"],
-        }
-        return {**default, **self.plan.get(cell.id, {})}
+    def plan_for(self, cell: Cell) -> Plan:
+        return self.plan.get(cell.id, Plan())
 
     def workloads_of(self, cell: Cell) -> tuple[str, ...]:
         return self.memberships.get(cell.id, (cell.workload,))
 
 
-def variant(runtime: list[str] | tuple[str, ...] = (), load: list[str] | tuple[str, ...] = ()):
-    """A research variant: runtime ablation flags plus load options."""
+def variant(
+    runtime: list[str] | tuple[str, ...] = (), load: list[str] | tuple[str, ...] = ()
+) -> Variant:
+    """A research variant from grids.toml's tokens, checked against the flags the
+    runner knows."""
     for f in runtime:
         name, _, value = f.partition("=")
         if f not in RUNTIME_FLAGS and value not in RUNTIME_VALUES.get(name, ()):
@@ -179,12 +216,7 @@ def variant(runtime: list[str] | tuple[str, ...] = (), load: list[str] | tuple[s
     for f in load:
         if f not in LOAD_FLAGS:
             raise ValueError(f"unknown load flag {f}")
-    return {"runtime": sorted(runtime), "load": sorted(load)}
-
-
-def _variant_id(v: dict[str, Any]) -> str:
-    rt, ld = "+".join(v["runtime"]), "+".join(v["load"])
-    return f"{rt}|{ld}" if ld else (rt or "all-on")
+    return Variant(tuple(sorted(runtime)), tuple(sorted(load)))
 
 
 def suite_modes(name: str, s: dict[str, Any]) -> list[str]:
@@ -330,17 +362,14 @@ def suite(doc: dict[str, Any], name: str) -> Suite:
         cells = {k: c for k, c in cells.items() if k in wanted or c.generator == "fixture-v1"}
     variants = [variant(v) for v in s.get("runtime_variants", [])]
     g1 = [variant(v) for v in s.get("g1_variants", [])]  # single-row cells only
-    modes = suite_modes(name, s)
+    modes = tuple(suite_modes(name, s))
     plan = {}
     for c in cells.values():
         # Fixtures and derived models have no native model for the baselines.
         own = c.generator == "fixture-v1" or c.model.derive
         methods = "treewalker" if own else s.get("methods", "factorial")
-        plan[c.id] = {
-            "methods": methods,
-            "variants": variants + g1 if c.generator == "rows-v1" else variants,
-            "modes": modes,
-        }
+        timed = variants + g1 if c.generator == "rows-v1" else variants
+        plan[c.id] = Plan(methods, tuple(timed), modes)
     return Suite(name, s["description"], list(cells.values()), plan=plan, memberships=memberships)
 
 
@@ -353,7 +382,7 @@ def find_cell(doc: dict[str, Any], cell_id: str) -> Cell | None:
     return None
 
 
-def sentinel_cell(doc):
+def sentinel_cell(doc: dict[str, Any]) -> Cell | None:
     """The sentinel's cell, when [run] names one and turns it on."""
     run = run_config(doc)
     if not run.get("sentinel_cell") or not run.get("sentinel_every"):
@@ -363,7 +392,7 @@ def sentinel_cell(doc):
 
 def ablation_variants(
     s: dict[str, Any], interaction: bool, single_rows: bool = False
-) -> list[dict[str, Any]]:
+) -> list[Variant]:
     """Every runtime variant with the default load options; each load flag alone;
     and at the interaction anchors every runtime variant crossed with all eight
     combinations of the first three load flags. Disabling predicate dedup runs
@@ -381,9 +410,9 @@ def ablation_variants(
         for bits in range(8):
             load = [f for i, f in enumerate(crossed) if bits >> i & 1]
             out += [variant(rt, load) for rt in runtime]
-    unique: dict[str, dict[str, Any]] = {}
+    unique: dict[str, Variant] = {}
     for v in out:
-        unique.setdefault(_variant_id(v), v)
+        unique.setdefault(v.id, v)
     return list(unique.values())
 
 
@@ -409,14 +438,14 @@ def _ablation(doc: dict[str, Any], name: str, s: dict[str, Any]) -> Suite:
     unique = list({c.id: c for c in cells}.values())
     keys = ("anchors", "runtime_variants", "kernel_variants", "g1_variants", "parse_flags")
     extra = {k: s[k] for k in (*keys, "interaction_anchors") if k in s}
-    modes = suite_modes(name, s)
+    modes = tuple(suite_modes(name, s))
     plan = {
-        c.id: {
-            "methods": "ablation",
-            "variants": ablation_variants(s, interaction[c.id], single_rows.get(c.id, False)),
-            "modes": modes,
-            "interaction": interaction[c.id],
-        }
+        c.id: Plan(
+            "ablation",
+            tuple(ablation_variants(s, interaction[c.id], single_rows.get(c.id, False))),
+            modes,
+            interaction[c.id],
+        )
         for c in unique
     }
     return Suite(name, s["description"], unique, extra, plan)

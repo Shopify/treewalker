@@ -50,9 +50,9 @@ def test_wall_time_scales_with_rows_trees_and_depth_without_halving(setup):
     assert b.missing == []
     real = [c for c in s.cells if c.framework != "treelite"]
     plan = s.plan_for(real[0])
-    m = len(plan["variants"]) + bg.OTHER_METHODS[plan["methods"]]
+    m = len(plan.variants) + bg.OTHER_METHODS[plan.methods]
     # The suite's one mode's timed rows, scaled by 500 trees x depth 4: no halving.
-    assert plan["modes"] == ["serving"]
+    assert plan.modes == ("serving",)
     assert b.work >= len(real) * m * 3 * 160 * 500 * 4
     assert b.hours == pytest.approx(b.work * 1e-6 / 3600)
     assert b.sample_bytes == pytest.approx(b.samples * 4.0)

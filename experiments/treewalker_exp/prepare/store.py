@@ -2,22 +2,13 @@
 its hash comes from the bytes in memory, the same bytes the formats' writers produce."""
 
 import hashlib
-import struct
+import os
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from .. import formats as fm
-
-
-def matrix_bytes(X: np.ndarray) -> bytes:
-    return struct.pack("<QQ", *X.shape) + np.ascontiguousarray(X, dtype="<f8").tobytes()
-
-
-def offsets_bytes(offsets: np.ndarray) -> bytes:
-    o = np.asarray(offsets, dtype="<u8")
-    return struct.pack("<Q", len(o) - 1) + o.tobytes()
 
 
 def put_bytes(path: Path, data: bytes) -> str:
@@ -29,29 +20,23 @@ def put_bytes(path: Path, data: bytes) -> str:
 
 
 def put_matrix(path: Path, X: np.ndarray) -> str:
-    return put_bytes(path, matrix_bytes(X))
+    return put_bytes(path, fm.matrix_bytes(X))
 
 
 def put_offsets(path: Path, offsets: np.ndarray) -> str:
-    fm.check_offsets(np.asarray(offsets, dtype=np.uint64))
-    return put_bytes(path, offsets_bytes(offsets))
+    return put_bytes(path, fm.offsets_bytes(offsets))
 
 
 def put_walker_config(path: Path, config: dict[str, Any]) -> str:
-    import json
-
-    return put_bytes(path, json.dumps(config, indent=2).encode())
+    return put_bytes(path, fm.walker_config_bytes(config))
 
 
 def put_npy(path: Path, array: np.ndarray) -> str:
-    import io
-
-    buf = io.BytesIO()
-    np.save(buf, array)
-    return put_bytes(path, buf.getvalue())
+    return put_bytes(path, fm.npy_bytes(array))
 
 
 def files_match(base: Path, files: dict[str, dict[str, str]]) -> bool:
+    """Whether every recorded file under ``base`` exists with its recorded hash."""
     for rec in files.values():
         p = base / rec["path"]
         if not p.exists() or fm.sha256_file(p) != rec["sha256"]:
@@ -60,6 +45,4 @@ def files_match(base: Path, files: dict[str, dict[str, str]]) -> bool:
 
 
 def rel(path: Path, start: Path) -> str:
-    import os
-
     return os.path.relpath(path, start)

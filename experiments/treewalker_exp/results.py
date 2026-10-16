@@ -176,18 +176,17 @@ def _speedups(run: Path, arch: str, n_boot: int) -> Any:
     est = analysis.estimates(d, n_boot=n_boot)
     us = 1e6 / est["hz"]
     rows_per_group = dict(
-        d["groups"]
-        .filter(pl.col("timed"))
+        d.groups.filter(pl.col("timed"))
         .group_by(pl.col("cell").cast(pl.String))
         .agg(pl.col("rows").mean())
         .iter_rows()
     )
     out = []
     for cell, rows in est["by_cell"].items():
-        m = d["manifests"][cell]
+        m = d.manifests[cell]
         base = {
             "arch": arch,
-            "suite": d["run"]["suite"],
+            "suite": d.record["suite"],
             "cell": cell,
             **design(cell),
             "mean_rows": rows_per_group.get(cell),

@@ -78,7 +78,7 @@ def test_readers_need_a_packed_run_and_pack_refuses_one(tmp_path):
     with pytest.raises(ValueError, match="is not packed: treewalker-exp pack"):
         analysis.load(run)
     pack.pack_run(run)
-    assert analysis.load(run)["manifests"]["b/cell"]["seconds"] == 1.0
+    assert analysis.load(run).manifests["b/cell"]["seconds"] == 1.0
     with pytest.raises(ValueError, match="already packed"):
         pack.pack_run(run)
 

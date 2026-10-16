@@ -9,11 +9,11 @@ from typing import Any
 import numpy as np
 
 from .. import datasets as ds
+from .. import formats as fm
 from .. import workloads as wl
 from ..grids import SURVIVAL, Model
 from ..paths import Paths
 from .models import model_stats
-from .store import matrix_bytes
 
 # --- model inputs ------------------------------------------------------------------
 
@@ -29,7 +29,7 @@ class TrainData:
     horizon: dict[str, int] | None
     sha256: str  # of train_data.bin: features plus the label column
     extra: dict[str, Any] = field(default_factory=dict)
-    # Fields only some models' identities have (IDENTITY_EXTRAS), added only when
+    # Fields only some models' identities have (models.IDENTITY_EXTRAS), added only when
     # present, so every other model keeps its key.
     identity: dict[str, Any] = field(default_factory=dict)
 
@@ -181,7 +181,7 @@ class Context:
             horizon, extra = None, {}
         else:
             raise ValueError(f"unknown dataset {model.dataset}")
-        sha = hashlib.sha256(matrix_bytes(np.column_stack([X, y]))).hexdigest()
+        sha = hashlib.sha256(fm.matrix_bytes(np.column_stack([X, y]))).hexdigest()
         td = TrainData(X, y, names, cat, split_rec, source, horizon, sha, extra, identity)
         self._train[key] = td
         return td
@@ -207,7 +207,7 @@ class Context:
         chosen = entities[ds.sample_entities(len(entities), model.replicate_fraction, seed)]
         keep = np.isin(rows, chosen)
         X, y = released.X[keep], released.y[keep]
-        sha = hashlib.sha256(matrix_bytes(np.column_stack([X, y]))).hexdigest()
+        sha = hashlib.sha256(fm.matrix_bytes(np.column_stack([X, y]))).hexdigest()
         replicate = {
             "index": model.replicate,
             "fraction": model.replicate_fraction,

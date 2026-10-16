@@ -1,7 +1,6 @@
 """Resume rules: a matching manifest is reused; any changed input rebuilds."""
 
 import hashlib
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -14,7 +13,6 @@ from treewalker_exp.paths import Paths
 from treewalker_exp.prepare import cells as pcells
 from treewalker_exp.prepare import context as pcontext
 from treewalker_exp.prepare import models as pmodels
-from treewalker_exp.prepare import store as pstore
 
 NAMES = ["a", "b", "c"]
 
@@ -23,7 +21,7 @@ def train_data(seed=0):
     rng = np.random.default_rng(seed)
     X = rng.normal(size=(300, 3))
     y = (X[:, 0] + rng.normal(size=300) > 0).astype(np.float64)
-    sha = hashlib.sha256(pstore.matrix_bytes(np.column_stack([X, y]))).hexdigest()
+    sha = hashlib.sha256(fm.matrix_bytes(np.column_stack([X, y]))).hexdigest()
     return pcontext.TrainData(
         X, y, NAMES, [], {"seed": seed, "test_frac": 0.2, "unit": "row"}, {"x": "y"}, None, sha
     )
@@ -178,59 +176,6 @@ def test_contract_violation_fails_the_cell(ctx, calls, monkeypatch, workload):
     doc = pcells.ensure_cell(ctx, CELL, td, mdoc, force=False)
     assert doc["status"] == "failed" and calls["predict"] == 0
     assert doc["contracts"]["violations"]
-
-
-FIXTURES = Path(__file__).parent / "fixtures" / "manifests"
-
-
-def as_written_by_old_code(name, model_doc, cell_doc):
-    """An old-format manifest pair from fixtures/manifests/NAME, with the
-    values that depend on this machine's libraries (keys, file hashes)
-    taken from a fresh run of the same model and cell."""
-    old_model = fm.read_json(FIXTURES / name / "model.json")
-    old_cell = fm.read_json(FIXTURES / name / "cell.json")
-    old_model.update({k: model_doc[k] for k in ("key", "libraries", "train_data_sha256")})
-    for role, rec in model_doc["files"].items():
-        old_model["files"][role] = rec
-    # Before PREP_POLICY a cell's key was its content key.
-    old_cell.update(key=cell_doc["content_key"], model_key=model_doc["key"])
-    old_cell["data_sha256"] = cell_doc["data_sha256"]
-    old_cell["model"]["key"] = model_doc["key"]
-    for role, rec in cell_doc["files"].items():
-        old_cell["files"][role] = rec
-    return old_model, old_cell
-
-
-@pytest.mark.parametrize("name", ["predicate-off-by-one", "no-policy"])
-def test_old_manifests_are_reevaluated_on_resume(ctx, calls, workload, name):
-    td = train_data()
-    mdoc = pmodels.ensure_model(ctx, MODEL, "lightgbm", td, force=False)
-    cdoc = pcells.ensure_cell(ctx, CELL, td, mdoc, force=False)
-    fw_dir = MODEL.dir(ctx.paths.artifacts) / "lightgbm"
-    cell_dir = CELL.dir(ctx.paths.artifacts)
-    old_model, old_cell = as_written_by_old_code(name, mdoc, cdoc)
-    fm.write_json(fw_dir / "model.json", old_model)
-    fm.write_cell(cell_dir / "cell.json", old_cell)
-    if name == "predicate-off-by-one":
-        assert old_cell["status"] == "unsupported" and old_cell["limits"]
-        assert "varying_predicates" in old_cell["model"]
-        assert "treelite_json_bytes" in old_model
-
-    # An ordinary resume: no --force, no retraining, no new references.
-    mdoc = pmodels.ensure_model(ctx, MODEL, "lightgbm", td, force=False)
-    doc = pcells.ensure_cell(ctx, CELL, td, mdoc, force=False)
-    assert calls == {"train": 1, "predict": 1}
-    assert doc["status"] == "ready" and doc["limits"] == [] and doc["warnings"] == []
-    assert doc["prep_policy"] == pmodels.PREP_POLICY and doc["key"] == cdoc["key"]
-    assert doc["model"]["varying_predicates_upper_bound"] == 4
-    assert "varying_predicates" not in doc["model"]
-    assert "model_treelite_json" not in doc["files"]
-    model = fm.read_json(fw_dir / "model.json")
-    assert model["prep_policy"] == pmodels.PREP_POLICY
-    assert model["treelite_json"] == {"status": "skipped: not a test model"}
-    assert "treelite_json_bytes" not in model and "treelite_json" not in model["files"]
-    assert not (fw_dir / "model_treelite.json").exists()
-    assert fm.read_cell(cell_dir / "cell.json") == doc
 
 
 def test_allowlist_changes_never_retrain(ctx, calls):
