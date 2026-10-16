@@ -11,7 +11,7 @@ from treewalker_exp import formats as fm
 BATCHES, ROUNDS, CHILDREN = 4, 3, 3
 
 
-def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS) -> None:
+def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS, extra=None) -> None:
     """One serving cell of 8 one-row groups in 4 batches: TreeWalker in process 0
     at 10 ticks a row, XGBoost in process 0 for `rounds` rounds and in three
     children for one; `xgboost(process)` gives its (ticks, instructions) a row."""
@@ -78,8 +78,50 @@ def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS) -> None:
                 {"method": "xgboost_native", "variant": "-"},
             ],
             "cell": {"max_depth": 4},
+            **(extra or {}),
         },
     )
+
+
+MIB = 1 << 20
+
+
+def reading(rss_mib, hwm_mib=None):
+    hwm = None if hwm_mib is None else hwm_mib * MIB
+    return {"rss_bytes": rss_mib * MIB, "hwm_bytes": hwm, "footprint_bytes": None}
+
+
+# The runner's memory records (sweep_bench's `memory` module) on Linux.
+LINUX_MEMORY = {
+    "load_seconds": {"": 0.0125},
+    "memory": {
+        "source": "linux: VmRSS and VmHWM from /proc/self/status; ...",
+        "methods": [
+            {
+                "method": "treewalker",
+                "variant": "all-on",
+                "load": "forest",
+                "peak_reset": True,
+                "peak_attributable": True,
+                "peak_load_bytes": 140 * MIB,
+                "before": reading(100, 100),
+                "after_load": reading(120, 140),
+                "after_predictor": reading(122, 140),
+            },
+            {
+                "method": "xgboost_native",
+                "variant": "-",
+                "load": "baseline",
+                "peak_reset": True,
+                "peak_attributable": True,
+                "peak_load_bytes": 130 * MIB,
+                "before": reading(122, 122),
+                "after_load": reading(127, 130),
+                "after_predictor": None,
+            },
+        ],
+    },
+}
 
 
 def write_run(run: Path, rounds: int = ROUNDS) -> None:
@@ -115,7 +157,11 @@ def write_run(run: Path, rounds: int = ROUNDS) -> None:
     )
     # Two modes: child 1 runs the fast mode (more instructions, 90 ticks a row).
     write_cell(
-        run, "c/two/xgboost/panel", lambda p: (90.0, 110.0) if p == 1 else (100.0, 100.0), rounds
+        run,
+        "c/two/xgboost/panel",
+        lambda p: (90.0, 110.0) if p == 1 else (100.0, 100.0),
+        rounds,
+        extra=LINUX_MEMORY,
     )
     # One mode; the children read 2% slow.
     write_cell(run, "c/one/xgboost/panel", lambda p: (102.0 if p else 100.0, 100.0), rounds)
@@ -133,6 +179,12 @@ def test_summarize_and_the_readout_on_a_run_with_counters_and_children(tmp_path)
     assert "expected over processes 0.1015 us/row (the mean of 4)" in text
     assert "[no second mode visible]" in text and "    0.1000   10.000" in text
     assert "first-load effect treewalker/all-on/serving +15.0%" in text
+    # Memory: one section, for the cell that has the records, read from cells.json.
+    assert text.count("  memory (linux, MiB):") == 1
+    tw = "    treewalker/all-on" + " " * 23 + "forest" + " " * 16
+    assert tw + "     12.5    140.0   +40.0    120.0   +20.0    +2.0" in text
+    xgb = "    xgboost_native/-" + " " * 24 + "baseline" + " " * 14
+    assert xgb + "        -    130.0    +8.0    127.0    +5.0       -" in text
 
     lines = readout.readout(tmp_path)
     text = "\n".join(lines)

@@ -455,3 +455,71 @@ def test_bootstrap_resamples_entities_not_repetitions():
     ticks = np.column_stack([np.ones(100), np.r_[np.full(50, 1.0), np.full(50, 3.0)]])
     _, lo, hi = analysis.bootstrap_ratio(ticks, entity, n_boot=400)
     assert hi - lo > 0.5
+
+
+def test_memory_rows_on_macos_keep_only_an_attributable_peak():
+    mib = 1 << 20
+
+    def reading(rss, fp, maxrss):
+        return {
+            "rss_bytes": rss * mib,
+            "hwm_bytes": None,
+            "footprint_bytes": fp * mib,
+            "maxrss_bytes": maxrss * mib,
+        }
+
+    def record(method, load, before, after, pred, attributable):
+        return {
+            "method": method,
+            "variant": "-",
+            "load": load,
+            "peak_reset": False,
+            "peak_attributable": attributable,
+            "peak_load_bytes": after["maxrss_bytes"] if attributable else None,
+            "before": before,
+            "after_load": after,
+            "after_predictor": pred,
+        }
+
+    m = {
+        "load_seconds": {"": 0.01, "k": 0.02},
+        "memory": {
+            "source": "macos: ...",
+            "methods": [
+                record(
+                    "treewalker",
+                    "forest",
+                    reading(50, 40, 60),
+                    reading(70, 65, 90),
+                    reading(71, 66, 90),
+                    True,
+                ),
+                record(
+                    "treewalker_research",
+                    "forest:k",
+                    reading(71, 66, 90),
+                    reading(80, 75, 90),
+                    reading(80, 75, 90),
+                    False,
+                ),
+                record(
+                    "treewalker_research",
+                    "shared:k",
+                    reading(80, 75, 90),
+                    reading(80, 75, 90),
+                    reading(81, 76, 90),
+                    False,
+                ),
+            ],
+        },
+    }
+    rows = analysis.memory_rows(m)
+    assert [r["load_seconds"] for r in rows] == [0.01, 0.02, None]
+    assert [r["peak_load_bytes"] for r in rows] == [90 * mib, None, None]
+    assert rows[0]["peak_rise_bytes"] == 40 * mib
+    assert [r["load_footprint_bytes"] for r in rows] == [25 * mib, 9 * mib, 0]
+    assert [r["predictor_rss_bytes"] for r in rows] == [mib, 0, mib]
+    lines = analysis.memory_lines(m)
+    assert lines[0].startswith("  memory (macos, MiB):") and "fp+load" in lines[1]
+    assert lines[3].split()[2:] == ["20.0", "-", "-", "80.0", "+9.0", "+0.0", "+9.0", "+0.0"]
+    assert analysis.memory_lines({"id": "old run"}) == []

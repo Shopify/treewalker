@@ -22,6 +22,11 @@ sensitivity checks:
   batches, with the expected time over processes alongside; a cell with no
   second mode visible shows process 0's time. XGBoost's main number, like every
   method's, is process 0's.
+- Memory per method (``memory_lines``): each load's time and the resident set
+  around it and around the method's first predictor, from the cell's process.
+  The peak during a load is the load's own on Linux (VmHWM is reset before each
+  load); on macOS only when ``ru_maxrss`` rose during it, so usually only for the
+  first method.
 """
 
 from dataclasses import dataclass
@@ -674,6 +679,7 @@ def summarize(run_dir: Path, reference: str = "treewalker", n_boot: int = 1000) 
             )
         oracle = m["validation"]["oracle"]
         lines.append(f"  oracle: {oracle.get('status')} on {oracle.get('rows', 0)} rows")
+        lines += memory_lines(m)
         for mode, stop in m["stop"].items():
             lines.append(
                 f"  {mode}: {stop['rounds']} rounds x {stop['blocks_per_round']} blocks, "
