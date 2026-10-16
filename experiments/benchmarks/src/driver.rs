@@ -1211,7 +1211,13 @@ fn time_mode(
     let nf = cell.n_features;
     // Seeded per cell, so the method order's position advantage differs by cell.
     let seed = crate::schedule::cell_seed(cfg.seed, &cell.id);
-    let schedule = Schedule::new(groups.len(), methods.len(), cfg.target_batches, seed);
+    let schedule = Schedule::ordered(
+        groups.len(),
+        methods.len(),
+        cfg.target_batches,
+        seed,
+        cell.group_order(),
+    );
     let bpr = schedule.blocks_per_round();
     let batch_groups =
         |b: usize| -> Vec<usize> { schedule.batches[b].iter().map(|&i| groups[i]).collect() };
@@ -1952,7 +1958,13 @@ pub fn xgboost_process(request: &Value) -> Result<Value> {
 fn warm_round(ctx: &Context, cell: &Cell, groups: &[usize], m: &mut TimedMethod, mode: Mode) {
     let cfg = &ctx.config;
     let seed = crate::schedule::cell_seed(cfg.seed, &cell.id);
-    let schedule = Schedule::new(groups.len(), 1, cfg.target_batches, seed);
+    let schedule = Schedule::ordered(
+        groups.len(),
+        1,
+        cfg.target_batches,
+        seed,
+        cell.group_order(),
+    );
     for batch in &schedule.batches {
         let ids: Vec<usize> = batch.iter().map(|&i| groups[i]).collect();
         let g = Gathered::new(cell, &ids);
@@ -3160,5 +3172,45 @@ mod timing_tests {
         assert_eq!(order[0], order[1].iter().rev().copied().collect::<Vec<_>>());
         assert_eq!(order[0], order[2]);
         assert_eq!(samples.len(), 4 * 2 * 10);
+    }
+
+    #[test]
+    fn a_cell_with_a_row_order_is_timed_in_file_order() {
+        let mut cell = cell(&[1; 10]);
+        cell.doc = json!({"row_order": "independent"});
+        let config = RunConfig {
+            target_batches: 3,
+            min_rounds: 2,
+            max_rounds: 2,
+            precision_pct: 0.0,
+            hardware_counters: false,
+            ..RunConfig::default()
+        };
+        let mut ctx = context(config);
+        let log = Log::default();
+        let mut methods = vec![fake("a", &log, 10), fake("b", &log, 20)];
+        let (mut samples, mut hw) = (output::samples_table(), output::hw_table());
+        let groups: Vec<usize> = (0..10).collect();
+        time_mode(
+            &mut ctx,
+            &cell,
+            &groups,
+            &mut methods,
+            Mode::Serving,
+            &mut samples,
+            &mut hw,
+        );
+        // Each phase warms up on the last batch, groups 7 to 9, then times every
+        // group in order; both methods, both rounds.
+        assert_eq!(cell.group_order(), crate::schedule::GroupOrder::File);
+        let calls = log.borrow();
+        let phases: Vec<Vec<usize>> = calls
+            .chunks(13)
+            .map(|p| p.iter().map(|c| c.1).collect())
+            .collect();
+        assert_eq!(phases.len(), 4);
+        for p in &phases {
+            assert_eq!(*p, [7, 8, 9].into_iter().chain(0..10).collect::<Vec<_>>());
+        }
     }
 }
