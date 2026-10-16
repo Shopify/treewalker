@@ -17,14 +17,21 @@ def doc():
 def test_ablation_variants_cross_only_at_the_interaction_anchors(doc):
     s = grids.suite(doc, "ablation")
     sizes = {c.id: len(s.plan[c.id]["variants"]) for c in s.cells}
-    # 7 runtime variants and 4 load flags alone; at the interaction anchors every
-    # runtime variant crosses the 8 combinations of the first three load flags.
-    assert sizes["support/nt500_md8_h16/lightgbm/panel"] == 7 * 8 + 1
-    assert sizes["flchain/nt1000_md16_h32/xgboost/panel"] == 57
-    assert sizes["support/nt50_md4_h1/lightgbm/panel"] == 7 + 4
+    # 6 runtime variants, 6 kernel variants and 4 load flags alone; at the
+    # interaction anchors every runtime variant crosses the 8 combinations of the
+    # first three load flags. Single rows' constant walk only at G = 1.
+    assert sizes["support/nt500_md8_h16/lightgbm/panel"] == 6 * 8 + 1 + 6
+    assert sizes["flchain/nt1000_md16_h32/xgboost/panel"] == 55
+    assert sizes["support/nt50_md4_h1/lightgbm/panel"] == 6 + 6 + 1 + 4
+    assert sizes["support/nt500_md4_h16/lightgbm/panel"] == 6 + 6 + 4
     # Expedia at an interaction anchor's (T, L) crosses too.
-    assert sizes["expedia/nt500_md8/lightgbm/sessions"] == 57
-    assert sizes["expedia/nt50_md4/lightgbm/sessions"] == 11
+    assert sizes["expedia/nt500_md8/lightgbm/sessions"] == 55
+    assert sizes["expedia/nt50_md4/lightgbm/sessions"] == 16
+    assert sum(sizes.values()) == 1048  # 948 before the kernel variants
+    g1 = [v for v in s.plan["support/nt50_md4_h1/xgboost/panel"]["variants"] if v["runtime"]]
+    assert {"runtime": ["disable_g1_constant"], "load": []} in g1
+    kernel = [v for v in s.plan["expedia/nt500_md8/xgboost/sessions"]["variants"] if v["load"]]
+    assert not [v for v in kernel if any("=" in f or "dispatch" in f for f in v["runtime"])]
     plan = s.plan["support/nt500_md8_h16/lightgbm/panel"]
     assert plan["methods"] == "ablation"
     dedup = [v for v in plan["variants"] if "disable_predicate_dedup" in v["load"]]
@@ -40,6 +47,23 @@ def test_variant_ids_match_the_runner():
     )
     with pytest.raises(ValueError):
         grids.variant(["disable_everything"])
+    # The kernel's tokens sort as Ablation::id() sorts them.
+    v = grids.variant(["lanes=4", "disable_unsplit"])
+    assert grids._variant_id(v) == "disable_unsplit+lanes=4"
+    assert (
+        grids._variant_id(grids.variant(["lanes=3", "disable_monotonic"]))
+        == "disable_monotonic+lanes=3"
+    )
+    for bad in (
+        ["lanes=13"],
+        ["distance=4"],
+        ["rate=2"],
+        ["layout=2e"],
+        ["lanes=1", "lanes=2"],
+        ["disable_exact_sums"],
+    ):
+        with pytest.raises(ValueError):
+            grids.variant(bad)
 
 
 def test_acceptance_plans_the_cells_and_fixtures(doc):

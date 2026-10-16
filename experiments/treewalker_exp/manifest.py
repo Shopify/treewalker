@@ -177,6 +177,8 @@ def build(
                 "workload": wkey,
                 "rows": doc["grouping"]["rows"],
                 "n_groups": doc["grouping"]["n_groups"],
+                # Single-row cells: the runner times their rows in file order.
+                **({"row_order": doc["row_order"]} if "row_order" in doc else {}),
             }
         )
     counts: dict[str, int] = {}

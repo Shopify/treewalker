@@ -140,6 +140,7 @@ class Context:
         self._credit: ds.CreditSplit | None = None
         self._draws: dict[tuple, wl.WhatIfDraws] = {}
         self._tl: dict[Path, Any] = {}
+        self._stats: dict[tuple, dict[str, Any]] = {}
 
     def survival(self, name: str) -> ds.SurvivalSplit:
         if name not in self._survival:
@@ -197,6 +198,14 @@ class Context:
                 raise ValueError(f"{dataset} has no sessions")
             self._sessions[dataset] = w
         return self._sessions[dataset]
+
+    def model_stats(self, bin_path: Path, varying: set[int]) -> dict[str, Any]:
+        """``model_stats`` of the model at ``bin_path`` under a varying set."""
+        st = bin_path.stat()
+        key = (bin_path, st.st_size, st.st_mtime_ns, tuple(sorted(varying)))
+        if key not in self._stats:
+            self._stats[key] = model_stats(self.tl_model(bin_path), varying)
+        return self._stats[key]
 
     def tl_model(self, bin_path: Path) -> Any:
         import treelite
@@ -355,8 +364,9 @@ class Context:
 # keys include it and model.json records it, so a change to the rules
 # re-evaluates every model and cell on resume; models are not retrained, and
 # a cell's data and references are reused when only the rules changed.
-# Policy 3 adds the stage oracle (oracle.bin) to every cell.
-PREP_POLICY = 3
+# Policy 3 adds the stage oracle (oracle.bin) to every cell, and policy 4 the
+# model statistics (model_stats).
+PREP_POLICY = 4
 
 
 def model_identity(model: Model, fw: str, td: TrainData) -> dict[str, Any]:
@@ -453,6 +463,133 @@ def json_record(fw_dir: Path, size: int | None) -> dict[str, Any]:
     return {"bytes": size, "status": "written", "path": path.name, "sha256": fm.sha256_file(path)}
 
 
+# --- model statistics -------------------------------------------------------------
+
+
+def model_stats(tl: Any, varying: set[int]) -> dict[str, Any]:
+    """What the kernel's layout policy weighs, from the model alone: the share
+    of internal nodes on varying features and the range of events per walk step
+    (train.walk_shares)."""
+    return {
+        "varying_share": wl.varying_share(tr.internal_nodes(tl), varying),
+        "walk": tr.walk_shares(tl, varying),
+    }
+
+
+def config_varying(config: dict[str, Any]) -> set[int]:
+    """Every feature a walker config lets vary: varying and monotonic."""
+    keys = ("varying_features", "mono_inc_features", "mono_dec_features")
+    return {int(f) for k in keys for f in config[k]}
+
+
+# --- derived models ----------------------------------------------------------------
+
+# Models derived from a trained model by editing its Treelite export, for kernel
+# paths no trained model reaches. They have no native model, so only TreeWalker
+# times them, and their references come from Treelite GTIL.
+POOLED_OFFSET = 200
+WIDE_EVERY = 10
+WIDE_SHIFT = -96
+DERIVATIONS = {
+    "pooled-categories": {
+        "rule": "every category of every categorical split, and every categorical input, "
+        "plus offset: the splits read the same rows, and every category is at least 32",
+        "offset": POOLED_OFFSET,
+    },
+    "wide-sums": {
+        "rule": "the leaves of one tree in every (0-based indices every - 1, 2 every - 1, "
+        "...) times 2^shift: the leaf exponents span past the 126-bit exact-sum rule",
+        "every": WIDE_EVERY,
+        "shift": WIDE_SHIFT,
+    },
+}
+
+
+def derive_model(bin_path: Path, derive: str) -> Any:
+    """The Treelite model at ``bin_path`` with one of DERIVATIONS applied."""
+    import treelite
+
+    tl = treelite.Model.deserialize(str(bin_path))
+    for i in range(tl.num_tree):
+        acc = tl.get_tree_accessor(i)
+        if derive == "pooled-categories":
+            cats = acc.get_field("category_list")
+            if len(cats):
+                acc.set_field("category_list", (cats + POOLED_OFFSET).astype(cats.dtype))
+        elif derive == "wide-sums":
+            if i % WIDE_EVERY == WIDE_EVERY - 1:
+                leaves = acc.get_field("leaf_value")
+                acc.set_field("leaf_value", np.ldexp(leaves, WIDE_SHIFT).astype(leaves.dtype))
+        else:
+            raise ValueError(f"unknown derivation {derive}")
+    return tl
+
+
+def derived_inputs(model: Model, w: wl.Workload, cat: list[int]) -> wl.Workload:
+    """A derived model's inputs: pooled categories shift the categorical columns."""
+    if model.derive != "pooled-categories":
+        return w
+    if not cat:
+        raise ValueError(f"{model.id}: no categorical features to pool")
+    X = w.X.copy()
+    X[:, cat] += POOLED_OFFSET
+    meta = {**w.meta, "derived": {"model": model.derive, "shifted": cat}}
+    return wl.Workload(X, w.offsets, w.config, w.entities, meta)
+
+
+def ensure_derived(
+    ctx: Context, model: Model, fw: str, trained: dict[str, Any], force: bool
+) -> dict[str, Any]:
+    """A derived model's export and model.json, rebuilt unless its key matches.
+    The trained model's identity carries over, with the derivation added."""
+    import treelite
+
+    art = ctx.paths.artifacts
+    src_dir = model.trained.dir(art) / fw
+    fw_dir = model.dir(art) / fw
+    derivation = {"name": model.derive, **DERIVATIONS[model.derive]}
+    identity = {
+        **{k: trained[k] for k in ("schema_version", "dataset", "framework", "source")},
+        **{k: trained[k] for k in ("split", "n_trees", "max_depth", "horizon", "train")},
+        **{k: trained[k] for k in ("categorical_features", "feature_order", "libraries")},
+        "train_data_sha256": trained["train_data_sha256"],
+        "derived_from": {"id": model.trained.id, "key": trained["key"]},
+        "derivation": derivation,
+        "treelite": treelite.__version__,
+    }
+    key = fm.sha256_json(identity)
+    doc_path = fw_dir / "model.json"
+    if not force and doc_path.exists():
+        doc = fm.read_json(doc_path)
+        if doc.get("key") == key and files_match(fw_dir, doc["files"]):
+            log(f"  {model.id}/{fw}: derived model matches its manifest, reused")
+            return doc
+    log(f"  {model.id}/{fw}: deriving from {model.trained.id}/{fw}")
+    tl = derive_model(src_dir / "model_treelite.bin", model.derive)
+    _put(fw_dir / "model_treelite.bin", tl.serialize_bytes())
+    structure = tr.structure(tl)
+    doc = {
+        **identity,
+        "key": key,
+        "prep_policy": PREP_POLICY,
+        "files": {
+            "treelite_bin": {
+                "path": "model_treelite.bin",
+                "sha256": fm.sha256_file(fw_dir / "model_treelite.bin"),
+            }
+        },
+        "structure": structure,
+        "limits": tr.model_limits(structure),
+        "treelite_json": json_record(fw_dir, None),
+        "sum_headroom_bits": {
+            "trained": tr.sum_headroom(ctx.tl_model(src_dir / "model_treelite.bin")),
+            "derived": tr.sum_headroom(tl),
+        },
+    }
+    fm.write_json(doc_path, doc)
+    return doc
+
+
 # Fields of model.json written before PREP_POLICY, replaced by treelite_json.
 LEGACY_MODEL_FIELDS = ("treelite_json_bytes", "treelite_json_loadable")
 
@@ -523,6 +660,40 @@ def write_workload(w: wl.Workload, data_dir: Path, offsets: bool = True) -> Buil
 
 
 def build_workload(ctx: Context, cell: Cell, td: TrainData, mdoc: dict[str, Any]) -> Built:
+    if cell.generator == "whatif-v1":
+        return build_whatif_v1(ctx, cell, mdoc)
+    w, out = make_workload(ctx, cell, td)
+    return write_workload(w, out)
+
+
+def make_workload(ctx: Context, cell: Cell, td: TrainData) -> tuple[wl.Workload, Path]:
+    """A cell's workload, and the directory its files go to."""
+    if cell.generator == "rows-v1":
+        p = cell.param
+        source, _ = make_workload(ctx, rows_source(cell), td)
+        w = wl.single_rows(source, p["row_order"], p["rows"])
+        w.meta["source"]["spec"] = wl.ROWS_SOURCE[cell.model.dataset]
+        if "derived" in source.meta:
+            w.meta["derived"] = source.meta["derived"]
+        return w, cell.dir(ctx.paths.artifacts)
+    w, out = _make_workload(ctx, cell, td)
+    return derived_inputs(cell.model, w, td.cat), out
+
+
+def rows_source(cell: Cell) -> Cell:
+    """The cell whose rows a rows-v1 cell takes (workloads.ROWS_SOURCE)."""
+    m = cell.model
+    if m.dataset in SURVIVAL:
+        return Cell(cell.workload, "panel-v2", m, cell.framework)
+    if m.dataset in RANKING:
+        return Cell(cell.workload, "ranking-sessions-v2", m, cell.framework)
+    if m.dataset == "credit":
+        params = tuple(wl.ROWS_WHATIF.items())
+        return Cell(cell.workload, "whatif-v2", m, cell.framework, params)
+    raise ValueError(f"rows-v1 has no source for {m.dataset}")
+
+
+def _make_workload(ctx: Context, cell: Cell, td: TrainData) -> tuple[wl.Workload, Path]:
     art = ctx.paths.artifacts
     model_dir = cell.model.dir(art)
     p = cell.param
@@ -532,15 +703,15 @@ def build_workload(ctx: Context, cell: Cell, td: TrainData, mdoc: dict[str, Any]
             cov = ctx.survival(cell.model.dataset).covariates("test")
             w = wl.panel(cov, td.horizon["realized"])
             w.meta["horizon"] = td.horizon
-            return write_workload(w, model_dir)
+            if "varying_share" in p:
+                return layout_panel(ctx, cell, w), cell.dir(art)
+            return w, model_dir
         case "ranking-sessions-v2":
-            return write_workload(ctx.sessions(cell.model.dataset), model_dir)
+            return ctx.sessions(cell.model.dataset), model_dir
         case "ranking-cohort-v2":
             sessions = ctx.sessions(cell.model.dataset)
             subsets = wl.ranking_cohort(sessions, p["min_candidates"], [p["size"]])
-            return write_workload(
-                subsets[p["size"]], art / cell.model.dataset / "workloads" / cell.workload_id
-            )
+            return subsets[p["size"]], art / cell.model.dataset / "workloads" / cell.workload_id
         case "whatif-v2":
             draws = ctx.whatif_draws(cell.model, td)
             # A replicate times its released cell's data: the features are the
@@ -559,10 +730,40 @@ def build_workload(ctx: Context, cell: Cell, td: TrainData, mdoc: dict[str, Any]
             w.meta["perturbation"]["split_counts"] = {
                 td.names[i]: int(counts[i]) for i in draws.pool
             }
-            return write_workload(w, cell.dir(art))
-        case "whatif-v1":
-            return build_whatif_v1(ctx, cell, mdoc)
+            return w, cell.dir(art)
+        case "whatif-grid-v1":
+            draws = ctx.whatif_draws(cell.model, td)
+            native = cell.model.dir(art) / cell.framework / tr.NATIVE_NAME[cell.framework]
+            counts = tr.split_counts(cell.framework, native, len(td.names))
+            w = wl.whatif_grid(draws, wl.whatif_v2_features(draws, counts, p["k"]), p["G"])
+            if td.horizon:
+                w.meta["horizon"] = td.horizon
+            w.meta["grid"]["split_counts"] = {td.names[i]: int(counts[i]) for i in draws.pool}
+            return w, cell.dir(art)
     raise ValueError(cell.generator)
+
+
+def layout_panel(ctx: Context, cell: Cell, w: wl.Workload) -> wl.Workload:
+    """The panel with extra constant covariates declared varying, so the share of
+    the model's internal nodes on varying features comes closest to the cell's
+    target."""
+    fw_dir = cell.model.dir(ctx.paths.artifacts) / cell.framework
+    counts = tr.internal_nodes(ctx.tl_model(fw_dir / "model_treelite.bin"))
+    target = cell.param["varying_share"]
+    base = list(w.config["varying_features"])
+    added = wl.varying_for_share(counts, base, target)
+    names = w.config["feature_names"]
+    config = {**w.config, "varying_features": sorted(base + added)}
+    layout = {
+        "target_share": target,
+        "base_share": wl.varying_share(counts, base),
+        "varying_share": wl.varying_share(counts, config["varying_features"]),
+        "declared_varying": [names[f] for f in added],
+        "internal_nodes": int(counts.sum()),
+        "rule": "the constant covariates whose internal nodes bring the share "
+        "closest to the target, of every subset",
+    }
+    return wl.Workload(w.X, w.offsets, config, w.entities, {**w.meta, "layout": layout})
 
 
 def build_whatif_v1(ctx: Context, cell: Cell, mdoc: dict[str, Any]) -> Built:
@@ -689,7 +890,9 @@ def ensure_cell(
             pred_path = fw_dir / "predictions.npy"  # where the released runner reads it
         else:
             pred_path = cell_dir / "predictions.npy"
-        if built.legacy_reference is None or cell.framework != "lightgbm":
+        if cell.model.derive:
+            preds = tr.gtil(tl, X.astype(np.float32) if tl.input_type == "float32" else X)
+        elif built.legacy_reference is None or cell.framework != "lightgbm":
             preds = tr.Reference(cell.framework, native, td.names, td.cat).predict(X)
         else:
             preds = ref
@@ -716,6 +919,15 @@ def ensure_cell(
     k = w.meta.get("k")
     if k is not None:
         k = {**k, "realized_varying_columns": len(contract["varying_columns"])}
+    # Only the cells that have them: single rows, layout calibration, derived models,
+    # what-if grids.
+    extra: dict[str, Any] = {
+        k_: w.meta[k_]
+        for k_ in ("row_order", "source", "layout", "derived", "grid")
+        if k_ in w.meta
+    }
+    if "derivation" in mdoc:
+        extra["derivation"] = mdoc["derivation"]
     doc = {
         **identity,
         "prep_policy": PREP_POLICY,
@@ -733,6 +945,7 @@ def ensure_cell(
             "realized_varying": [names[i] for i in contract["varying_columns"]],
         },
         "perturbation": w.meta.get("perturbation"),
+        **extra,
         "seeds": {"split": mdoc["split"]["seed"], **w.meta.get("seeds", {})},
         "split": mdoc["split"],
         "train": mdoc["train"],
@@ -745,6 +958,7 @@ def ensure_cell(
             "varying_predicates_upper_bound": predicates,
         },
         "contracts": {k_: v for k_, v in contract.items() if k_ != "varying_columns"},
+        "model_stats": ctx.model_stats(fw_dir / "model_treelite.bin", varying),
         "limits": limits,
         "warnings": warnings,
         "oracle": oracle,
@@ -763,9 +977,9 @@ def ensure_cell(
 
 # Cells built from the import fixtures for runner coverage their shape lacks.
 # fallback_sums: identity.bin's model with leaves 1e300 and 1e-300, 2^-997 apart,
-# so no fixed point holds both and exact_sums() is false (tests/import.rs builds
-# the same model). wide_pieces: sigmoid_f64 over groups across the 1,024-row piece
-# boundary.
+# so no i128 fixed point holds both and it sums in the wide accumulator
+# (tests/import.rs builds the same model). wide_pieces: sigmoid_f64 over groups
+# across the 1,024-row piece boundary.
 WIDE_PIECES = [1023, 1024, 1025, 2049]
 
 
@@ -891,6 +1105,7 @@ def ensure_fixture(ctx: Context, cell: Cell) -> dict[str, Any]:
             "source": f"tests/fixtures/import ({name})",
         },
         "contracts": {k: v for k, v in contract.items() if k != "varying_columns"},
+        "model_stats": ctx.model_stats(model_bin, config_varying(config)),
         "oracle": oracle,
         "files": {
             role: {"path": rel(files[role], cell_dir), "sha256": hashes[role]}
@@ -933,12 +1148,15 @@ def prepare(ctx: Context, cells: list[Cell], force: bool = False) -> Report:
                 report.add(c.id, ensure_fixture(ctx, c)["status"])
             continue
         try:
-            td = ctx.train_data(model)
-            if model.layout == "standard":
+            trained = model.trained
+            td = ctx.train_data(trained)
+            if trained.layout == "standard":
                 train = np.column_stack([td.X, td.y])
-                put_matrix(model.dir(ctx.paths.artifacts) / "train_data.bin", train)
+                put_matrix(trained.dir(ctx.paths.artifacts) / "train_data.bin", train)
             frameworks = sorted({c.framework for c in model_cells})
-            mdocs = {fw: ensure_model(ctx, model, fw, td, force) for fw in frameworks}
+            mdocs = {fw: ensure_model(ctx, trained, fw, td, force) for fw in frameworks}
+            if model.derive:
+                mdocs = {fw: ensure_derived(ctx, model, fw, mdocs[fw], force) for fw in frameworks}
             report.models += len(frameworks)
             for c in sorted(model_cells, key=lambda c: c.id):
                 doc = ensure_cell(ctx, c, td, mdocs[c.framework], force)

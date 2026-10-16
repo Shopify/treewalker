@@ -239,9 +239,9 @@ models = [
     "random_forest",
 ]
 
-# Runner coverage the import fixtures' shape lacks: a model without exact sums
-# (leaves 1e300 and 1e-300) and groups of 1,023 to 2,049 rows, across the
-# 1,024-row piece boundary.
+# Runner coverage the import fixtures' shape lacks: a model past the 126-bit
+# exact-sum rule, summed in the wide accumulator (leaves 1e300 and 1e-300), and
+# groups of 1,023 to 2,049 rows, across the 1,024-row piece boundary.
 [workloads.fixtures-runner]
 generator = "fixture-v1"
 models = ["fallback_sums", "wide_pieces"]
@@ -263,6 +263,90 @@ datasets = ["flchain"]
 n_trees = [50]
 max_depth = [4]
 horizon = [16, 32, 64, 128, 256, 512, 1024]
+
+# The prediction kernel's cells (the kernel suite).
+#
+# Single rows (G = 1) on the 500-tree, depth-8 models: each row its own group,
+# no feature varying. The rows come from the dataset's group workload (the panel
+# at horizon 16, the sessions, credit's what-if at k = 4, G = 64) and the cell
+# keeps the first `rows` of them, in one of two orders: independent rows, a
+# fixed-seed shuffle, or file order, where consecutive rows come from one
+# patient, session or applicant. The runner times a cell with a row order in
+# its file order, the same rows in the same order for every method.
+[workloads.kernel-g1]
+generator = "rows-v1"
+datasets = ["support", "flchain", "credit", "expedia"]
+n_trees = [500]
+max_depth = [8]
+horizon = [16]
+row_order = ["independent", "file"]
+rows = 20_000
+
+# Layout calibration: the panels with extra constant covariates declared
+# varying, so the share of internal nodes that split on varying features comes
+# as close to each target as the covariates allow. The panels alone are at
+# 0.21-0.30.
+[workloads.kernel-layout]
+generator = "panel-v2"
+datasets = ["support", "flchain"]
+n_trees = [500]
+max_depth = [8]
+horizon = [16]
+varying_share = [0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
+
+# Kernel paths no trained model reaches, on models derived from SUPPORT's: every
+# category shifted to 200 and above (pooled categorical splits), and one tree in
+# ten with its leaves scaled by 2^-96 (past the 126-bit exact-sum rule). Their
+# panels and independent single rows; TreeWalker's methods only.
+[workloads.kernel-derived]
+generator = "panel-v2"
+datasets = ["support"]
+n_trees = [500]
+max_depth = [8]
+horizon = [16]
+derive = ["pooled-categories", "wide-sums"]
+
+[workloads.kernel-derived-g1]
+generator = "rows-v1"
+datasets = ["support"]
+n_trees = [500]
+max_depth = [8]
+horizon = [16]
+derive = ["pooled-categories", "wide-sums"]
+row_order = ["independent"]
+rows = 20_000
+
+# Groups past the kernel's 1,024-row pieces, which no panel reaches (FLCHAIN
+# realizes at most 1,008 steps, SUPPORT 104): ICE grids of each base entity over
+# its model's two most-split covariates, 64 x 32 and 64 x 64 levels
+# (workloads.WHATIF_GRID). They validate the kernel; nothing is tuned on them.
+[workloads.kernel-grid-credit]
+generator = "whatif-grid-v1"
+datasets = ["credit"]
+n_trees = [500]
+max_depth = [8]
+k = [2]
+G = [2048, 4096]
+
+[workloads.kernel-grid-flchain]
+generator = "whatif-grid-v1"
+datasets = ["flchain"]
+n_trees = [50]
+max_depth = [4]
+horizon = [16]
+k = [2]
+G = [2048, 4096]
+
+# Perturbed what-ifs whose leaves cover scattered rows: credit at T=500 L=8, G = 128,
+# k = 8 and k = 1 (the cells of the 2.x commit 8f896af), where most runs of a leaf's
+# rows are one row long. They validate the leaf pass; nothing is tuned on them.
+[workloads.kernel-whatif-credit]
+generator = "whatif-v2"
+datasets = ["credit"]
+n_trees = [500]
+max_depth = [8]
+k = [1, 8]
+G = [128]
 
 # --- suites --------------------------------------------------------------------
 
@@ -309,10 +393,23 @@ runtime_variants = [
     ["disable_unsplit"],
     ["disable_unsplit", "disable_varying_precompute"],
     ["disable_predicate_sweep"],
-    ["disable_exact_sums"],
 ]
-# LoadOptions, one at a time everywhere; all 8 combinations of the first
-# three at the interaction anchors. disable_prefix_grouping is prefix_depth 0.
+# The kernel's own choices, one at a time with the default load options: walk
+# lanes, per-group mask widths and the restart prefetch.
+kernel_variants = [
+    ["lanes=1"],
+    ["lanes=2"],
+    ["lanes=4"],
+    ["lanes=8"],
+    ["disable_width_dispatch"],
+    ["disable_restart_prefetch"],
+]
+# Only at the anchors with G = 1: single rows' constant walk through varying
+# splits.
+g1_variants = [["disable_g1_constant"]]
+# Load-time ablations (research::LoadAblation), one at a time everywhere; all 8
+# combinations of the first three at the interaction anchors.
+# disable_prefix_grouping is prefix depth 0.
 # Disabling dedup keeps bitset interning on.
 parse_flags = [
     "disable_tree_ordering",
@@ -467,7 +564,7 @@ cells = [
 run = { xgboost_process_arches = ["x86_64", "aarch64"], sentinel_every = 10 }
 
 # The prepared-artifact smoke tier: f32 and f64 models, every mask width and the
-# 1,024-row piece boundary, exact and fallback accumulation, no-op and active
+# 1,024-row piece boundary, i128 and wide exact sums, no-op and active
 # ablations.
 [suites.smoke]
 description = "Small cells for the artifact tests and a quick runner check."
@@ -479,6 +576,30 @@ runtime_variants = [
     ["disable_varying_precompute", "disable_monotonic"],
     ["disable_unsplit"],
     ["disable_predicate_sweep"],
-    ["disable_exact_sums"],
     ["disable_monotonic"],
+    ["lanes=1"],
+    ["disable_g1_constant"],
+    ["disable_width_dispatch"],
+    ["disable_restart_prefetch"],
 ]
+
+# The prediction kernel's cells: single rows in both orders, the layout
+# calibration panels, pooled categories, wide sums and what-if grids past
+# 1,024 rows. TreeWalker only, with
+# the policy's alternatives: 4 and 8 lanes, and on single rows stops at varying
+# splits.
+[suites.kernel]
+description = "Single rows, layout calibration, pooled categories, wide sums, groups past 1,024 rows and scattered leaves."
+methods = "treewalker"
+modes = ["serving"]
+workloads = [
+    "kernel-g1",
+    "kernel-layout",
+    "kernel-derived",
+    "kernel-derived-g1",
+    "kernel-grid-credit",
+    "kernel-grid-flchain",
+    "kernel-whatif-credit",
+]
+runtime_variants = [[], ["lanes=4"], ["lanes=8"]]
+g1_variants = [["disable_g1_constant"]]
