@@ -1,5 +1,6 @@
-//! The precompute's masks against the float predicates, on the generator's models and
-//! groups.
+//! Single rows through the kernel against the generator's evaluator, and their outputs
+//! across lane counts, restart prefetch and chunk sizes; the precompute's masks against
+//! the float predicates.
 
 // The property tests' generator, with the exact module's copy of their oracle.
 #[expect(clippy::float_cmp, reason = "exact expectations")]
@@ -14,8 +15,9 @@ use crate::exact::oracle;
 use model::{Feature, Precision, Settings};
 use rng::Rng;
 
+use super::{Groups, Options, Predictor, Workspace};
 use crate::config::Choices;
-use crate::rules::Prefix;
+use crate::rules::{Prefix, Tuning};
 use crate::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -148,6 +150,98 @@ fn group(
     (0..n)
         .flat_map(|r| columns.iter().map(move |c| c[r]))
         .collect()
+}
+
+/// A predictor whose chunks take `chunk_bytes`, or the rule's budget.
+fn predictor(forest: &Forest, chunk_bytes: Option<usize>) -> Predictor {
+    let rule = Tuning::new(&forest.model);
+    let tuning = Tuning {
+        chunk_bytes: chunk_bytes.unwrap_or(rule.chunk_bytes),
+        ..rule
+    };
+    Predictor {
+        workspace: Workspace::with_tuning(&forest.model, tuning),
+        model: std::sync::Arc::clone(&forest.model),
+    }
+}
+
+/// The kernel's outputs with `options` for every row of the case as a group of its
+/// own, in chunks of `chunk_bytes` or the rule's.
+fn kernel(c: &Case, chunk_bytes: Option<usize>, options: Options) -> Vec<f64> {
+    let mut p = predictor(&c.forest, chunk_bytes);
+    let mut out = vec![f64::NAN; c.data.len() / c.forest.config().n_features()];
+    let groups = Groups::Fixed(1);
+    p.check(&c.data, out.len(), groups);
+    p.kernel::<false, true>(&c.data, &mut out, groups, options, None, true);
+    out
+}
+
+fn same(actual: &[f64], expected: &[f64], what: &str) {
+    for (r, (a, e)) in actual.iter().zip(expected).enumerate() {
+        assert_eq!(a.to_bits(), e.to_bits(), "{what}: row {r}: {a:e} != {e:e}");
+    }
+}
+
+#[test]
+fn single_rows_match_the_oracle() {
+    let (mut fixed, mut wide) = (0, 0);
+    for seed in 0..if MIRI { 4 } else { 40 } {
+        let c = case(0x5EED_0000 + seed);
+        let nf = c.forest.config().n_features();
+        let production = kernel(&c, None, Options::default());
+        // The generator's own evaluation of each row, summed by the big-integer oracle.
+        let expected: Vec<f64> = c
+            .data
+            .chunks_exact(nf)
+            .map(|row| c.model.predict(row))
+            .collect();
+        same(&production, &expected, &format!("case {seed}: the oracle"));
+        match c.forest.model.plan {
+            crate::exact::Plan::Fixed(_) => fixed += 1,
+            crate::exact::Plan::Wide(_) => wide += 1,
+        }
+    }
+    assert!(
+        MIRI || (fixed > 10 && wide > 3),
+        "{fixed} with i128 sums, {wide} wide"
+    );
+}
+
+#[test]
+fn single_rows_do_not_depend_on_how_the_kernel_runs() {
+    let default = Options::default();
+    for seed in 0..if MIRI { 1 } else { 25 } {
+        let c = case(0xC0FF_EE00 + seed);
+        let reference = kernel(&c, None, default);
+        let check = |out: Vec<f64>, what: &str| same(&out, &reference, &format!("{seed} {what}"));
+        let lanes = |k, distance| Options {
+            lanes: Some(k),
+            distance,
+            ..default
+        };
+        let k = |n: usize| if MIRI { [1, 3, 12][n % 3] } else { n };
+        for n in 1..=if MIRI { 3 } else { 12 } {
+            let distance = [None, Some(0)][n % 2];
+            check(kernel(&c, Some(12_000), lanes(k(n), distance)), "lanes");
+        }
+        for d in [0, 1, 2, 4, 8, 16] {
+            let o = Options {
+                distance: Some(d),
+                ..default
+            };
+            check(kernel(&c, Some(12_000), o), "distance");
+        }
+        for r in [1, 2, 4] {
+            let o = Options {
+                rate: Some(r),
+                ..default
+            };
+            check(kernel(&c, Some(12_000), o), "rate");
+        }
+        for chunk in [1, 1_500, 40_000] {
+            check(kernel(&c, Some(chunk), default), "chunks");
+        }
+    }
 }
 
 /// Each varying predicate's left mask over `rows`, as runtime-width words, from its
