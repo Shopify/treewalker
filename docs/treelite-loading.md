@@ -175,7 +175,8 @@ strictly increasing), and `predict_fixed` consecutive groups of one width, the
 last of which may be shorter. Every group has at most `max_group_width` rows;
 empty input is a no-op. A call whose input length is not a multiple of
 `n_features`, whose output length differs from the row count, or whose grouping
-is invalid panics before writing any output.
+is invalid panics before writing any output. A bad model or data input gives an error; a
+violated calling contract, such as these, panics, as documented here.
 
 ## Bounded import
 

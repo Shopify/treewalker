@@ -69,11 +69,38 @@ committed fixtures.
 
 ### Development checks
 
-Every commit passes `cargo fmt --check`, `cargo clippy --workspace --all-targets
--- -D warnings` and `cargo test`. The Linux-only code (the timestamp counter's
-calibration, `perf_event`) is checked by cross clippy. Parquet's zstd is C, so
-without a Linux cross toolchain the check compiles it with clang and the macOS
-SDK headers; nothing builds or links for Linux:
+`experiments/scripts/checks.sh` runs the checks as concurrent lanes, each building in
+its own target directory under `target/checks`, and writes every step's log and a
+summary of their status, test counts and times to `target/checks/logs`:
+
+```bash
+PYTHON=.venv/bin/python experiments/scripts/checks.sh fast   # every commit
+PYTHON=.venv/bin/python experiments/scripts/checks.sh full   # before a pull request or a release
+```
+
+The fast checks are `cargo fmt --check`, `cargo clippy --workspace --all-targets --
+-D warnings` with and without the research features, `cargo test --workspace`, and the
+Python tests, ruff and mypy: 44 s on an M4 Pro once built. The full checks, 4 to 5
+minutes, add the release tests with the research API, the bench crate's tests, the
+property tests at their full counts (`TW_PROPTEST_FULL=1`), cross clippy, Miri, the
+spill checks and the bench crate's suite on the core artifacts (`TEST_ARTIFACTS_BASE`).
+
+What guards what. The property tests (`tests/property.rs`) check production, each call
+and the research predictor against an exact oracle and the full walk, bit for bit, on
+random models in both formats with random layouts, and groups of 1 to 2,049 rows: the
+widths around every mask boundary, more than 64 features, and category IDs anywhere in
+`u32`. The artifact suite checks real XGBoost and LightGBM models against the frameworks'
+own outputs, `tests/import.rs` the exported fixtures against them, and
+`tests/vectors.rs` every output against recorded vectors, so that a release that changes
+one fails. Unit tests localize the hard algorithms: exact rounding, the bins and
+category chains, the precompute's sweep, the masks' runs and the rules. A bad model or
+data input gives an error; a violated calling contract panics, as documented (see
+[Treelite loading](docs/treelite-loading.md)). Each instruction set's paths run the same
+tests natively on their machines.
+
+The Linux-only code (the timestamp counter's calibration, `perf_event`) is checked by
+cross clippy. Parquet's zstd is C, so without a Linux cross toolchain the check compiles
+it with clang and the macOS SDK headers; nothing builds or links for Linux:
 
 ```bash
 SDK=$(xcrun --show-sdk-path)
@@ -82,19 +109,21 @@ export CC_x86_64_unknown_linux_gnu=clang \
   CC_aarch64_unknown_linux_gnu=clang \
   CFLAGS_aarch64_unknown_linux_gnu="--target=aarch64-unknown-linux-gnu -isystem $SDK/usr/include -D__arm64__"
 for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids" \
-         "x86_64-unknown-linux-gnu x86-64" "aarch64-unknown-linux-gnu neoverse-v2"; do
+         "x86_64-unknown-linux-gnu x86-64-v4" "x86_64-unknown-linux-gnu x86-64" \
+         "aarch64-unknown-linux-gnu neoverse-v2"; do
   set -- $t
-  for f in "" "--features treewalker-bench/external-bench,treewalker-bench/pmu"; do
+  for f in "" "--features treewalker-bench/external-bench,treewalker-bench/pmu" \
+           "--features treewalker-bench/research"; do
     RUSTFLAGS="-C target-cpu=$2" cargo clippy --target $1 --workspace --all-targets $f -- -D warnings
   done
 done
 ```
 
-Optionally, Miri checks the unsafe code on small production-shaped cases
-(`tests/miri.rs` and the lib's `prefetching_walks`), each of which runs every kind of
-unsafe operation of its path once, with a nightly toolchain (`rustup +nightly component
-add miri`). The x86-64 runs take the SSE2 and AVX2 masks, the RISC-V run the plain-word
-fallback; on AArch64, Miri lacks a NEON intrinsic the masks use. Miri perturbs `exp` unless floats are
+Miri checks the unsafe code on small production-shaped cases (`tests/miri.rs` and the
+lib's `prefetching_walks`), each of which runs every kind of unsafe operation of its
+path once, with a nightly toolchain (`rustup +nightly component add miri`). The x86-64
+runs take the SSE2 and AVX2 masks, the RISC-V run the plain-word fallback; on AArch64,
+Miri lacks a NEON intrinsic the masks use. Miri perturbs `exp` unless floats are
 deterministic, and the sigmoid would then differ between two calls of the same
 prediction. An empty `RUSTFLAGS` replaces the repository's `target-cpu=native`:
 
