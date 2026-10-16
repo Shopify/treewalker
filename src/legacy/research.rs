@@ -26,7 +26,8 @@
 //! forest.predict_full_walk(&rows, &mut reference); // every tree, row by row
 //! ```
 
-use crate::legacy::forest::{Forest, Model};
+use crate::Forest;
+use crate::legacy::forest::Model;
 use crate::legacy::predict::{Groups, Predictor};
 
 pub use crate::legacy::forest::{Node, ThresholdType, Tree};
@@ -86,7 +87,7 @@ impl Forest {
     /// If `rows.len()` is not a multiple of `n_features` or `out.len()` is not the row
     /// count.
     pub fn predict_full_walk(&self, rows: &[f64], out: &mut [f64]) {
-        let nf = self.model.config.n_features();
+        let nf = self.legacy().config.n_features();
         assert!(
             rows.len().is_multiple_of(nf),
             "input length {} is not a multiple of n_features {nf}",
@@ -98,37 +99,37 @@ impl Forest {
             out.len(),
             rows.len() / nf
         );
-        self.model.full_walk(rows, out);
+        self.legacy().full_walk(rows, out);
     }
 
     /// All trees' nodes, in the optimized layout.
     #[must_use]
     pub fn nodes(&self) -> &[Node] {
-        &self.model.nodes
+        &self.legacy().nodes
     }
 
     /// Per-tree offsets into [`Self::nodes`].
     #[must_use]
     pub fn trees(&self) -> &[Tree] {
-        &self.model.trees
+        &self.legacy().trees
     }
 
     /// One tree's nodes.
     #[must_use]
     pub fn tree_nodes(&self, tree: &Tree) -> &[Node] {
-        &self.model.nodes[tree.node_start as usize..(tree.node_start + tree.node_count) as usize]
+        &self.legacy().nodes[tree.node_start as usize..(tree.node_start + tree.node_count) as usize]
     }
 
     /// Bytes of categorical bitsets in the shared pool.
     #[must_use]
     pub fn bitset_bytes(&self) -> usize {
-        self.model.bitsets.len()
+        self.legacy().bitsets.len()
     }
 
     /// Whether thresholds compare in `f32` (XGBoost) or `f64` (LightGBM).
     #[must_use]
     pub fn threshold_type(&self) -> ThresholdType {
-        self.model.threshold_type
+        self.legacy().threshold_type
     }
 
     /// Left masks of every varying predicate over one group of at most 32 rows, from
@@ -141,12 +142,12 @@ impl Forest {
     /// If `rows.len()` is not a multiple of `n_features` or holds more than 32 rows.
     #[must_use]
     pub fn predicate_masks(&self, rows: &[f64], sweep: bool) -> Vec<u32> {
-        let nf = self.model.config.n_features();
+        let nf = self.legacy().config.n_features();
         assert!(
             rows.len().is_multiple_of(nf) && rows.len() / nf <= 32,
             "predicate_masks takes up to 32 rows of n_features values"
         );
-        self.model.predicate_masks(rows, sweep)
+        self.legacy().predicate_masks(rows, sweep)
     }
 }
 

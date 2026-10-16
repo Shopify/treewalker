@@ -40,7 +40,8 @@ pub use counters::WorkCounters;
 
 use std::sync::Arc;
 
-use crate::legacy::forest::{Forest, Model, ThresholdType};
+use crate::Forest;
+use crate::legacy::forest::{Model, ThresholdType};
 use crate::legacy::mask::{Bits, RowMask};
 
 /// Runtime ablation flags: each disables one optimization of the predict path.
@@ -260,8 +261,8 @@ impl Forest {
     #[must_use]
     pub fn predictor(&self) -> Predictor {
         Predictor {
-            workspace: Workspace::new(&self.model),
-            model: Arc::clone(&self.model),
+            workspace: Workspace::new(self.legacy()),
+            model: Arc::clone(self.legacy()),
         }
     }
 }
