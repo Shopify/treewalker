@@ -196,6 +196,12 @@ impl VaryingPredicate {
         Self::new(node.feature, node.flags, node.value)
     }
 
+    /// The predicate of a decoded split.
+    #[inline]
+    pub(crate) const fn of_split(split: &crate::load::parse::decoded::Split) -> Self {
+        Self::new(split.feature, split.flags, split.value)
+    }
+
     /// The predicate on `feature` with a parsed node's `flags` and `value`.
     #[inline]
     const fn new(feature: u32, flags: u8, value: f64) -> Self {

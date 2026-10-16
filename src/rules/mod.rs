@@ -17,7 +17,9 @@ mod steps;
 
 pub(crate) use lanes::{MAX_LANES, lanes};
 pub(crate) use prefetch::{Distance, MAX_DISTANCE, distance, pass_distance};
-pub(crate) use prefix::Prefix;
+pub(crate) use prefix::{
+    PathNode, Paths, Prefix, PrefixStats, Token, compare_paths, prefix_groups,
+};
 pub(crate) use steps::{ItemLengths, StepSums, Steps};
 
 use machine::Caches;
