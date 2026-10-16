@@ -72,6 +72,8 @@
 
 mod config;
 mod error;
+// Until the new kernel uses them, the wide accumulator and the runs are unused.
+#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod exact;
 mod forest;
 mod mask;
