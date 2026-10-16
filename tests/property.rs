@@ -5,6 +5,8 @@
 //! so a failure replays alone. Environment variables:
 //!
 //! - `TW_PROPTEST_CASES`: cases per test, instead of each test's default.
+//! - `TW_PROPTEST_FULL`: each test's full-run cases, the full checks' count, set by the
+//!   test's cost (`TW_PROPTEST_CASES` overrides it).
 //! - `TW_PROPTEST_SEED`: the base seed (decimal or 0x-prefixed hex).
 //! - `TW_PROPTEST_CASE`: run only this case index.
 //! - `TW_PROPTEST_DUMP`: a directory to write each case's model, configuration and
@@ -29,6 +31,8 @@ const BOUNDARIES: [usize; 18] = [
 struct Profile {
     name: &'static str,
     cases: usize,
+    /// Cases with `TW_PROPTEST_FULL`: about 40 s at most in release on an M4 Pro.
+    full_cases: usize,
     settings: Settings,
     /// Rows per case, at most (a single group may reach 2,049).
     max_rows: usize,
@@ -93,8 +97,13 @@ fn parse(name: &str, value: &str) -> u64 {
 /// Run a profile's cases; on failure, name the seed and case that replay it.
 fn run(profile: &Profile) -> Coverage {
     let seed = env("TW_PROPTEST_SEED").map_or(DEFAULT_SEED, |v| parse("TW_PROPTEST_SEED", &v));
+    let default = if env("TW_PROPTEST_FULL").is_some() {
+        profile.full_cases
+    } else {
+        profile.cases
+    };
     let cases =
-        env("TW_PROPTEST_CASES").map_or(profile.cases, |v| parse("TW_PROPTEST_CASES", &v) as usize);
+        env("TW_PROPTEST_CASES").map_or(default, |v| parse("TW_PROPTEST_CASES", &v) as usize);
     let only = env("TW_PROPTEST_CASE").map(|v| parse("TW_PROPTEST_CASE", &v) as usize);
     let name_hash = profile
         .name
@@ -487,7 +496,7 @@ fn dump(
     std::fs::write(base.with_extension("rows.f64"), bytes).unwrap();
 }
 
-/// Whether the run covers the profile's default cases, so coverage can be checked.
+/// Whether the run covers the profile's default or full cases, so coverage can be checked.
 fn full_run() -> bool {
     env("TW_PROPTEST_CASE").is_none() && env("TW_PROPTEST_CASES").is_none()
 }
@@ -497,6 +506,7 @@ fn ordinary_models() {
     let c = run(&Profile {
         name: "ordinary_models",
         cases: 400,
+        full_cases: 5_000,
         settings: Settings {
             max_trees: 30,
             max_nodes: 1500,
@@ -526,6 +536,7 @@ fn leaves_past_the_126_bit_rule() {
     let c = run(&Profile {
         name: "leaves_past_the_126_bit_rule",
         cases: 300,
+        full_cases: 5_000,
         settings: Settings {
             max_trees: 30,
             max_nodes: 1500,
@@ -550,6 +561,7 @@ fn categorical_models() {
     let c = run(&Profile {
         name: "categorical_models",
         cases: 300,
+        full_cases: 5_000,
         settings: Settings {
             max_trees: 20,
             max_nodes: 1500,
@@ -576,6 +588,7 @@ fn repeated_varying_values() {
     let c = run(&Profile {
         name: "repeated_varying_values",
         cases: 300,
+        full_cases: 5_000,
         settings: Settings {
             max_trees: 20,
             max_nodes: 1500,
@@ -599,6 +612,7 @@ fn deep_trees_and_wide_groups() {
     let c = run(&Profile {
         name: "deep_trees_and_wide_groups",
         cases: 80,
+        full_cases: 5_000,
         settings: Settings {
             max_trees: 6,
             max_nodes: 9000,
@@ -628,6 +642,7 @@ fn past_the_old_feature_and_category_limits() {
     let c = run(&Profile {
         name: "past_the_old_feature_and_category_limits",
         cases: 150,
+        full_cases: 5_000,
         settings: Settings {
             max_trees: 20,
             max_nodes: 1500,
@@ -656,6 +671,7 @@ fn nested_categorical_sets() {
     let c = run(&Profile {
         name: "nested_categorical_sets",
         cases: 200,
+        full_cases: 5_000,
         settings: Settings {
             max_trees: 30,
             max_nodes: 2000,
@@ -683,6 +699,7 @@ fn past_the_old_tree_size_and_depth_limits() {
     let c = run(&Profile {
         name: "past_the_old_tree_size_and_depth_limits",
         cases: 12,
+        full_cases: 500,
         settings: Settings {
             max_trees: 2,
             max_nodes: 90_000,
