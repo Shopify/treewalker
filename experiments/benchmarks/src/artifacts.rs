@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use serde_json::Value;
+use treewalker_gbdt::research::LoadAblation;
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
 use crate::data;
@@ -97,8 +98,8 @@ pub struct VariantSpec {
     /// Runtime flags, by `Ablation` field name.
     #[serde(default)]
     pub runtime: Vec<String>,
-    /// Load-time flags: `disable_tree_ordering`, `disable_prefix_grouping`,
-    /// `disable_bitset_intern`, `disable_predicate_dedup`.
+    /// Load-time flags: `disable_tree_ordering`, `disable_prefix_grouping` (prefix
+    /// depth 0), `disable_bitset_intern`, `disable_predicate_dedup`.
     #[serde(default)]
     pub load: Vec<String>,
 }
@@ -119,26 +120,19 @@ impl VariantSpec {
     }
 
     pub fn ablation(&self) -> Result<treewalker_gbdt::research::Ablation> {
-        let mut a = treewalker_gbdt::research::Ablation::default();
-        for flag in &self.runtime {
-            match flag.as_str() {
-                "disable_varying_precompute" => a.disable_varying_precompute = true,
-                "disable_predicate_sweep" => a.disable_predicate_sweep = true,
-                "disable_unsplit" => a.disable_unsplit = true,
-                "disable_monotonic" => a.disable_monotonic = true,
-                "disable_exact_sums" => a.disable_exact_sums = true,
-                other => bail!("unknown runtime flag {other}"),
-            }
-        }
-        Ok(a)
+        self.runtime
+            .iter()
+            .try_fold(treewalker_gbdt::research::Ablation::default(), |a, flag| {
+                a.with(flag).map_err(|e| anyhow::anyhow!(e))
+            })
     }
 
-    pub fn load_options(&self) -> Result<LoadOptions> {
-        let mut o = LoadOptions::default();
+    pub fn load_ablation(&self) -> Result<LoadAblation> {
+        let mut o = LoadAblation::default();
         for flag in &self.load {
             match flag.as_str() {
                 "disable_tree_ordering" => o.disable_tree_ordering = true,
-                "disable_prefix_grouping" => o.prefix_depth = 0,
+                "disable_prefix_grouping" => o.prefix_depth = Some(0),
                 "disable_bitset_intern" => o.disable_bitset_intern = true,
                 "disable_predicate_dedup" => o.disable_predicate_dedup = true,
                 other => bail!("unknown load flag {other}"),
@@ -196,9 +190,9 @@ pub struct RunConfig {
     /// Time each cell, and each sentinel, in a new process of the runner, so none
     /// runs in a heap that earlier cells' models have churned.
     pub fresh_process: bool,
-    /// Load every TreeWalker forest with exact leaf sums (`LoadOptions::exact_sums`),
-    /// the library's default; false sums each row's leaves in `f64`, as the paper's
-    /// algorithms do. A cell whose forests report otherwise is refused.
+    /// Exact leaf sums, grids.toml's `exact_sums`. 3.0 sums every model exactly, so
+    /// only true is accepted; the suites that set it false measure 2.x's per-row
+    /// `f64` sums, and run at their recorded ref.
     pub exact_sums: bool,
 }
 
@@ -237,6 +231,12 @@ impl Manifest {
             "{}: manifest schema {} (this runner reads {MANIFEST_SCHEMA}); rerun treewalker-exp manifest",
             path.display(),
             m.schema_version
+        );
+        ensure!(
+            m.run.exact_sums,
+            "{}: run.exact_sums = false: 3.0 sums every model exactly; this suite measures \
+             2.x's per-row f64 sums: run it at its recorded ref",
+            path.display()
         );
         Ok(m)
     }
@@ -528,18 +528,19 @@ impl Cell {
         &self.data[self.offsets[g] * self.n_features..self.offsets[g + 1] * self.n_features]
     }
 
-    /// Load the model with `options` at the configured maximum group width.
-    pub fn forest(&self, options: &LoadOptions) -> Result<Forest> {
-        Ok(Forest::load_with(
+    /// Load the model with the load-time `ablation` at the configured maximum group
+    /// width.
+    pub fn forest(&self, ablation: &LoadAblation) -> Result<Forest> {
+        Ok(Forest::load_ablated(
             &self.model_treelite,
             &self.walker_config,
-            options,
+            &LoadOptions::default(),
+            ablation,
         )?)
     }
 
-    /// Load the model with the cell's feature roles at another maximum group width,
-    /// with the default layout and `exact_sums` as given.
-    pub fn forest_at_width(&self, width: usize, exact_sums: bool) -> Result<Forest> {
+    /// Load the model with the cell's feature roles at another maximum group width.
+    pub fn forest_at_width(&self, width: usize) -> Result<Forest> {
         let file = WalkerConfig::from_file(&self.walker_config)?;
         let nf = file.n_features();
         let pick = |role: fn(&WalkerConfig, usize) -> bool| {
@@ -555,10 +556,7 @@ impl Cell {
             std::fs::File::open(&self.model_treelite)?,
             ModelFormat::TreeliteBinaryV4,
             config,
-            &LoadOptions {
-                exact_sums,
-                ..LoadOptions::default()
-            },
+            &LoadOptions::default(),
         )?)
     }
 
@@ -647,10 +645,11 @@ mod tests {
         assert!(v(&["nope"], &[]).ablation().is_err());
         assert_eq!(
             v(&[], &["disable_prefix_grouping"])
-                .load_options()
+                .load_ablation()
                 .unwrap()
                 .prefix_depth,
-            0
+            Some(0)
         );
+        assert!(v(&[], &["prefix_depth=2"]).load_ablation().is_err());
     }
 }

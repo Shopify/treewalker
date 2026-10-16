@@ -72,26 +72,24 @@
 
 mod config;
 mod error;
-// Until the research API and the reader loads move to the new kernel and loader,
-// their parts of these modules are unused.
+// Until today's loader is deleted, it calls exact::scale, which the new kernel does
+// not.
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod exact;
 mod forest;
-// Today's model and kernel serve the research API until it moves to the new kernel;
-// outside it they are unused.
+// Today's loader still loads every Forest's input until it is deleted; its model and
+// kernel are unused.
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod legacy;
+// Until today's loader is deleted, every load reads its input into memory first, so
+// the decoders' reader and file paths are unused.
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod load;
-#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod model;
-#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod predict;
 mod predictor;
 #[cfg(feature = "research")]
-#[path = "legacy/research.rs"]
 pub mod research;
-#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod rules;
 
 pub use config::{LoadOptions, WalkerConfig, WalkerConfigBuilder};

@@ -17,8 +17,8 @@ use crate::{LoadError, ModelFormat};
 #[derive(Clone)]
 pub struct Forest {
     pub(crate) model: Arc<Model>,
-    /// Scaffolding while `src/legacy/` serves the Predictor and the research API:
-    /// today's model of the same input, which today's kernel predicts from.
+    /// Scaffolding until `src/legacy/` is deleted: today's model of the same input,
+    /// which nothing reads.
     pub(crate) legacy: Option<Arc<crate::legacy::forest::Model>>,
 }
 
@@ -95,8 +95,8 @@ impl Forest {
         options: &LoadOptions,
         choices: &Choices,
     ) -> Result<Self, LoadError> {
-        // Scaffolding while `src/legacy/` serves the Predictor and the research API:
-        // today's loader reads the same input, so the input is read first, to its cap.
+        // Scaffolding until `src/legacy/` is deleted: today's loader reads the same
+        // input, so the input is read first, to its cap.
         let cap = match format {
             ModelFormat::TreeliteBinaryV4 => options.max_binary_bytes,
             ModelFormat::TreeliteJson => options.max_json_bytes,
@@ -115,7 +115,7 @@ impl Forest {
         options: &LoadOptions,
         choices: &Choices,
     ) -> Result<Self, LoadError> {
-        // Scaffolding while `src/legacy/` serves the Predictor and the research API.
+        // Scaffolding until `src/legacy/` is deleted.
         Self::from_reader_with(file, format, config, options, choices)
     }
 
@@ -127,20 +127,18 @@ impl Forest {
         options: &LoadOptions,
         choices: &Choices,
     ) -> Result<Self, LoadError> {
-        // Scaffolding while `src/legacy/` serves the Predictor and the research API:
-        // today's model of the same bytes, loaded first, so that a load fails where
-        // today's loader fails.
-        let legacy = Self::legacy_model(bytes, format, &config, options)?;
+        // Scaffolding until `src/legacy/` is deleted: today's model of the same bytes,
+        // loaded first, so that a load fails where today's loader fails.
+        let legacy = Self::legacy_model(bytes, format, &config, choices)?;
         let parsed = parse::parse_bytes(bytes, format, &config, options, choices)?;
         let mut forest = Self::build(parsed, config, options, choices)?;
         forest.legacy = legacy;
         Ok(forest)
     }
 
-    /// Scaffolding while `src/legacy/` serves the Predictor and the research API:
-    /// today's model of `bytes`, with the layout switches of `options`. The new
-    /// loader's unit tests load models that today's loader rejects, so there it is
-    /// `None` instead of an error.
+    /// Scaffolding until `src/legacy/` is deleted: today's model of `bytes`, with the
+    /// layout `choices`. The new loader's unit tests load models that today's loader
+    /// rejects, so there it is `None` instead of an error.
     #[cfg_attr(
         test,
         expect(
@@ -152,19 +150,14 @@ impl Forest {
         bytes: &[u8],
         format: ModelFormat,
         config: &WalkerConfig,
-        options: &LoadOptions,
+        choices: &Choices,
     ) -> Result<Option<Arc<crate::legacy::forest::Model>>, LoadError> {
-        let legacy = crate::legacy::forest::load(bytes, format, config.clone(), options);
+        let options = crate::legacy::Options::of(choices);
+        let legacy = crate::legacy::forest::load(bytes, format, config.clone(), &options);
         #[cfg(test)]
         return Ok(legacy.ok());
         #[cfg(not(test))]
         legacy.map(Some)
-    }
-
-    /// Scaffolding while `src/legacy/` serves the Predictor and the research API:
-    /// today's model.
-    pub(crate) const fn legacy(&self) -> &Arc<crate::legacy::forest::Model> {
-        self.legacy.as_ref().expect("loaded with today's model")
     }
 
     /// The feature classification the model was loaded with.
@@ -172,20 +165,5 @@ impl Forest {
     #[must_use]
     pub fn config(&self) -> &WalkerConfig {
         &self.model.config
-    }
-
-    /// Whether prediction sums leaf values exactly and rounds once, so each row's tree
-    /// sum is the `f64` nearest to the true sum whatever the tree order. Averaging, the
-    /// base score and the link function are applied afterwards in ordinary `f64`.
-    /// False if the model was loaded with [`LoadOptions::exact_sums`] off, or if a leaf
-    /// is not finite or the leaf exponents span too wide a range for a 126-bit fixed
-    /// point; prediction then adds each row's leaves in `f64` in tree order, as the
-    /// full walk does.
-    // Scaffolding while `src/legacy/` serves the research API: its predictors' sums.
-    // The Predictor sums every model exactly.
-    #[inline]
-    #[must_use]
-    pub fn exact_sums(&self) -> bool {
-        self.legacy().fixed_scale.is_some()
     }
 }

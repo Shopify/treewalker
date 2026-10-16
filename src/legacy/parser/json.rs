@@ -4,8 +4,9 @@ use super::common::{
     reorder_and_emit,
 };
 use super::validation::{self, MAX_JSON_BYTES, Metadata, ParsedModel};
+use crate::legacy::Options;
 use crate::legacy::forest::Tree;
-use crate::{LoadError, LoadOptions, WalkerConfig};
+use crate::{LoadError, WalkerConfig};
 use rustc_hash::FxHashMap;
 use simd_json::{OwnedValue as Value, prelude::*};
 use std::io::Read;
@@ -70,7 +71,7 @@ fn extensions(v: &Value, names: &[&str]) -> Result<(), LoadError> {
 pub(super) fn parse(
     reader: impl Read,
     config: &WalkerConfig,
-    options: &LoadOptions,
+    options: &Options,
 ) -> Result<ParsedModel, LoadError> {
     let mut bytes = Vec::new();
     reader

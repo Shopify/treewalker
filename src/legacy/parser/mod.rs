@@ -43,7 +43,8 @@ pub(crate) use validation::{Output, ParsedModel, Postprocessor};
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::ModelFormat;
-use crate::config::{LoadOptions, WalkerConfig};
+use crate::config::WalkerConfig;
+use crate::legacy::Options;
 use crate::legacy::forest::{FeatureRange, Node, PrefixGroup, Threshold, Tree, VaryingPredicate};
 
 // ---------------------------------------------------------------------------
@@ -54,7 +55,7 @@ pub(crate) fn parse_reader(
     reader: impl Read,
     format: ModelFormat,
     config: &WalkerConfig,
-    options: &LoadOptions,
+    options: &Options,
 ) -> Result<ParsedModel, LoadError> {
     if options.prefix_depth > validation::MAX_DEPTH {
         return Err(LoadError::Limit(format!(

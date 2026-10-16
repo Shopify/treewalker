@@ -214,6 +214,24 @@ def test_gates_fail_closed(tmp_path):
     assert ok, text
 
 
+def test_from_schema_7_every_forest_sums_exactly_and_the_setting_decides(tmp_path):
+    # 3.0 runs record no forest's exact_sums: the gate passes iff the setting is on.
+    exact = cell()
+    del exact["exact_sums"]
+    del exact["validation"]["oracle"]["exact_sums"]
+    on = tmp_path / "on"
+    on.mkdir()
+    run = write_run(on, {"a/c": exact}, run={"exact_sums": True}, schema=7, suite="x")
+    lines, ok = cr.gates(run)
+    assert ok, lines
+    assert any("every TreeWalker forest sums exactly (output schema 7)" in x for x in lines)
+    off = tmp_path / "off"
+    off.mkdir()
+    run = write_run(off, {"a/c": exact}, run={"exact_sums": False}, schema=7, suite="x")
+    lines, ok = cr.gates(run)
+    assert not ok and any("output schema 7 sums exactly" in x for x in lines)
+
+
 def test_an_unchosen_failing_candidate_is_a_diagnostic_not_a_failure():
     m = cell()
     m["methods"].append(method("lightgbm_native", serving="fast", validated=["fast"]))

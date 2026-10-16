@@ -4,8 +4,9 @@ use super::common::{
     reorder_and_emit,
 };
 use super::validation::{self, MAX_TREES, Metadata, ParsedModel};
+use crate::legacy::Options;
 use crate::legacy::forest::{ThresholdType, Tree};
-use crate::{LoadError, LoadOptions, WalkerConfig};
+use crate::{LoadError, WalkerConfig};
 use rustc_hash::FxHashMap;
 use std::io::{BufReader, Read};
 
@@ -194,7 +195,7 @@ struct TreeBufs {
 pub(super) fn parse(
     reader: impl Read,
     config: &WalkerConfig,
-    options: &LoadOptions,
+    options: &Options,
 ) -> Result<ParsedModel, LoadError> {
     let mut r = Reader {
         input: BufReader::with_capacity(128 * 1024, reader),

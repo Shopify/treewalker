@@ -32,7 +32,8 @@
 
 use std::sync::Arc;
 
-use crate::config::{LoadOptions, WalkerConfig};
+use super::Options;
+use crate::config::WalkerConfig;
 use crate::legacy::parser;
 use crate::{LoadError, ModelFormat};
 use std::io::Cursor;
@@ -369,7 +370,7 @@ pub(crate) fn load(
     bytes: &[u8],
     format: ModelFormat,
     config: WalkerConfig,
-    options: &LoadOptions,
+    options: &Options,
 ) -> Result<Arc<Model>, LoadError> {
     let reader = Cursor::new(bytes);
     let parser::ParsedModel {
@@ -394,14 +395,10 @@ pub(crate) fn load(
         (Vec::new(), 0)
     };
 
-    let fixed_scale = if options.exact_sums {
-        crate::exact::scale(
-            nodes.iter().filter(|n| n.is_leaf()).map(|n| n.value),
-            trees.len(),
-        )
-    } else {
-        None
-    };
+    let fixed_scale = crate::exact::scale(
+        nodes.iter().filter(|n| n.is_leaf()).map(|n| n.value),
+        trees.len(),
+    );
 
     // SAFETY: malloc_trim takes no pointers; it only returns free heap pages to
     // the system.
