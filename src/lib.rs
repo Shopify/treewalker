@@ -86,6 +86,8 @@ mod predict;
 #[cfg(feature = "research")]
 #[path = "legacy/research.rs"]
 pub mod research;
+#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
+mod rules;
 
 pub use config::{LoadOptions, WalkerConfig, WalkerConfigBuilder};
 pub use error::LoadError;

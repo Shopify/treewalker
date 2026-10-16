@@ -38,7 +38,7 @@ mod json;
 mod validation;
 use crate::LoadError;
 use std::io::Read;
-pub(crate) use validation::{Output, ParsedModel, Postprocessor, validate_json_depth};
+pub(crate) use validation::{Output, ParsedModel, Postprocessor};
 
 use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;

@@ -14,5 +14,9 @@
 //!   that every F64 split compares `<=`.
 //! - F32: thresholds are kept, and splits compare `(val as f32) < (t as f32)`.
 
+mod binary;
 pub(crate) mod decoded;
 pub(crate) mod tree;
+mod validation;
+use crate::LoadError;
+pub(crate) use validation::{ParsedModel, validate_json_depth};
