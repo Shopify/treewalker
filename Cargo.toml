@@ -83,6 +83,14 @@ name = "property"
 required-features = ["research"]
 
 [[test]]
+name = "vectors"
+required-features = ["research"]
+
+[[test]]
+name = "miri"
+required-features = ["research"]
+
+[[test]]
 name = "limits"
 required-features = ["research"]
 
