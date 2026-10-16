@@ -86,6 +86,7 @@
 
 mod build;
 mod chains;
+mod masks;
 #[cfg(test)]
 mod tests;
 
@@ -97,6 +98,7 @@ use crate::exact::WideLeaf;
 use crate::model::category;
 
 pub(crate) use build::{Built, Input};
+pub(crate) use masks::{ChainPoint, MaskChain, MaskFeature, MaskPlan};
 
 // ---------------------------------------------------------------------------
 // Nodes

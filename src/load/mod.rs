@@ -24,6 +24,9 @@
 //!    nodes in place as layout nodes and writes the leaf values, with each tree's
 //!    expected steps and scratch needs. The nodes stay in input order: tree order
 //!    is the order of the tree starts, and so of the prefix groups and chunks.
+//! 7. **Mask plan** ([`layout::MaskPlan`]): each varying feature's predicates, the
+//!    categorical ones by chain, and per code the masks its rows flip, which the
+//!    precompute reads.
 
 pub(crate) mod layout;
 mod order;
@@ -57,6 +60,7 @@ impl Forest {
         let (categories, category_starts) = order::repack_categories(&mut decoded, &order);
         let (varying_predicates, predicate_ids) =
             predicates::varying_predicates(&decoded, &order, choices.predicate_dedup)?;
+        let feature_ranges = predicates::build_feature_ranges(&varying_predicates);
         let mut tree_starts = Vec::with_capacity(order.len());
         let mut trees = Vec::with_capacity(order.len());
         for (&t, &category_start) in order.iter().zip(&category_starts) {
@@ -85,6 +89,7 @@ impl Forest {
             steps,
             items,
             needs,
+            points,
             #[cfg(any(test, feature = "research"))]
             nodes,
         } = layout::Layout::build(
@@ -105,6 +110,13 @@ impl Forest {
         )?;
         drop(predicate_ids);
         drop(decoded);
+        let masks = layout::MaskPlan::build(
+            &layout.bins,
+            &feature_ranges,
+            &points,
+            options.max_rank_table_bytes,
+        )?;
+        drop(points);
 
         // SAFETY: malloc_trim takes no pointers; it only returns free heap pages to
         // the system. Miri does not emulate it.
@@ -120,6 +132,7 @@ impl Forest {
                 config,
                 categories,
                 varying_predicates,
+                masks,
                 threshold_type,
                 prefix_groups,
                 prefix,

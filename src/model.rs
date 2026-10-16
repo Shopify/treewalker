@@ -408,8 +408,8 @@ pub struct Output {
     pub postprocessor: Postprocessor,
 }
 
-/// A loaded model: its trees, varying predicates, prefix groups, exact-sum plan and
-/// prediction layout, with the configuration it was laid out for.
+/// A loaded model: its trees, varying predicates and their mask plan, prefix groups,
+/// exact-sum plan and prediction layout, with the configuration it was laid out for.
 /// Immutable once loaded, and shared by a [`crate::Forest`]'s clones and predictors.
 ///
 /// `repr(C)` with the research-only field last keeps the other fields' offsets, and
@@ -422,6 +422,8 @@ pub(crate) struct Model {
     /// The categorical splits' lists: each its length, then its sorted categories.
     pub(crate) categories: Vec<u32>,
     pub(crate) varying_predicates: Vec<VaryingPredicate>,
+    /// Each varying feature's predicates, and the categorical ones' left regions.
+    pub(crate) masks: crate::load::layout::MaskPlan,
     pub(crate) threshold_type: ThresholdType,
     /// Runs of trees sharing constant heavy-path prefixes, by first tree.
     pub(crate) prefix_groups: Vec<PrefixGroup>,

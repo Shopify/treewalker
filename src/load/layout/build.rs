@@ -10,17 +10,21 @@
 
 use super::chains::{self, Sets};
 use super::{
-    BinMap, CategoryBins, CategoryCodes, DUMMY_SLOT, FIRST_CATEGORY, FLAG_LEAF, FeatureBins,
-    Layout, LayoutNode, LeafValues, MASK_SHIFT, MAX_PREDICATES, MAX_SLOTS, MISSING, Need,
-    SLOT_SHIFT,
+    BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, FIRST_CATEGORY, FLAG_LEAF,
+    FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT, MAX_PREDICATES, MAX_SLOTS, MISSING,
+    Need, SLOT_SHIFT,
 };
 use crate::LoadError;
 use crate::config::WalkerConfig;
 use crate::exact::Plan;
 use crate::load::parse::decoded::{Decoded, Packed, Split, TreeNodes};
 use crate::load::predicates::PredicateIds;
-use crate::model::{ThresholdType, category_list};
+use crate::model::{FLAG_CATEGORICAL, FLAG_VARYING, ThresholdType, category_list};
 use crate::rules::{ItemLengths, StepSums, Steps};
+
+/// Both flags of a varying categorical split, tested at once: rarely true, where a
+/// branch on whether a split varies first would be unpredictable.
+const VARYING_CATEGORICAL: u8 = FLAG_VARYING | FLAG_CATEGORICAL;
 
 /// What the build reads.
 pub(crate) struct Input<'a> {
@@ -47,6 +51,8 @@ pub(crate) struct Built {
     pub(crate) steps: Steps,
     pub(crate) items: ItemLengths,
     pub(crate) needs: Vec<Need>,
+    /// Each varying predicate's test, for the categorical ones.
+    pub(crate) points: Vec<ChainPoint>,
     /// The parsed nodes, for introspection and the full walk.
     #[cfg(any(test, feature = "research"))]
     pub(crate) nodes: Vec<crate::model::Node>,
@@ -461,6 +467,7 @@ impl Layout {
             };
             total
         ];
+        let mut points = vec![ChainPoint::NONE; n_predicates];
         let (mut steps, mut needs) = (StepSums::default(), Vec::with_capacity(order.len()));
         let mut kinds = Kinds::default();
         // Whether each split is constant, and an entry for leaves.
@@ -549,6 +556,15 @@ impl Layout {
                 };
                 let mask = 2 * u64::from(id) + 1 + u64::from(!heavy_left);
                 let mask = if varying { mask } else { 0 };
+                // A varying categorical predicate's left rows are its heavy set's,
+                // or their complement's when its heavy side is the right.
+                if split.flags & VARYING_CATEGORICAL == VARYING_CATEGORICAL {
+                    points[id as usize] = ChainPoint {
+                        slot: (w0 >> SLOT_SHIFT) as u32,
+                        k: w0 as u32,
+                        invert: !heavy_left,
+                    };
+                }
                 nodes[at] = LayoutNode {
                     w0,
                     w1: (start as u64 + u64::from(kinds.light[local as usize]))
@@ -593,6 +609,7 @@ impl Layout {
             steps: steps.steps(order.len()),
             items: steps.items(),
             needs,
+            points,
             #[cfg(any(test, feature = "research"))]
             nodes: parsed,
         })

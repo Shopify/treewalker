@@ -770,17 +770,22 @@ fn nested_heavy_sets_share_a_chain() {
 fn chains_stop_at_the_rank_table_cap() {
     // Ten singletons, some with missing: an antichain, ten chains over 12 codes.
     // The rank tables take 212 bytes: 10 defaults, 13 exception bounds and 15
-    // exceptions, each singleton's code and five times missing, at rank 0.
+    // exceptions, each singleton's code and five times missing, at rank 0. Varying,
+    // the masks' flips take 112 more: 13 bounds and a flip per exception, each into
+    // its chain's one predicate (no row starts in it, the default rank being past
+    // it).
     let splits: Vec<_> = (0..10).map(|c| (vec![c], c % 2 == 0, true)).collect();
     let cap = |bytes| LoadOptions {
         max_rank_table_bytes: bytes,
         ..LoadOptions::default()
     };
     let mut rng = Rng(31);
-    for (varying, bytes) in [(false, 212), (true, 212)] {
+    for (varying, bytes) in [(false, 212), (true, 324)] {
         let forest = categorical_load(&splits, varying, &cap(bytes)).unwrap();
-        let bins = &forest.model.layout.bins;
+        let (bins, masks) = (&forest.model.layout.bins, &forest.model.masks);
         assert_eq!((bins.rank_table_bytes(), bins.chain_slots()), (212, 10));
+        let flips = 4 * (masks.flip_bounds.len() + masks.flips.len());
+        assert_eq!(flips, if varying { 112 } else { 0 });
         check_model(&mut rng, &forest, 500);
         assert!(matches!(
             categorical_load(&splits, varying, &cap(bytes - 1)),
