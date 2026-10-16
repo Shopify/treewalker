@@ -26,7 +26,9 @@ def function(name: str) -> str:
 
 def check_done(results):
     tf = (INFRA / "outputs.tf").read_text()
-    cmd = re.search(r'output "check_done".*?--command \'([^\']*)\'', tf, re.S)[1]
+    m = re.search(r'output "check_done".*?--command \'([^\']*)\'', tf, re.S)
+    assert m is not None
+    cmd = m[1]
     cmd = cmd.replace("/home/bench/results", str(results))
     return subprocess.run(["sh", "-c", cmd], capture_output=True, text=True).stdout.strip()
 

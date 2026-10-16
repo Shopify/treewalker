@@ -91,7 +91,13 @@ def test_suites_declare_their_modes(doc):
         ablation = name in ("ablation", "camera-ready-ablation")
         want = ["serving", "batch"] if ablation else ["serving"]
         assert {s.plan_for(c).modes for c in s.cells} == {tuple(want)}, name
-    for bad in ({}, {"modes": []}, {"modes": ["warm"]}, {"modes": ["batch", "batch"]}):
+    bad_plans: list[dict[str, list[str]]] = [
+        {},
+        {"modes": []},
+        {"modes": ["warm"]},
+        {"modes": ["batch", "batch"]},
+    ]
+    for bad in bad_plans:
         with pytest.raises(ValueError):
             grids.suite_modes("x", bad)
     assert grids.suite_modes("x", {"modes": ["batch", "serving"]}) == ["batch", "serving"]
@@ -148,10 +154,10 @@ def test_the_sentinel_resolves_against_the_artifacts(doc, tmp_path):
     assert cell is not None and cell.id == "support/nt500_md4_h16/lightgbm/panel"
     # Not prepared: recorded with a reason, never silently dropped.
     entry = mf.sentinel(paths, doc, run)
-    assert entry["status"] == "skipped" and "not prepared" in entry["reason"]
+    assert entry is not None and entry["status"] == "skipped" and "not prepared" in entry["reason"]
     fm.write_cell(cell.dir(paths.artifacts) / "cell.json", {"status": "ready", "key": "k1"})
     entry = mf.sentinel(paths, doc, run)
-    assert entry == {
+    assert entry is not None and entry == {
         "id": cell.id,
         "dir": "support/nt500_md4_h16/lightgbm/cells/panel",
         "status": "ready",
@@ -165,12 +171,13 @@ def test_the_sentinel_resolves_against_the_artifacts(doc, tmp_path):
     )
     (cell.dir(paths.artifacts) / "x.bin").write_bytes(b"changed")
     entry = mf.sentinel(paths, doc, run)
-    assert entry["status"] == "stale" and entry["reason"] == "status stale"
+    assert entry is not None and entry["status"] == "stale" and entry["reason"] == "status stale"
     assert mf.sentinel(paths, doc, {**run, "sentinel_every": 0}) is None
     missing = mf.sentinel(paths, doc, {**run, "sentinel_cell": "no/such/cell"})
-    assert missing["status"] == "skipped"
+    assert missing is not None and missing["status"] == "skipped"
     # compile-baselines covers the sentinel's model in every suite.
-    assert sentinel_cell(doc).id == cell.id
+    covered = sentinel_cell(doc)
+    assert covered is not None and covered.id == cell.id
 
 
 def test_camera_ready_suites_turn_exact_sums_off_and_keep_the_factorial():

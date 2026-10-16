@@ -59,7 +59,7 @@ def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS) -> None:
     ).write_parquet(d / "groups.parquet")
     pl.DataFrame({"cell": [cell] * 8, "group": range(8)}).write_parquet(d / "counters.parquet")
     stop = {"rounds": rounds, "blocks_per_round": BATCHES, "reason": "precision"}
-    procs = [{"process": p, "mode": "serving", "status": "ok"} for p in range(CHILDREN + 1)]
+    processes = [{"process": p, "mode": "serving", "status": "ok"} for p in range(CHILDREN + 1)]
     fm.write_json(
         d / "manifest.json",
         {
@@ -70,7 +70,7 @@ def write_cell(run: Path, cell: str, xgboost, rounds: int = ROUNDS) -> None:
             "excluded": [],
             "validation": {"oracle": {"status": "pass", "rows": 8}},
             "stop": {"serving": {**stop, "probes": [], "conversion": []}},
-            "xgboost_processes": {"count": CHILDREN, "processes": procs},
+            "xgboost_processes": {"count": CHILDREN, "processes": processes},
             "seconds": 1.0,
             "model": {"trees": 50},
             "methods": [

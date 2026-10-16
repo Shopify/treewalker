@@ -76,10 +76,22 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
 python_version = "3.14"
-files = ["experiments/treewalker_exp", "experiments/scripts", "experiments/compile.py"]
+files = [
+    "experiments/treewalker_exp",
+    "experiments/scripts",
+    "experiments/compile.py",
+    "experiments/tests",
+]
 mypy_path = ["experiments", "experiments/scripts"]
 explicit_package_bases = true
 ignore_missing_imports = true
 check_untyped_defs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+# The tests' bodies are checked, but pytest's test functions and fixtures need no
+# annotations.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false

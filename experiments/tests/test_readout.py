@@ -69,7 +69,7 @@ def test_the_position_profile_is_net_of_content():
         for b in range(4):
             content = 1 + b  # batch b costs 1 + b for every method
             for m, var, base in (("treewalker", "all-on", 10), ("lleaves", "-", 20)):
-                t = base * content
+                t = float(base * content)
                 if m == "lleaves" and r == 0:
                     t *= 1.5  # round 0 slow for lleaves only
                 if m == "lleaves" and b == 0:
