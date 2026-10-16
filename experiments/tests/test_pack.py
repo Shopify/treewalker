@@ -73,12 +73,30 @@ def test_pack_writes_one_verified_file_per_table_in_the_packed_types(tmp_path):
     assert (run / "cells").is_dir() and not (run / ".pack-tmp").exists()  # kept by default
 
 
+def test_manifest_fields_pass_through_unchanged(tmp_path):
+    # The memory records (and any later additive field) reach cells.json as written.
+    run = write_run(tmp_path)
+    memory = {"source": "linux: ...", "methods": [{"method": "treewalker", "load": "forest"}]}
+    for d in (run / "cells").iterdir():
+        m = fm.read_json(d / "manifest.json")
+        fm.write_json(d / "manifest.json", {**m, "memory": memory, "load_seconds": {"": 0.5}})
+    pack.pack_run(run)
+    cells = fm.read_json(run / pack.CELLS)
+    assert {c["memory"]["methods"][0]["load"] for c in cells.values()} == {"forest"}
+    assert cells["a/cell"] == {
+        "id": "a/cell",
+        "seconds": 1.0,
+        "memory": memory,
+        "load_seconds": {"": 0.5},
+    }
+
+
 def test_readers_need_a_packed_run_and_pack_refuses_one(tmp_path):
     run = write_run(tmp_path)
     with pytest.raises(ValueError, match="is not packed: treewalker-exp pack"):
         analysis.load(run)
     pack.pack_run(run)
-    assert analysis.load(run)["manifests"]["b/cell"]["seconds"] == 1.0
+    assert analysis.load(run).manifests["b/cell"]["seconds"] == 1.0
     with pytest.raises(ValueError, match="already packed"):
         pack.pack_run(run)
 

@@ -9,10 +9,12 @@ import pytest
 
 from treewalker_exp import datasets as ds
 from treewalker_exp import grids
-from treewalker_exp import prepare as prep
 from treewalker_exp import workloads as wl
 from treewalker_exp.grids import Cell, Model
 from treewalker_exp.paths import Paths
+from treewalker_exp.prepare import cells as pcells
+from treewalker_exp.prepare import context as pcontext
+from treewalker_exp.prepare import models as pmodels
 
 GRIDS = Path(__file__).resolve().parents[1] / "grids.toml"
 NEW_WORKLOADS = {"panel-replicates", "whatif-credit-replicates", "ranking-replicates"}
@@ -86,7 +88,7 @@ def credit_split() -> ds.CreditSplit:
 
 @pytest.fixture
 def ctx(tmp_path):
-    c = prep.Context(
+    c = pcontext.Context(
         Paths(tmp_path, tmp_path / "artifacts"),
         {"seed": 42, "test_frac": 0.2, "expedia_max_sessions": 0},
     )
@@ -162,7 +164,7 @@ def test_survival_replicate_samples_whole_patients(ctx):
 
 
 def test_replicates_are_deterministic(ctx, tmp_path):
-    again = prep.Context(ctx.paths, {"seed": 42, "test_frac": 0.2, "expedia_max_sessions": 0})
+    again = pcontext.Context(ctx.paths, {"seed": 42, "test_frac": 0.2, "expedia_max_sessions": 0})
     again._survival["support"] = survival_split()
     again._ranking, again._credit = ranking_split(), credit_split()
     for m in (Model("support", 5, 2, 4), Model("expedia", 5, 2), Model("credit", 5, 2)):
@@ -189,7 +191,7 @@ def test_credit_replicate_samples_rows(ctx):
 
 
 def hashes(ctx, cell, td):
-    return prep.build_workload(ctx, cell, td, {"key": "unused"}).hashes
+    return pcells.build_workload(ctx, cell, td, {"key": "unused"}).hashes
 
 
 @pytest.mark.parametrize(
@@ -220,7 +222,7 @@ def test_whatif_replicates_take_the_released_models_features(ctx):
     released = Cell("whatif-credit-core", "whatif-v2", model, "lightgbm", params)
     rep = Cell("whatif-credit-replicates", "whatif-v2", replicate(model), "lightgbm", params)
     # The replicate's build trains the released model it takes the features from.
-    built = prep.build_workload(ctx, rep, ctx.train_data(rep.model), {"key": "unused"})
+    built = pcells.build_workload(ctx, rep, ctx.train_data(rep.model), {"key": "unused"})
     assert built.workload.meta["perturbation"]["ranked_by"] == "credit/nt5_md2/lightgbm"
     assert built.hashes == hashes(ctx, released, ctx.train_data(model))
     assert (model.dir(ctx.paths.artifacts) / "lightgbm" / "model.json").exists()
@@ -230,8 +232,8 @@ def test_a_replicate_is_a_new_model_with_its_own_key(ctx):
     model = Model("support", 5, 2, 4)
     rep = replicate(model)
     assert rep.id == "support/nt5_md2_h4_r1" and rep.released == model == model.released
-    a = prep.model_identity(model, "lightgbm", ctx.train_data(model))
-    b = prep.model_identity(rep, "lightgbm", ctx.train_data(rep))
+    a = pmodels.model_identity(model, "lightgbm", ctx.train_data(model))
+    b = pmodels.model_identity(rep, "lightgbm", ctx.train_data(rep))
     assert set(b) - set(a) == {"replicate"} and b["replicate"]["fraction"] == 0.8
     assert {k: v for k, v in b.items() if k not in ("replicate", "train_data_sha256")} == {
         k: v for k, v in a.items() if k != "train_data_sha256"
@@ -280,8 +282,8 @@ def test_expedia_filled_uses_the_training_minimum(ctx):
         assert np.float32(fills[j]) < np.float32(lo)  # distinct after XGBoost's f32 conversion
     assert set(record["fill"]) == {"prop_location_score2", "prop_review_score"}
     assert filled.identity == {"missing_values": record}
-    a = prep.model_identity(Model("expedia", 5, 2), "xgboost", released)
-    b = prep.model_identity(Model("expedia-filled", 5, 2), "xgboost", filled)
+    a = pmodels.model_identity(Model("expedia", 5, 2), "xgboost", released)
+    b = pmodels.model_identity(Model("expedia-filled", 5, 2), "xgboost", filled)
     assert set(b) - set(a) == {"missing_values"} and b["split"] == a["split"]
 
 
@@ -333,7 +335,7 @@ def test_released_models_keep_their_identity_fields(ctx):
     for m in (Model("support", 5, 2, 4), Model("expedia", 5, 2), Model("credit", 5, 2)):
         td = ctx.train_data(m)
         assert td.identity == {}
-        assert set(prep.model_identity(m, "lightgbm", td)) == MODEL_IDENTITY_FIELDS
+        assert set(pmodels.model_identity(m, "lightgbm", td)) == MODEL_IDENTITY_FIELDS
 
 
 # sha256 of every suite's cells (ID, directory, workload, generator) at 8f4a9f9,
@@ -379,7 +381,7 @@ def test_factorial_adds_the_replicates_and_expedia_filled():
     assert {(c.model.n_trees, c.model.max_depth) for c in filled} == {
         (t, d) for t in (50, 500, 1000, 2000) for d in (2, 4)
     }
-    assert all(s.plan_for(c)["methods"] == "factorial" for c in new)
+    assert all(s.plan_for(c).methods == "factorial" for c in new)
 
 
 @pytest.mark.parametrize(

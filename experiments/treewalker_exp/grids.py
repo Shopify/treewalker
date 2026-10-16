@@ -13,12 +13,21 @@ GENERATORS = {
     "ranking-cohort-v2",
     "whatif-v1",
     "whatif-v2",
+    "whatif-grid-v1",
     "fixture-v1",
+    "rows-v1",
 }
 # Generators whose models can be seed replicates: the released fixtures and
 # scenario layout cannot.
 REPLICABLE = {"panel-v2", "ranking-sessions-v2", "ranking-cohort-v2", "whatif-v2"}
-# The load options a variant can turn off; prefix grouping off is prefix_depth 0.
+# rows-v1: the order a single-row cell's rows are timed in. Independent rows are a
+# fixed-seed shuffle of the source's rows; file order keeps the source's order.
+ROW_ORDERS = ("independent", "file")
+# Models derived from a trained one by editing its Treelite export, with the
+# suffix their names get. See prepare.models.DERIVATIONS.
+DERIVED = {"pooled-categories": "pooled", "wide-sums": "wide"}
+# The load-time ablations a variant can turn on (treewalker_gbdt::research::
+# LoadAblation); prefix grouping off is prefix depth 0.
 LOAD_FLAGS = (
     "disable_tree_ordering",
     "disable_prefix_grouping",
@@ -26,13 +35,21 @@ LOAD_FLAGS = (
     "disable_predicate_dedup",
 )
 MODES = ("serving", "batch")
+# The runtime ablations (treewalker_gbdt::research::Ablation): flags, plus the
+# walk lanes as a name=value token, which forces what the lane rule
+# (src/rules/lanes.rs) would choose.
 RUNTIME_FLAGS = (
     "disable_varying_precompute",
     "disable_predicate_sweep",
     "disable_unsplit",
     "disable_monotonic",
-    "disable_exact_sums",
+    "disable_g1_constant",
+    "disable_width_dispatch",
+    "disable_restart_prefetch",
 )
+RUNTIME_VALUES = {
+    "lanes": tuple(str(k) for k in range(1, 13)),
+}
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -47,6 +64,8 @@ class Model:
     # training split's entities; 0 is the released model, on all of them.
     replicate: int = 0
     replicate_fraction: float = 0.0
+    # A model derived from the trained one (DERIVED), or "" for the trained model.
+    derive: str = ""
 
     @property
     def name(self) -> str:
@@ -54,12 +73,18 @@ class Model:
             return self.fixture
         base = f"nt{self.n_trees}_md{self.max_depth}"
         base = base if self.horizon is None else f"{base}_h{self.horizon}"
-        return f"{base}_r{self.replicate}" if self.replicate else base
+        base = f"{base}_r{self.replicate}" if self.replicate else base
+        return f"{base}_{DERIVED[self.derive]}" if self.derive else base
 
     @property
     def released(self) -> Model:
         """The released model a replicate resamples; a released model itself."""
         return replace(self, replicate=0, replicate_fraction=0.0)
+
+    @property
+    def trained(self) -> Model:
+        """The trained model a derived model edits; a trained model itself."""
+        return replace(self, derive="")
 
     @property
     def id(self) -> str:
@@ -92,6 +117,8 @@ class Cell:
     def workload_id(self) -> str:
         p = self.param
         match self.generator:
+            case "panel-v2" if "varying_share" in p:
+                return f"panel-share{round(100 * p['varying_share'])}"
             case "panel-v2":
                 return "panel"
             case "ranking-sessions-v2":
@@ -100,6 +127,8 @@ class Cell:
                 return f"cohort{p['min_candidates']}-n{p['size']}"
             case "fixture-v1":
                 return "import"
+            case "rows-v1":
+                return f"g1-{p['row_order']}"
             case _:
                 return f"{self.generator}-k{p['k']}-G{p['G']}"
 
@@ -114,45 +143,80 @@ class Cell:
         return self.model.dir(artifacts) / self.framework / "cells" / self.workload_id
 
 
+@dataclass(frozen=True, slots=True)
+class Variant:
+    """A research variant: runtime ablation tokens and load flags, each sorted."""
+
+    runtime: tuple[str, ...] = ()
+    load: tuple[str, ...] = ()
+
+    @property
+    def id(self) -> str:
+        """The runner's variant ID: runtime tokens, then load flags after ``|``."""
+        rt, ld = "+".join(self.runtime), "+".join(self.load)
+        return f"{rt}|{ld}" if ld else (rt or "all-on")
+
+    def to_json(self) -> dict[str, list[str]]:
+        return {"runtime": list(self.runtime), "load": list(self.load)}
+
+
+@dataclass(frozen=True, slots=True)
+class Plan:
+    """What the runner times on a cell: its method set, research variants and modes;
+    ablation cells also say whether they sit at an interaction anchor."""
+
+    methods: str = "factorial"
+    variants: tuple[Variant, ...] = ()
+    modes: tuple[str, ...] = ("serving",)
+    interaction: bool | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        """The manifest entry's fields, in the manifest's order."""
+        out: dict[str, Any] = {
+            "methods": self.methods,
+            "variants": [v.to_json() for v in self.variants],
+            "modes": list(self.modes),
+        }
+        if self.interaction is not None:
+            out["interaction"] = self.interaction
+        return out
+
+
 @dataclass(slots=True)
 class Suite:
     name: str
     description: str
     cells: list[Cell]
     extra: dict[str, Any] = field(default_factory=dict)
-    # Per cell ID: what the runner times, {"methods", "variants", "modes"}.
-    plan: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Per cell ID: what the runner times.
+    plan: dict[str, Plan] = field(default_factory=dict)
     # Per cell ID, every workload that names the cell, in grids.toml's order. A
     # cell shared by overlapping workloads keeps the first as its own (part of
     # its identity); a workload filter matches any of them.
     memberships: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
-    def plan_for(self, cell: Cell) -> dict[str, Any]:
-        default = {
-            "methods": "factorial",
-            "variants": [],
-            "modes": ["serving"],
-        }
-        return {**default, **self.plan.get(cell.id, {})}
+    def plan_for(self, cell: Cell) -> Plan:
+        return self.plan.get(cell.id, Plan())
 
     def workloads_of(self, cell: Cell) -> tuple[str, ...]:
         return self.memberships.get(cell.id, (cell.workload,))
 
 
-def variant(runtime: list[str] | tuple[str, ...] = (), load: list[str] | tuple[str, ...] = ()):
-    """A research variant: runtime ablation flags plus load options."""
+def variant(
+    runtime: list[str] | tuple[str, ...] = (), load: list[str] | tuple[str, ...] = ()
+) -> Variant:
+    """A research variant from grids.toml's tokens, checked against the flags the
+    runner knows."""
     for f in runtime:
-        if f not in RUNTIME_FLAGS:
+        name, _, value = f.partition("=")
+        if f not in RUNTIME_FLAGS and value not in RUNTIME_VALUES.get(name, ()):
             raise ValueError(f"unknown runtime flag {f}")
+    if len({f.partition("=")[0] for f in runtime}) != len(runtime):
+        raise ValueError(f"runtime flags {runtime} repeat a field")
     for f in load:
         if f not in LOAD_FLAGS:
             raise ValueError(f"unknown load flag {f}")
-    return {"runtime": sorted(runtime), "load": sorted(load)}
-
-
-def _variant_id(v: dict[str, Any]) -> str:
-    rt, ld = "+".join(v["runtime"]), "+".join(v["load"])
-    return f"{rt}|{ld}" if ld else (rt or "all-on")
+    return Variant(tuple(sorted(runtime)), tuple(sorted(load)))
 
 
 def suite_modes(name: str, s: dict[str, Any]) -> list[str]:
@@ -183,14 +247,20 @@ def _workload_cells(name: str, w: dict[str, Any], defaults: dict[str, Any]) -> l
         ]
     frameworks = w.get("frameworks", defaults["frameworks"])
     replicates, fraction = _replicates(name, w)
+    derived = _derived(name, w)
+    shares = _shares(name, w) if "varying_share" in w else None
     out = []
-    for dataset, nt, md, r in product(w["datasets"], w["n_trees"], w["max_depth"], replicates):
+    for dataset, nt, md, r, d in product(
+        w["datasets"], w["n_trees"], w["max_depth"], replicates, derived
+    ):
         horizons: list[int | None] = [None]
         if dataset in SURVIVAL:
             horizons = list(w.get("horizon", [16]))
         for h in horizons:
             layout = "scenario-v1" if gen == "whatif-v1" else "standard"
-            model = Model(dataset, nt, md, h, layout, replicate=r, replicate_fraction=fraction)
+            model = Model(
+                dataset, nt, md, h, layout, replicate=r, replicate_fraction=fraction, derive=d
+            )
             params: list[tuple[tuple[str, Any], ...]]
             if gen.startswith("whatif"):
                 params = [(("k", k), ("G", g)) for k, g in product(w["k"], w["G"])]
@@ -198,11 +268,46 @@ def _workload_cells(name: str, w: dict[str, Any], defaults: dict[str, Any]) -> l
                 params = [
                     (("min_candidates", w["min_candidates"]), ("size", n)) for n in w["sizes"]
                 ]
+            elif gen == "rows-v1":
+                params = [(("row_order", o), ("rows", w["rows"])) for o in _row_orders(name, w)]
+            elif shares is not None:
+                params = [(("varying_share", s),) for s in shares]
             else:
                 params = [()]
             for fw, p in product(frameworks, params):
                 out.append(Cell(name, gen, model, fw, p))
     return out
+
+
+def _derived(name: str, w: dict[str, Any]) -> list[str]:
+    """A workload's derived models (``derive``), or the trained models alone."""
+    if "derive" not in w:
+        return [""]
+    ds = w["derive"]
+    if not ds or any(d not in DERIVED for d in ds) or len(set(ds)) != len(ds):
+        raise ValueError(f"workload {name}: derive must list distinct ones of {', '.join(DERIVED)}")
+    if "replicates" in w:
+        raise ValueError(f"workload {name}: derived models of replicates are not supported")
+    return list(ds)
+
+
+def _row_orders(name: str, w: dict[str, Any]) -> list[str]:
+    orders = w.get("row_order", ["independent"])
+    if not orders or any(o not in ROW_ORDERS for o in orders) or len(set(orders)) != len(orders):
+        raise ValueError(f"workload {name}: row_order must list one or both of {ROW_ORDERS}")
+    if type(w.get("rows")) is not int or w["rows"] < 1:
+        raise ValueError(f"workload {name}: rows must be a positive integer")
+    return list(orders)
+
+
+def _shares(name: str, w: dict[str, Any]) -> list[float]:
+    shares = w["varying_share"]
+    if w["generator"] != "panel-v2":
+        raise ValueError(f"workload {name}: varying_share needs the panel-v2 generator")
+    ok = all(type(s) is float and 0.0 < s < 1.0 for s in shares)
+    if not shares or not ok or len({round(100 * s) for s in shares}) != len(shares):
+        raise ValueError(f"workload {name}: varying_share must be distinct floats in (0, 1)")
+    return list(shares)
 
 
 def _replicates(name: str, w: dict[str, Any]) -> tuple[list[int], float]:
@@ -256,15 +361,15 @@ def suite(doc: dict[str, Any], name: str) -> Suite:
             raise ValueError(f"suite {name}: no such cells {sorted(missing)}")
         cells = {k: c for k, c in cells.items() if k in wanted or c.generator == "fixture-v1"}
     variants = [variant(v) for v in s.get("runtime_variants", [])]
-    modes = suite_modes(name, s)
+    g1 = [variant(v) for v in s.get("g1_variants", [])]  # single-row cells only
+    modes = tuple(suite_modes(name, s))
     plan = {}
     for c in cells.values():
-        methods = "treewalker" if c.generator == "fixture-v1" else s.get("methods", "factorial")
-        plan[c.id] = {
-            "methods": methods,
-            "variants": variants,
-            "modes": modes,
-        }
+        # Fixtures and derived models have no native model for the baselines.
+        own = c.generator == "fixture-v1" or c.model.derive
+        methods = "treewalker" if own else s.get("methods", "factorial")
+        timed = variants + g1 if c.generator == "rows-v1" else variants
+        plan[c.id] = Plan(methods, tuple(timed), modes)
     return Suite(name, s["description"], list(cells.values()), plan=plan, memberships=memberships)
 
 
@@ -277,22 +382,37 @@ def find_cell(doc: dict[str, Any], cell_id: str) -> Cell | None:
     return None
 
 
-def ablation_variants(s: dict[str, Any], interaction: bool) -> list[dict[str, Any]]:
+def sentinel_cell(doc: dict[str, Any]) -> Cell | None:
+    """The sentinel's cell, when [run] names one and turns it on."""
+    run = run_config(doc)
+    if not run.get("sentinel_cell") or not run.get("sentinel_every"):
+        return None
+    return find_cell(doc, run["sentinel_cell"])
+
+
+def ablation_variants(
+    s: dict[str, Any], interaction: bool, single_rows: bool = False
+) -> list[Variant]:
     """Every runtime variant with the default load options; each load flag alone;
     and at the interaction anchors every runtime variant crossed with all eight
     combinations of the first three load flags. Disabling predicate dedup runs
-    alone, with bitset interning on, because the two interact."""
+    alone, with bitset interning on, because the two interact. The kernel
+    variants run with the default load options only, and the single-row ones
+    only where the groups are single rows."""
     runtime = [list(v) for v in s["runtime_variants"]]
     out = [variant(rt) for rt in runtime]
+    out += [variant(rt) for rt in s.get("kernel_variants", [])]
+    if single_rows:
+        out += [variant(rt) for rt in s.get("g1_variants", [])]
     out += [variant((), [f]) for f in s["parse_flags"]]
     if interaction:
         crossed = [f for f in s["parse_flags"] if f != "disable_predicate_dedup"][:3]
         for bits in range(8):
             load = [f for i, f in enumerate(crossed) if bits >> i & 1]
             out += [variant(rt, load) for rt in runtime]
-    unique: dict[str, dict[str, Any]] = {}
+    unique: dict[str, Variant] = {}
     for v in out:
-        unique.setdefault(_variant_id(v), v)
+        unique.setdefault(v.id, v)
     return list(unique.values())
 
 
@@ -302,27 +422,30 @@ def _ablation(doc: dict[str, Any], name: str, s: dict[str, Any]) -> Suite:
     inter_tl = {(t, d) for t, d, _ in inter}
     cells = []
     interaction: dict[str, bool] = {}
+    single_rows: dict[str, bool] = {}
     for nt, md, g in s["anchors"]:
         for dataset in s["panel_datasets"]:
             for fw in frameworks:
                 c = Cell("panel", "panel-v2", Model(dataset, nt, md, g), fw)
                 cells.append(c)
                 interaction[c.id] = (nt, md, g) in inter
+                single_rows[c.id] = g == 1
         for dataset in s["ranking_datasets"]:
             for fw in frameworks:
                 c = Cell("ranking", "ranking-sessions-v2", Model(dataset, nt, md), fw)
                 cells.append(c)
                 interaction[c.id] = (nt, md) in inter_tl
     unique = list({c.id: c for c in cells}.values())
-    extra = {k: s[k] for k in ("anchors", "runtime_variants", "parse_flags", "interaction_anchors")}
-    modes = suite_modes(name, s)
+    keys = ("anchors", "runtime_variants", "kernel_variants", "g1_variants", "parse_flags")
+    extra = {k: s[k] for k in (*keys, "interaction_anchors") if k in s}
+    modes = tuple(suite_modes(name, s))
     plan = {
-        c.id: {
-            "methods": "ablation",
-            "variants": ablation_variants(s, interaction[c.id]),
-            "modes": modes,
-            "interaction": interaction[c.id],
-        }
+        c.id: Plan(
+            "ablation",
+            tuple(ablation_variants(s, interaction[c.id], single_rows.get(c.id, False))),
+            modes,
+            interaction[c.id],
+        )
         for c in unique
     }
     return Suite(name, s["description"], unique, extra, plan)

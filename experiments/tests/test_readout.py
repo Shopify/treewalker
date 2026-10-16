@@ -34,8 +34,8 @@ def xgboost(rows):
 
 
 def test_children_against_process_zero_on_the_same_batch_and_cluster():
-    # rev-gpt's case: process 0 costs 200 in round 0 and 100 later; the child
-    # costs 200 in its one round: against the later rounds, 2.
+    # Process 0 costs 200 in round 0 and 100 later; the child costs 200 in its one
+    # round: against the later rounds, 2.
     rows = [(0, r, b, 200 if r == 0 else 100, 1000) for r in range(3) for b in range(2)]
     rows += [(1, 0, b, 200, 1000) for b in range(2)]
     df, r = xgboost(rows)
@@ -69,7 +69,7 @@ def test_the_position_profile_is_net_of_content():
         for b in range(4):
             content = 1 + b  # batch b costs 1 + b for every method
             for m, var, base in (("treewalker", "all-on", 10), ("lleaves", "-", 20)):
-                t = base * content
+                t = float(base * content)
                 if m == "lleaves" and r == 0:
                     t *= 1.5  # round 0 slow for lleaves only
                 if m == "lleaves" and b == 0:

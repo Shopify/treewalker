@@ -37,15 +37,16 @@ saves about 5% more on samples). Against the runner's per-cell files (zstd 3,
 dictionary everywhere) the final run packed to 0.38x on both machines.
 """
 
-from __future__ import annotations
-
 import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import formats as fm
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 TABLES = ("samples", "groups", "counters", "hw", "stages")
 # Tables an older output schema lacks, by the schema that introduced them.
@@ -142,7 +143,7 @@ def require_packed(run_dir: Path) -> None:
                     raise ValueError(f"{path} is a git-lfs pointer: run `git lfs pull`")
 
 
-def target_schema(source: Any, table: str) -> Any:
+def target_schema(source: pa.Schema, table: str) -> pa.Schema:
     """The packed schema for a table whose cells have the arrow schema ``source``."""
     import pyarrow as pa
 
@@ -158,7 +159,7 @@ def target_schema(source: Any, table: str) -> Any:
     return pa.schema(fields)
 
 
-def writer_options(schema: Any, table: str) -> dict[str, Any]:
+def writer_options(schema: pa.Schema, table: str) -> dict[str, Any]:
     import pyarrow as pa
 
     dictionary, encoding = [], {}
@@ -240,7 +241,7 @@ def _attempts(run_dir: Path) -> list[Path]:
     return sorted(p for p in d.iterdir() if p.is_dir() and p.name.isdigit())
 
 
-def _read(cell: Path, table: str, attempt: int | None) -> Any:
+def _read(cell: Path, table: str, attempt: int | None) -> pa.Table:
     import pyarrow as pa
     import pyarrow.parquet as pq
 
@@ -250,7 +251,7 @@ def _read(cell: Path, table: str, attempt: int | None) -> Any:
     return t.add_column(0, "sentinel", pa.array([attempt] * t.num_rows, pa.uint32()))
 
 
-def _to_target(t: Any, target: Any, where: Path) -> Any:
+def _to_target(t: pa.Table, target: pa.Schema, where: Path) -> pa.Table:
     """Cast one row group to the packed types; strings get one dictionary per row group."""
     import pyarrow as pa
     import pyarrow.compute as pc

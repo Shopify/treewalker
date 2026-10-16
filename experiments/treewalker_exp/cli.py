@@ -5,9 +5,14 @@ Heavy libraries are imported inside the commands, so ``--help`` stays fast.
 
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
+
+if TYPE_CHECKING:
+    from .grids import Cell
+    from .paths import Paths
+    from .results import Campaign
 
 app = typer.Typer(
     help="Prepare data, models and baselines for the TreeWalker benchmarks.",
@@ -38,7 +43,7 @@ def main(
     state.repo, state.artifacts = repo, artifacts_dir
 
 
-def _paths():
+def _paths() -> Paths:
     from .paths import RepoNotFound, resolve
 
     try:
@@ -47,7 +52,14 @@ def _paths():
         raise typer.BadParameter(str(e)) from e
 
 
-def _cells(suites: list[str], datasets, workloads, models, frameworks, ids=None):
+def _cells(
+    suites: list[str],
+    datasets: list[str] | None,
+    workloads: list[str] | None,
+    models: list[str] | None,
+    frameworks: list[str] | None,
+    ids: list[str] | None = None,
+) -> tuple[Paths, dict[str, Any], list[Cell]]:
     from fnmatch import fnmatchcase
 
     from . import grids
@@ -160,8 +172,8 @@ def prepare(
             print(c.id)
         return
 
-    from .prepare import Context
     from .prepare import prepare as run
+    from .prepare.context import Context
 
     ctx = Context(paths, grids.defaults(doc), grids.treelite_json_models(doc))
     report = run(ctx, cells, force)
@@ -177,7 +189,7 @@ def prepare(
         raise typer.Exit(1)
 
 
-def _validate(paths, cells) -> list[str]:
+def _validate(paths: Paths, cells: list[Cell]) -> list[str]:
     from . import bench
 
     if not cells:
@@ -229,7 +241,7 @@ def compile_baselines(
     uv run --group baselines treewalker-exp compile-baselines ...
     """
     import os
-    from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures import Future, ProcessPoolExecutor
 
     from . import baselines as bl
     from . import formats as fm
@@ -242,13 +254,13 @@ def compile_baselines(
         cid
         for name in suite
         for cid, p in grids.suite(doc, name).plan.items()
-        if p["methods"] == "factorial"
+        if p.methods == "factorial"
     }
     cells = [c for c in cells if c.id in timed]
     # The sentinel times its cell's baselines in every suite's run, the ablation
     # suite's included, so an unfiltered compile covers its model too.
     if not (dataset or workload or model or framework or cell):
-        extra = sentinel_cell(doc)
+        extra = grids.sentinel_cell(doc)
         if extra is not None and extra.id not in {c.id for c in cells}:
             cells.append(extra)
     files = grids.baseline_settings(doc).get("tl2cgen_parallel_comp", "trees")
@@ -276,7 +288,7 @@ def compile_baselines(
             tasks.append(("lleaves", fw_dir))
         if "quickscorer" in tools and fw == "xgboost":
             tasks.append(("quickscorer", fw_dir))
-    tasks = compile_order(tasks)
+    tasks = bl.compile_order(tasks)
     print(
         f"{len(tasks)} compiles, {budget} compiler processes at once, "
         f"tl2cgen {threads} threads each, lleaves {bl.LLEAVES_CHUNKS} chunks",
@@ -284,10 +296,10 @@ def compile_baselines(
     )
     failed = []
 
-    def submit(pool, task):
+    def submit(pool: ProcessPoolExecutor, task: tuple[str, Path]) -> Future[None]:
         tool, fw_dir = task
         return pool.submit(
-            _compile_one, tool, fw_dir, threads, paths.compile_script, cc, force, files
+            bl.compile_one, tool, fw_dir, threads, paths.compile_script, cc, force, files
         )
 
     with ProcessPoolExecutor(max_workers=budget) as pool:
@@ -317,35 +329,6 @@ def compile_baselines(
         fm.write_cell(cell_json, cdoc)
     if failed:
         raise typer.Exit(1)
-
-
-def compile_order(tasks):
-    """Largest models first, by node count; a model's compiles together."""
-    from . import baselines as bl
-
-    nodes = {fw_dir: bl.model_nodes(fw_dir) for _, fw_dir in tasks}
-    return sorted(tasks, key=lambda t: (-nodes[t[1]], str(t[1]), t[0]))
-
-
-def sentinel_cell(doc):
-    """The sentinel's cell, when [run] names one and turns it on."""
-    from . import grids
-
-    run = grids.run_config(doc)
-    if not run.get("sentinel_cell") or not run.get("sentinel_every"):
-        return None
-    return grids.find_cell(doc, run["sentinel_cell"])
-
-
-def _compile_one(tool, fw_dir, threads, script, cc, force, files) -> None:
-    from . import baselines as bl
-
-    if tool == "tl2cgen":
-        bl.compile_tl2cgen(fw_dir, threads, force, files)
-    elif tool == "quickscorer":
-        bl.write_quickscorer(fw_dir, force)
-    else:
-        bl.compile_lleaves(script, fw_dir, cc, force)
 
 
 @app.command("build-native")
@@ -418,7 +401,7 @@ CAMPAIGN = typer.Option(
 )
 
 
-def _campaign(paths, name: str | None):
+def _campaign(paths: Paths, name: str | None) -> Campaign:
     from . import results
 
     c = results.campaign(paths.runs, name)
@@ -747,9 +730,9 @@ def run(
         raise typer.BadParameter(str(e), param_hint="--set") from None
     from . import pack
 
-    state = pack.run_state(paths.runs / run_id) if run_id and len(suite) == 1 else "absent"
-    if state not in ("absent", "partial", "raw"):
-        raise typer.BadParameter(f"{paths.runs / run_id} is packed: a run is never resumed into")
+    resumed = paths.runs / run_id if run_id and len(suite) == 1 else None
+    if resumed is not None and pack.run_state(resumed) not in ("absent", "partial", "raw"):
+        raise typer.BadParameter(f"{resumed} is packed: a run is never resumed into")
     binary = bench.build(paths, rustflags=rustflags)
     failed = False
     for name in suite:

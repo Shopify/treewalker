@@ -445,3 +445,21 @@ def summary(doc: dict[str, Any]) -> dict[str, Any]:
         "identity": doc["identity"],
         "effective": doc.get("effective"),
     }
+
+
+def compile_order(tasks: list[tuple[str, Path]]) -> list[tuple[str, Path]]:
+    """Largest models first, by node count; a model's compiles together."""
+    nodes = {fw_dir: model_nodes(fw_dir) for _, fw_dir in tasks}
+    return sorted(tasks, key=lambda t: (-nodes[t[1]], str(t[1]), t[0]))
+
+
+def compile_one(
+    tool: str, fw_dir: Path, threads: int, script: Path, cc: str, force: bool, files: int | str
+) -> None:
+    """One compile of ``compile-baselines``, in a worker process."""
+    if tool == "tl2cgen":
+        compile_tl2cgen(fw_dir, threads, force, files)
+    elif tool == "quickscorer":
+        write_quickscorer(fw_dir, force)
+    else:
+        compile_lleaves(script, fw_dir, cc, force)

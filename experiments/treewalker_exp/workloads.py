@@ -20,6 +20,17 @@ one is a new version, never a silent edit:
   byte-identical check: gain-ranked features with multiplicative shocks.
 - ``whatif-v2``: a targeted stress test, not a representative distribution of
   production requests. See ``WHATIF_V2``.
+- ``whatif-grid-v1``: groups of more than 1,024 rows, to validate the kernel's
+  runtime-width masks. See ``WHATIF_GRID``.
+- ``rows-v1``: single rows (G = 1). Each row of a source workload (``ROWS_SOURCE``)
+  is its own group and no feature varies. Independent rows are a fixed-seed
+  shuffle of the source's rows; file order keeps the source's order, where
+  consecutive rows come from one entity. Either way the first ``rows`` rows.
+
+A panel-v2 cell with a ``varying_share`` declares extra constant covariates as
+varying so that share of the model's internal nodes splits on varying features,
+as closely as the covariates allow (``varying_for_share``). Declaring a constant
+feature varying only weakens the contract, so the predictions do not change.
 """
 
 from dataclasses import dataclass, field
@@ -351,6 +362,143 @@ def whatif_v2(draws: WhatIfDraws, features: list[int], k: int, G: int) -> Worklo
         "seeds": {"generator": draws.seed},
     }
     return Workload(np.ascontiguousarray(X), offsets, config, draws.base_ids, meta)
+
+
+# --- what-if grids, v1 -------------------------------------------------------------
+
+WHATIF_GRID_SEED = 43
+N_GRID_BASE = 64
+GRID_LEVELS = 64
+
+WHATIF_GRID = (
+    "An ICE grid per base entity: every combination of levels of the model's two "
+    "most-split eligible covariates (whatif-v2's ranking and pool), 64 levels of the "
+    "first and G / 64 of the second, the first outer. A feature's n levels are its "
+    "training values at the quantiles (i + 1/2) / n, so levels repeat where training "
+    "values tie. Every other feature keeps the base entity's value. The 64 base "
+    "entities are drawn, with a stream of their own, from whatif-v2's base entities, "
+    "and keep their whatif-v2 time step. Groups exceed the kernel's 1,024-row pieces: "
+    "validation only."
+)
+
+
+def whatif_grid(draws: WhatIfDraws, features: list[int], G: int) -> Workload:
+    """``N_GRID_BASE`` groups of G rows: each base entity over the grid of
+    ``WHATIF_GRID``."""
+    if len(features) != 2 or G % GRID_LEVELS:
+        raise ValueError(f"whatif-grid-v1 grids two features over {GRID_LEVELS} x G/64 levels")
+    rng = np.random.default_rng(ds.dataset_seed(draws.dataset, WHATIF_GRID_SEED))
+    chosen = np.sort(rng.choice(len(draws.base), min(N_GRID_BASE, len(draws.base)), replace=False))
+    base = draws.base[chosen]
+    n_base, n_cov = base.shape
+    counts = (GRID_LEVELS, G // GRID_LEVELS)
+    levels = [
+        np.quantile(draws.donors[:, f], (np.arange(n) + 0.5) / n, method="inverted_cdf")
+        for f, n in zip(features, counts, strict=True)
+    ]
+    groups = np.repeat(base[:, None, :], G, axis=1)
+    first, second = np.meshgrid(levels[0], levels[1], indexing="ij")
+    groups[:, :, features[0]] = first.reshape(-1)
+    groups[:, :, features[1]] = second.reshape(-1)
+    X = groups.reshape(n_base * G, n_cov)
+    varying = sorted(features)
+    if draws.horizon is not None:
+        assert draws.steps is not None
+        steps = np.repeat(draws.steps[chosen], G)
+        X = np.hstack([X, ds.tv_features(steps, X[:, 0], draws.horizon)])
+        if 0 in varying:
+            varying.append(n_cov + ds.INTERACTION)
+    offsets = np.arange(n_base + 1, dtype=np.uint64) * G
+    config = walker_config(draws.names, G, varying, [], [])
+    meta = {
+        "generator": "whatif-grid-v1",
+        "grouping": {"kind": "whatif-grid", "G": G},
+        "grid": {
+            "features": [draws.names[f] for f in features],
+            "levels": [lv.tolist() for lv in levels],
+            "distinct_levels": [len(np.unique(lv)) for lv in levels],
+            "varying": [draws.names[i] for i in varying],
+            "rules": WHATIF_GRID,
+        },
+        "seeds": {"generator": ds.dataset_seed(draws.dataset, WHATIF_GRID_SEED)},
+    }
+    return Workload(np.ascontiguousarray(X), offsets, config, draws.base_ids[chosen], meta)
+
+
+# --- single rows ------------------------------------------------------------------
+
+# Each dataset's source of rows: the workload the dataset's group cells time, so
+# file order has its entities' rows next to each other. Credit's what-if rows
+# are 64 scenarios of one applicant each.
+ROWS_SOURCE = {
+    "support": "panel at the model's horizon",
+    "flchain": "panel at the model's horizon",
+    "expedia": "sessions",
+    "expedia-filled": "sessions",
+    "credit": "whatif-v2, k = 4, G = 64",
+}
+ROWS_WHATIF = {"k": 4, "G": 64}
+ROWS_SEED = 42
+
+
+def single_rows(source: Workload, row_order: str, n_rows: int) -> Workload:
+    """``n_rows`` rows of ``source``, the first of a fixed-seed shuffle
+    (independent) or of its own order (file), each its own group, with every
+    feature constant. Each row keeps its source group's entity ID."""
+    n = source.X.shape[0]
+    if row_order == "independent":
+        rows = np.random.default_rng(ROWS_SEED).permutation(n)[:n_rows]
+    elif row_order == "file":
+        rows = np.arange(min(n, n_rows))
+    else:
+        raise ValueError(f"unknown row order {row_order}")
+    off = source.group_offsets.astype(np.int64)
+    entities = np.repeat(source.entities, np.diff(off))[rows]
+    config = walker_config(source.config["feature_names"], 1, [], [], [])
+    meta = {
+        "generator": "rows-v1",
+        "grouping": {"kind": "rows", "row_order": row_order},
+        "row_order": row_order,
+        "source": {
+            "generator": source.meta.get("generator"),
+            "grouping": source.meta.get("grouping"),
+            "rows": n,
+        },
+        "seeds": {
+            **source.meta.get("seeds", {}),
+            **({"row_order": ROWS_SEED} if row_order == "independent" else {}),
+        },
+    }
+    return Workload(np.ascontiguousarray(source.X[rows]), None, config, entities, meta)
+
+
+# --- layout calibration ------------------------------------------------------------
+
+
+def varying_share(counts: np.ndarray, varying: list[int] | set[int]) -> float:
+    """The share of internal nodes that split on ``varying`` features, from each
+    feature's internal-node count."""
+    return float(counts[sorted(varying)].sum() / counts.sum())
+
+
+# The subset search's limit on candidates; the panels have 8 (FLCHAIN) and 14 (SUPPORT).
+MAX_SHARE_CANDIDATES = 20
+
+
+def varying_for_share(counts: np.ndarray, varying: list[int], target: float) -> list[int]:
+    """Constant features to declare varying so the share of internal nodes on
+    varying features comes closest to ``target``: the best of every subset of
+    the features the model splits on, ties to the lowest subset index with the
+    i-th of them as bit i. Features the model never splits on are not added."""
+    candidates = [f for f in range(len(counts)) if f not in varying and counts[f] > 0]
+    if len(candidates) > MAX_SHARE_CANDIDATES:
+        raise ValueError(f"{len(candidates)} candidate features; at most {MAX_SHARE_CANDIDATES}")
+    sums = np.zeros(1, dtype=np.int64)
+    for f in candidates:
+        sums = np.concatenate([sums, sums + counts[f]])
+    have = int(counts[varying].sum())
+    best = int(np.argmin(np.abs(have + sums - target * int(counts.sum()))))
+    return [f for i, f in enumerate(candidates) if best >> i & 1]
 
 
 # --- contracts -------------------------------------------------------------------

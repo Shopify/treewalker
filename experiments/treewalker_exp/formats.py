@@ -14,11 +14,12 @@ a partial file behind under the final name.
 """
 
 import hashlib
+import io
 import json
 import os
 import struct
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any
@@ -73,13 +74,14 @@ def sha256_json(value: Any) -> str:
 # --- test_data.bin -----------------------------------------------------------
 
 
-def write_matrix(path: Path, data: np.ndarray) -> None:
+def matrix_bytes(data: np.ndarray) -> bytes:
     if data.ndim != 2:
         raise ValueError(f"expected a 2-D matrix, got shape {data.shape}")
-    n_rows, n_cols = data.shape
-    with _atomic(path) as f:
-        f.write(struct.pack("<QQ", n_rows, n_cols))
-        f.write(np.ascontiguousarray(data, dtype="<f8").tobytes())
+    return struct.pack("<QQ", *data.shape) + np.ascontiguousarray(data, dtype="<f8").tobytes()
+
+
+def write_matrix(path: Path, data: np.ndarray) -> None:
+    write_bytes(path, matrix_bytes(data))
 
 
 def read_matrix(path: Path) -> np.ndarray:
@@ -106,12 +108,14 @@ def check_offsets(offsets: np.ndarray, n_rows: int | None = None) -> None:
         raise ValueError(f"group offsets end at {int(offsets[-1])}, data has {n_rows} rows")
 
 
+def offsets_bytes(offsets: np.ndarray) -> bytes:
+    o = np.asarray(offsets, dtype="<u8")
+    check_offsets(o)
+    return struct.pack("<Q", len(o) - 1) + o.tobytes()
+
+
 def write_group_offsets(path: Path, offsets: np.ndarray) -> None:
-    offsets = np.asarray(offsets, dtype=np.uint64)
-    check_offsets(offsets)
-    with _atomic(path) as f:
-        f.write(struct.pack("<Q", len(offsets) - 1))
-        f.write(offsets.astype("<u8").tobytes())
+    write_bytes(path, offsets_bytes(offsets))
 
 
 def read_group_offsets(path: Path) -> np.ndarray:
@@ -126,9 +130,13 @@ def read_group_offsets(path: Path) -> np.ndarray:
 # --- JSON documents ------------------------------------------------------------
 
 
-def write_walker_config(path: Path, config: dict[str, Any]) -> None:
+def walker_config_bytes(config: dict[str, Any]) -> bytes:
     # No trailing newline: the released artifacts were written this way.
-    write_bytes(path, json.dumps(config, indent=2).encode())
+    return json.dumps(config, indent=2).encode()
+
+
+def write_walker_config(path: Path, config: dict[str, Any]) -> None:
+    write_bytes(path, walker_config_bytes(config))
 
 
 def read_walker_config(path: Path) -> dict[str, Any]:
@@ -152,14 +160,15 @@ read_cell = read_json
 # --- NumPy arrays --------------------------------------------------------------
 
 
+def npy_bytes(array: np.ndarray) -> bytes:
+    buf = io.BytesIO()
+    np.save(buf, array)
+    return buf.getvalue()
+
+
 def write_npy(path: Path, array: np.ndarray) -> None:
-    with _atomic(path) as f:
-        np.save(f, array)
+    write_bytes(path, npy_bytes(array))
 
 
 def read_npy(path: Path) -> np.ndarray:
     return np.load(path)
-
-
-write_predictions: Callable[[Path, np.ndarray], None] = write_npy
-read_predictions: Callable[[Path], np.ndarray] = read_npy

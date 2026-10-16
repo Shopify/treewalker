@@ -1,6 +1,7 @@
 """check-run: the validity gates and the warnings before reading any result."""
 
 import copy
+from typing import Any
 
 import pytest
 
@@ -288,7 +289,7 @@ def test_released_e1_reads_the_tagged_csv():
 def test_e1_warns_beyond_ten_percent(tmp_path, monkeypatch):
     run = tmp_path / "scenario-v1-x86_64"
     run.mkdir()
-    cells = {
+    cells: dict[str, dict[str, Any]] = {
         "scenario_credit/lightgbm/whatif-v1-k1-G4": {},
         "scenario_credit/lightgbm/whatif-v1-k8-G4": {},
     }

@@ -42,7 +42,7 @@ from typing import Any
 
 import polars as pl
 
-from . import analysis
+from . import analysis, counters
 from . import formats as fm
 
 MACHINES = {"intel": "x86_64", "arm": "aarch64"}
@@ -176,18 +176,17 @@ def _speedups(run: Path, arch: str, n_boot: int) -> Any:
     est = analysis.estimates(d, n_boot=n_boot)
     us = 1e6 / est["hz"]
     rows_per_group = dict(
-        d["groups"]
-        .filter(pl.col("timed"))
+        d.groups.filter(pl.col("timed"))
         .group_by(pl.col("cell").cast(pl.String))
         .agg(pl.col("rows").mean())
         .iter_rows()
     )
     out = []
     for cell, rows in est["by_cell"].items():
-        m = d["manifests"][cell]
+        m = d.manifests[cell]
         base = {
             "arch": arch,
-            "suite": d["run"]["suite"],
+            "suite": d.record["suite"],
             "cell": cell,
             **design(cell),
             "mean_rows": rows_per_group.get(cell),
@@ -343,21 +342,43 @@ def best_baseline(df: Any, mode: str = "serving") -> Any:
 
 @cache
 def _work(run: Path) -> Any:
-    counters = pl.read_parquet(run / "counters.parquet")
+    table = pl.read_parquet(run / "counters.parquet")
     groups = pl.read_parquet(run / "groups.parquet", columns=["cell", "group", "rows"])
-    numeric = [c for c, t in counters.schema.items() if t.is_integer() and c != "group"]
+    # 3.x's own `groups` counter is the group count `pl.len()` takes.
+    skip = {"group", "groups", "counters_version"}
+    numeric = [c for c, t in table.schema.items() if t.is_integer() and c not in skip]
     out = (
-        counters.join(groups, on=["cell", "group"])
-        .group_by(pl.col("cell").cast(pl.String), pl.col("variant").cast(pl.String))
+        table.join(groups, on=["cell", "group"])
+        .group_by(
+            pl.col("cell").cast(pl.String),
+            pl.col("variant").cast(pl.String),
+            pl.col("counters_version").cast(pl.Int64),
+        )
         .agg(
             *(pl.col(c).sum() for c in numeric),
             groups=pl.len(),
             rows=pl.col("rows").sum(),
         )
+        .with_columns(
+            pl.col("cell")
+            .map_elements(design, return_dtype=pl.Struct(_DESIGN_SCHEMA))
+            .alias("design")
+        )
+        .unnest("design")
     )
-    return out.with_columns(
-        pl.col("cell").map_elements(design, return_dtype=pl.Struct(_DESIGN_SCHEMA)).alias("design")
-    ).unnest("design")
+    return as_csv_terms(out)
+
+
+def as_csv_terms(work: pl.DataFrame) -> pl.DataFrame:
+    """``work`` with the released CSVs' counter columns (`counters.terms`): a 3.x
+    run's rows (counters_version 3 and later) gain them from their own counters."""
+    if work.is_empty() or (work["counters_version"] == 2).all():
+        return work
+    rows = [
+        r | counters.terms(r["counters_version"], r, r["T"]) for r in work.iter_rows(named=True)
+    ]
+    schema = dict(work.schema) | {c: pl.Int64 for c in counters.COUNTERS}
+    return pl.DataFrame(rows, schema=schema)
 
 
 def work(runs: Path, suite: str, arch: str = "intel") -> Any:
