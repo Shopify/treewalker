@@ -64,13 +64,22 @@ testpaths = ["experiments/tests"]
 target-version = "py314"
 line-length = 100
 src = ["experiments"]
-include = ["experiments/treewalker_exp/**/*.py", "experiments/tests/**/*.py", "experiments/compile.py"]
+include = [
+    "experiments/treewalker_exp/**/*.py",
+    "experiments/scripts/**/*.py",
+    "experiments/tests/**/*.py",
+    "experiments/compile.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
 python_version = "3.14"
-files = ["experiments/treewalker_exp"]
+files = ["experiments/treewalker_exp", "experiments/scripts", "experiments/compile.py"]
+mypy_path = ["experiments", "experiments/scripts"]
+explicit_package_bases = true
 ignore_missing_imports = true
 check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
