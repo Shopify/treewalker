@@ -5,7 +5,7 @@
 use super::mask::rows::{self, Unit};
 use super::mask::{Mask, Wide};
 use super::precompute::SWEEP_TURNS;
-use super::resolve::{Carrier, Handle, Slot};
+use super::resolve::{Carrier, Handle, LISTED_SLACK, Slot};
 use super::walk::{Item, MAX_PAD};
 use crate::exact::{self, Plan, WIDE_SUMS};
 use crate::load::layout::Need;
@@ -339,7 +339,13 @@ impl Scratch {
             },
             q32: Queues::new(0, i32s, l32s, 0),
             q64: Queues::new(0, i64s, l64s, 0),
-            handles: Queues::new(<Handle as Carrier<Wide<2>>>::NONE, ihs, lhs, lhs),
+            // Listing varying stops may write LISTED_SLACK entries past the last.
+            handles: Queues::new(
+                <Handle as Carrier<Wide<2>>>::NONE,
+                ihs,
+                lhs + LISTED_SLACK,
+                lhs + LISTED_SLACK,
+            ),
             slots: Queues::new(<Slot as Carrier<Unit>>::NONE, iss, lss, 0),
         };
         // Checked once the buffers are reserved: a width past it needs over 13 TiB of

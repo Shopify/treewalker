@@ -4,10 +4,10 @@
 use super::counters::{Clock, Stats};
 use super::kernel::Options;
 use super::mask::Mask;
-use super::resolve::{Carrier, Resolve, Splits};
+use super::resolve::{COMPRESS, Carrier, LISTED_SLACK, Resolve, Splits};
 use super::scan::Scan;
 use super::scratch::Queues;
-use super::walk::{self, Item, Pools, Steps, lanes_of, pad};
+use super::walk::{self, Item, MAX_PAD, Pools, Steps, lanes_of, pad};
 use crate::rules::{Distance, pass_distance};
 
 /// How a group's passes run their walks: with the rule's lanes for each walk, or a
@@ -151,6 +151,17 @@ impl<M: Mask> Pass<'_, M> {
         scan: &mut impl Scan<M>,
     ) -> (usize, usize) {
         let (p, u) = (self.p, self.units);
+        // Listing fixed-width handles' varying stops may write LISTED_SLACK entries
+        // past the last leaf entry and position: the scratch gives both that many more
+        // than the chunk's leaves plus one, which the items' length bounds with the most
+        // padding (`Model::masked_group` asserts it).
+        if C::ARENA && !C::RUNTIME && COMPRESS {
+            let room = queues.items.len() - MAX_PAD + LISTED_SLACK;
+            assert!(
+                queues.leaves.len() >= room && queues.listed.len() >= room,
+                "listing slack"
+            );
+        }
         // SAFETY: the caller sizes the arena for the chunk's slots, slot 0 included.
         let root = unsafe { C::root(arena.as_mut_ptr(), self.n, u) };
         for (item, &node) in queues.items.iter_mut().zip(self.roots) {
