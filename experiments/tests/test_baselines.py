@@ -136,7 +136,7 @@ def test_compiles_run_largest_first_within_the_process_budget(tmp_path):
     import time
     from concurrent.futures import ThreadPoolExecutor
 
-    from treewalker_exp.cli import compile_order
+    from treewalker_exp.baselines import compile_order
 
     dirs = {}
     for name, nodes in [("small", 100), ("big", 90_000), ("mid", 5_000)]:

@@ -144,7 +144,7 @@ def test_run_config_overrides_keep_keys_and_types():
 def test_the_sentinel_resolves_against_the_artifacts(doc, tmp_path):
     from treewalker_exp import formats as fm
     from treewalker_exp import manifest as mf
-    from treewalker_exp.cli import sentinel_cell
+    from treewalker_exp.grids import sentinel_cell
     from treewalker_exp.paths import Paths
 
     run = grids.run_config(doc)

@@ -248,7 +248,7 @@ def compile_baselines(
     # The sentinel times its cell's baselines in every suite's run, the ablation
     # suite's included, so an unfiltered compile covers its model too.
     if not (dataset or workload or model or framework or cell):
-        extra = sentinel_cell(doc)
+        extra = grids.sentinel_cell(doc)
         if extra is not None and extra.id not in {c.id for c in cells}:
             cells.append(extra)
     files = grids.baseline_settings(doc).get("tl2cgen_parallel_comp", "trees")
@@ -276,7 +276,7 @@ def compile_baselines(
             tasks.append(("lleaves", fw_dir))
         if "quickscorer" in tools and fw == "xgboost":
             tasks.append(("quickscorer", fw_dir))
-    tasks = compile_order(tasks)
+    tasks = bl.compile_order(tasks)
     print(
         f"{len(tasks)} compiles, {budget} compiler processes at once, "
         f"tl2cgen {threads} threads each, lleaves {bl.LLEAVES_CHUNKS} chunks",
@@ -287,7 +287,7 @@ def compile_baselines(
     def submit(pool, task):
         tool, fw_dir = task
         return pool.submit(
-            _compile_one, tool, fw_dir, threads, paths.compile_script, cc, force, files
+            bl.compile_one, tool, fw_dir, threads, paths.compile_script, cc, force, files
         )
 
     with ProcessPoolExecutor(max_workers=budget) as pool:
@@ -317,35 +317,6 @@ def compile_baselines(
         fm.write_cell(cell_json, cdoc)
     if failed:
         raise typer.Exit(1)
-
-
-def compile_order(tasks):
-    """Largest models first, by node count; a model's compiles together."""
-    from . import baselines as bl
-
-    nodes = {fw_dir: bl.model_nodes(fw_dir) for _, fw_dir in tasks}
-    return sorted(tasks, key=lambda t: (-nodes[t[1]], str(t[1]), t[0]))
-
-
-def sentinel_cell(doc):
-    """The sentinel's cell, when [run] names one and turns it on."""
-    from . import grids
-
-    run = grids.run_config(doc)
-    if not run.get("sentinel_cell") or not run.get("sentinel_every"):
-        return None
-    return grids.find_cell(doc, run["sentinel_cell"])
-
-
-def _compile_one(tool, fw_dir, threads, script, cc, force, files) -> None:
-    from . import baselines as bl
-
-    if tool == "tl2cgen":
-        bl.compile_tl2cgen(fw_dir, threads, force, files)
-    elif tool == "quickscorer":
-        bl.write_quickscorer(fw_dir, force)
-    else:
-        bl.compile_lleaves(script, fw_dir, cc, force)
 
 
 @app.command("build-native")

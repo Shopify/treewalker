@@ -353,6 +353,14 @@ def find_cell(doc: dict[str, Any], cell_id: str) -> Cell | None:
     return None
 
 
+def sentinel_cell(doc):
+    """The sentinel's cell, when [run] names one and turns it on."""
+    run = run_config(doc)
+    if not run.get("sentinel_cell") or not run.get("sentinel_every"):
+        return None
+    return find_cell(doc, run["sentinel_cell"])
+
+
 def ablation_variants(
     s: dict[str, Any], interaction: bool, single_rows: bool = False
 ) -> list[dict[str, Any]]:

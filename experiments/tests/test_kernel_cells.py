@@ -16,6 +16,10 @@ from treewalker_exp import train as tr
 from treewalker_exp import workloads as wl
 from treewalker_exp.grids import Cell, Model, Suite
 from treewalker_exp.paths import Paths
+from treewalker_exp.prepare import cells as pcells
+from treewalker_exp.prepare import context as pcontext
+from treewalker_exp.prepare import fixtures as pfixtures
+from treewalker_exp.prepare import models as pmodels
 
 GRIDS = Path(__file__).resolve().parents[1] / "grids.toml"
 KERNEL = {
@@ -32,7 +36,7 @@ FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "import"
 
 @pytest.fixture
 def ctx(tmp_path):
-    c = prep.Context(
+    c = pcontext.Context(
         Paths(tmp_path, tmp_path / "artifacts"),
         {"seed": 42, "test_frac": 0.2, "expedia_max_sessions": 0},
     )
@@ -204,11 +208,11 @@ def categorical_split(n: int = 1500) -> ds.SurvivalSplit:
 def built(ctx, cell):
     m = cell.model.trained
     td = ctx.train_data(m)
-    prep.ensure_model(ctx, m, cell.framework, td, force=False)
+    pmodels.ensure_model(ctx, m, cell.framework, td, force=False)
     if cell.model.derive:
-        trained = prep.ensure_model(ctx, m, cell.framework, td, force=False)
-        prep.ensure_derived(ctx, cell.model, cell.framework, trained, force=False)
-    return prep.build_workload(ctx, cell, td, {"key": "unused"}).workload
+        trained = pmodels.ensure_model(ctx, m, cell.framework, td, force=False)
+        pmodels.ensure_derived(ctx, cell.model, cell.framework, trained, force=False)
+    return pcells.build_workload(ctx, cell, td, {"key": "unused"}).workload
 
 
 @pytest.mark.parametrize(
@@ -272,7 +276,7 @@ def test_sum_headroom_follows_the_exact_sum_rule():
     identity = treelite.Model.deserialize(str(FIXTURES / "identity.bin"))
     assert tr.sum_headroom(identity) == 126 - (1 + 2 + 2)
     # 1e300 and 1e-300: no i128 fixed point holds both.
-    assert tr.sum_headroom(prep._fallback_sums_model()) < 0
+    assert tr.sum_headroom(pfixtures._fallback_sums_model()) < 0
 
 
 def test_derived_models_edit_the_trained_export(ctx):
@@ -282,7 +286,7 @@ def test_derived_models_edit_the_trained_export(ctx):
     assert td.cat == [2]
     art = ctx.paths.artifacts
     for fw in ("lightgbm", "xgboost"):
-        tdoc = prep.ensure_model(ctx, trained, fw, td, force=False)
+        tdoc = pmodels.ensure_model(ctx, trained, fw, td, force=False)
         tl = treelite.Model.deserialize(str(trained.dir(art) / fw / "model_treelite.bin"))
         cats = np.concatenate(
             [tl.get_tree_accessor(i).get_field("category_list") for i in range(20)]
@@ -292,31 +296,31 @@ def test_derived_models_edit_the_trained_export(ctx):
         dtype = np.float32 if tl.input_type == "float32" else np.float64
 
         pooled = Model("support", 20, 3, 4, derive="pooled-categories")
-        doc = prep.ensure_derived(ctx, pooled, fw, tdoc, force=False)
+        doc = pmodels.ensure_derived(ctx, pooled, fw, tdoc, force=False)
         assert doc["derived_from"] == {"id": trained.id, "key": tdoc["key"]}
         assert doc["key"] != tdoc["key"] and set(doc["files"]) == {"treelite_bin"}
         pl = treelite.Model.deserialize(str(pooled.dir(art) / fw / "model_treelite.bin"))
         pcats = np.concatenate(
             [pl.get_tree_accessor(i).get_field("category_list") for i in range(20)]
         )
-        assert np.array_equal(pcats, cats + prep.POOLED_OFFSET)
+        assert np.array_equal(pcats, cats + pmodels.POOLED_OFFSET)
         w = built(ctx, Cell("kernel-derived", "panel-v2", pooled, fw))
-        assert np.array_equal(w.X[:, 2], X[:, 2] + prep.POOLED_OFFSET)
+        assert np.array_equal(w.X[:, 2], X[:, 2] + pmodels.POOLED_OFFSET)
         assert np.array_equal(np.delete(w.X, 2, axis=1), np.delete(X, 2, axis=1))
         same = treelite.gtil.predict(pl, w.X.astype(dtype))
         assert np.array_equal(same, treelite.gtil.predict(tl, X.astype(dtype)))
 
         wide = Model("support", 20, 3, 4, derive="wide-sums")
-        doc = prep.ensure_derived(ctx, wide, fw, tdoc, force=False)
+        doc = pmodels.ensure_derived(ctx, wide, fw, tdoc, force=False)
         assert doc["sum_headroom_bits"]["trained"] > 0 >= doc["sum_headroom_bits"]["derived"]
         wd = treelite.Model.deserialize(str(wide.dir(art) / fw / "model_treelite.bin"))
         for i in (8, 9, 19):
             a, b = tl.get_tree_accessor(i), wd.get_tree_accessor(i)
-            scale = 2.0**prep.WIDE_SHIFT if i % 10 == 9 else 1.0
+            scale = 2.0**pmodels.WIDE_SHIFT if i % 10 == 9 else 1.0
             assert np.array_equal(b.get_field("leaf_value"), a.get_field("leaf_value") * scale)
         assert np.array_equal(built(ctx, Cell("kernel-derived", "panel-v2", wide, fw)).X, X)
         # Reused while its key matches.
-        assert prep.ensure_derived(ctx, wide, fw, tdoc, force=False) == doc
+        assert pmodels.ensure_derived(ctx, wide, fw, tdoc, force=False) == doc
 
 
 def test_kernel_cells_prepare_and_enter_the_manifest(ctx):
@@ -426,7 +430,7 @@ def test_walk_shares_bound_the_events_per_step():
             "events_per_step": 0.4,
         }
     )
-    stats = prep.model_stats(tl, {0})
+    stats = pmodels.model_stats(tl, {0})
     assert stats["varying_share"] == 0.5 and stats["walk"] == got
     cfg = wl.walker_config(["a", "b", "c"], 4, [0], [2], [])
-    assert prep.config_varying(cfg) == {0, 2}
+    assert pmodels.config_varying(cfg) == {0, 2}
