@@ -9,6 +9,7 @@
 //! - [`prefix_groups`]: which trees share a constant prefix and how deep, from the
 //!   forest's heavy paths and their training weights.
 
+pub(crate) mod machine;
 mod prefix;
 
 pub(crate) use prefix::Prefix;
