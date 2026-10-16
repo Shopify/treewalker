@@ -353,6 +353,7 @@ pub fn run_cell(
             "layout": layout_stats(forest),
         },
         "load_seconds": loaded.load_seconds,
+        "memory": {"source": crate::memory::SOURCE, "methods": loaded.memory},
         "groups": cell.n_groups(),
         "timed_groups": timed_groups.len(),
         "sample": sample,

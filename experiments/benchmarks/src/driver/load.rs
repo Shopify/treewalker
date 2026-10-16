@@ -8,6 +8,7 @@ use treewalker_gbdt::Forest;
 use treewalker_gbdt::research::LoadAblation;
 
 use crate::artifacts::{Cell, ManifestCell, VariantSpec};
+use crate::memory::{Meter, MethodMemory};
 use crate::methods::{CHUNK_ROWS, Engine, TimedMethod};
 use crate::schedule::batch_calls;
 use crate::suites::MethodSet;
@@ -78,6 +79,8 @@ pub(super) struct Loaded {
     /// Forests by load options, for counters and full walks.
     pub(super) forests: BTreeMap<String, Forest>,
     pub(super) load_seconds: BTreeMap<String, f64>,
+    /// Each method's memory around its load and first predictor, in load order.
+    pub(super) memory: Vec<MethodMemory>,
 }
 
 pub(super) fn load_key(spec: &VariantSpec) -> String {
@@ -104,22 +107,32 @@ pub(super) fn load_methods(
         excluded: Vec::new(),
         forests: BTreeMap::new(),
         load_seconds: BTreeMap::new(),
+        memory: Vec::new(),
     };
+    // Every memory read sits outside the load's clock.
+    let meter = Meter::start();
     let t0 = Instant::now();
     let base = cell.forest(&LoadAblation::default())?;
-    l.load_seconds
-        .insert(String::new(), t0.elapsed().as_secs_f64());
+    let seconds = t0.elapsed().as_secs_f64();
+    let base_memory = meter.loaded("treewalker", "all-on", "forest");
+    l.load_seconds.insert(String::new(), seconds);
     l.forests.insert(String::new(), base.clone());
 
     if wanted(ctx, "treewalker") {
+        let mut mem = base_memory.clone();
+        let predictor = base.predictor();
+        mem.predictor_built();
+        l.memory.push(mem);
         l.methods.push(TimedMethod::new(
             "treewalker",
             "all-on",
-            Engine::Production(base.predictor()),
+            Engine::Production(predictor),
             max_rows,
         ));
     }
     if set.full_walk() && wanted(ctx, "treewalker_fullwalk") {
+        l.memory
+            .push(base_memory.renamed("treewalker_fullwalk", "-"));
         l.methods.push(TimedMethod::new(
             "treewalker_fullwalk",
             "-",
@@ -129,13 +142,25 @@ pub(super) fn load_methods(
     }
     if set.full_walk() && cell.max_group_rows() > CHUNK_ROWS && wanted(ctx, "treewalker_chunked128")
     {
-        match cell.forest_at_width(CHUNK_ROWS) {
-            Ok(f) => l.methods.push(TimedMethod::new(
-                "treewalker_chunked128",
-                "-",
-                Engine::Chunked(f.predictor()),
-                max_rows,
-            )),
+        let meter = Meter::start();
+        let loaded = cell.forest_at_width(CHUNK_ROWS);
+        let mut mem = meter.loaded(
+            "treewalker_chunked128",
+            "-",
+            &format!("forest_at_width:{CHUNK_ROWS}"),
+        );
+        match loaded {
+            Ok(f) => {
+                let predictor = f.predictor();
+                mem.predictor_built();
+                l.memory.push(mem);
+                l.methods.push(TimedMethod::new(
+                    "treewalker_chunked128",
+                    "-",
+                    Engine::Chunked(predictor),
+                    max_rows,
+                ));
+            }
             Err(e) => l.excluded.push(Excluded {
                 method: "treewalker_chunked128".into(),
                 variant: "-".into(),
@@ -149,16 +174,20 @@ pub(super) fn load_methods(
         }
         let id = spec.id();
         let key = load_key(spec);
-        let forest = if let Some(f) = l.forests.get(&key) {
-            f.clone()
+        let (forest, mut mem) = if let Some(f) = l.forests.get(&key) {
+            let mem = MethodMemory::shared("treewalker_research", &id, &format!("shared:{key}"));
+            (f.clone(), mem)
         } else {
+            let meter = Meter::start();
             let t0 = Instant::now();
-            match spec.load_ablation().and_then(|o| cell.forest(&o)) {
+            let loaded = spec.load_ablation().and_then(|o| cell.forest(&o));
+            let seconds = t0.elapsed().as_secs_f64();
+            let mem = meter.loaded("treewalker_research", &id, &format!("forest:{key}"));
+            match loaded {
                 Ok(f) => {
-                    l.load_seconds
-                        .insert(key.clone(), t0.elapsed().as_secs_f64());
+                    l.load_seconds.insert(key.clone(), seconds);
                     l.forests.insert(key, f.clone());
-                    f
+                    (f, mem)
                 }
                 Err(e) => {
                     l.excluded.push(Excluded {
@@ -171,10 +200,13 @@ pub(super) fn load_methods(
             }
         };
         let ablation = spec.ablation()?;
+        let predictor = forest.research_predictor(ablation);
+        mem.predictor_built();
+        l.memory.push(mem);
         let mut m = TimedMethod::new(
             "treewalker_research",
             &id,
-            Engine::Research(forest.research_predictor(ablation)),
+            Engine::Research(predictor),
             max_rows,
         );
         m.spec = Some(spec.clone());
@@ -199,6 +231,8 @@ fn load_baselines(_cell: &Cell, _ctx: &Context, _max_rows: usize, l: &mut Loaded
 fn load_baselines(cell: &Cell, ctx: &Context, max_rows: usize, l: &mut Loaded) {
     use crate::external::{Link, QuickScorerBench};
 
+    // Each baseline's load between memory readings; kept for the methods timed.
+    let mut memory: Vec<MethodMemory> = Vec::new();
     let mut add = |name: &str, r: Result<Box<dyn crate::external::ExternalMethod>, String>| {
         if !wanted(ctx, name) {
             return;
@@ -243,9 +277,10 @@ fn load_baselines(cell: &Cell, ctx: &Context, max_rows: usize, l: &mut Loaded) {
                 (Some(Ok(lib)), Some((rt, want))) => {
                     // The runtime must still have the hash the run recorded.
                     match crate::data::sha256_file(rt) {
-                        Ok(got) if got == *want => {
-                            Tl2cgenBench::load(&lib, rt, nf, max_rows).map(|m| Box::new(m) as _)
-                        }
+                        Ok(got) if got == *want => measured(&mut memory, "tl2cgen", || {
+                            Tl2cgenBench::load(&lib, rt, nf, max_rows)
+                        })
+                        .map(|m| Box::new(m) as _),
                         Ok(got) => Err(format!(
                             "{} has sha256 {got}, the run recorded {want}",
                             rt.display()
@@ -264,15 +299,20 @@ fn load_baselines(cell: &Cell, ctx: &Context, max_rows: usize, l: &mut Loaded) {
                     || Err("not compiled; run compile-baselines".into()),
                     |lib| {
                         let path = checked(lib)?;
-                        LleavesBench::load(&path, nf, max_rows).map(|m| Box::new(m) as _)
+                        measured(&mut memory, "lleaves", || {
+                            LleavesBench::load(&path, nf, max_rows)
+                        })
+                        .map(|m| Box::new(m) as _)
                     },
                 ),
             );
             add(
                 "lightgbm_native",
                 match (&ctx.natives.lightgbm, &cell.model_native) {
-                    (Some(lib), Some(model)) => LightGbmBench::load(&lib.path, model, nf, max_rows)
-                        .map(|m| Box::new(m) as _),
+                    (Some(lib), Some(model)) => measured(&mut memory, "lightgbm_native", || {
+                        LightGbmBench::load(&lib.path, model, nf, max_rows)
+                    })
+                    .map(|m| Box::new(m) as _),
                     (None, _) => Err("no native LightGBM library; run build-native".into()),
                     (_, None) => Err("no LightGBM text model".into()),
                 },
@@ -282,9 +322,10 @@ fn load_baselines(cell: &Cell, ctx: &Context, max_rows: usize, l: &mut Loaded) {
             add(
                 "xgboost_native",
                 match (&ctx.natives.xgboost, &cell.model_native) {
-                    (Some(lib), Some(model)) => {
-                        XgBoostBench::load(&lib.path, model, nf, max_rows).map(|m| Box::new(m) as _)
-                    }
+                    (Some(lib), Some(model)) => measured(&mut memory, "xgboost_native", || {
+                        XgBoostBench::load(&lib.path, model, nf, max_rows)
+                    })
+                    .map(|m| Box::new(m) as _),
                     (None, _) => Err("no native XGBoost library; run build-native".into()),
                     (_, None) => Err("no XGBoost JSON model".into()),
                 },
@@ -312,12 +353,29 @@ fn load_baselines(cell: &Cell, ctx: &Context, max_rows: usize, l: &mut Loaded) {
     add(
         "quickscorer",
         match (&quickscorer, link) {
-            (Ok(model), Some(link)) => {
+            (Ok(model), Some(link)) => measured(&mut memory, "quickscorer", || {
                 QuickScorerBench::load(model, link, cell.n_features, max_rows)
-                    .map(|m| Box::new(m) as _)
-            }
+            })
+            .map(|m| Box::new(m) as _),
             (Err(reason), _) => Err(reason.clone()),
             (_, None) => Err("no oracle header with the model's link".into()),
         },
     );
+    memory.retain(|m| l.methods.iter().any(|t| t.method == m.method));
+    l.memory.extend(memory);
+}
+
+/// Run one baseline's load between memory readings, outside its clock.
+#[cfg(feature = "quickscorer-bench")]
+fn measured<T>(
+    memory: &mut Vec<MethodMemory>,
+    method: &str,
+    load: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let meter = Meter::start();
+    let loaded = load();
+    if loaded.is_ok() {
+        memory.push(meter.loaded(method, "-", "baseline"));
+    }
+    loaded
 }

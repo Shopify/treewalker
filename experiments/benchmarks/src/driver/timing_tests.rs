@@ -363,6 +363,7 @@ fn a_dropped_method_takes_its_variant_spec_with_it() {
         excluded: Vec::new(),
         forests: BTreeMap::new(),
         load_seconds: BTreeMap::new(),
+        memory: Vec::new(),
     };
     for name in ["a", "b", "c"] {
         let mut m = fake(name, &log, 1);
