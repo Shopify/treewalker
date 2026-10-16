@@ -1,4 +1,4 @@
-//! The kernel against the generator's evaluator, and its outputs
+//! The kernel against the exact full walk and the generator's evaluator, and its outputs
 //! across lane counts, width dispatch, single rows' constant walk, restart prefetch
 //! and chunk sizes.
 
@@ -183,12 +183,15 @@ fn same(actual: &[f64], expected: &[f64], what: &str) {
 }
 
 #[test]
-fn the_kernel_matches_the_oracle() {
+fn the_kernel_matches_the_full_walk_and_the_oracle() {
     let (mut fixed, mut wide) = (0, 0);
     for seed in 0..if MIRI { 4 } else { 40 } {
         let c = case(0x5EED_0000 + seed);
         let nf = c.forest.config().n_features();
+        let mut full = vec![f64::NAN; c.data.len() / nf];
+        c.forest.predict_full_walk(&c.data, &mut full);
         let production = kernel(&c, None, Options::default());
+        same(&production, &full, &format!("case {seed}: the full walk"));
         // The generator's own evaluation of each row, summed by the big-integer oracle.
         let expected: Vec<f64> = c
             .data

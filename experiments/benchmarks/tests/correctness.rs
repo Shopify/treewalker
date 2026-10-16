@@ -9,11 +9,11 @@
 use std::path::{Path, PathBuf};
 
 use treewalker_bench::artifacts::{self, Cell};
-use treewalker_gbdt::research::{Ablation, Stages, ThresholdType, WorkCounters};
-use treewalker_gbdt::{Forest, LoadError, LoadOptions, WalkerConfig};
+use treewalker_gbdt::research::{Ablation, LoadAblation, Stages, ThresholdType, WorkCounters};
+use treewalker_gbdt::{Forest, LoadError, WalkerConfig};
 
-/// Outputs of `f64` additions in tree order (the full walk, GTIL) against
-/// production's correctly rounded sums.
+/// Outputs of `f64` additions in tree order (GTIL) against correctly rounded sums
+/// (production, the exact full walk).
 const TOL_F64: f64 = 1e-13;
 /// Native XGBoost adds its `f32` leaves in `f32`.
 const TOL_F32: f64 = 1e-5;
@@ -47,7 +47,7 @@ fn cells() -> Vec<Cell> {
 }
 
 fn forest(c: &Cell) -> Forest {
-    c.forest(&LoadOptions::default()).unwrap()
+    c.forest(&LoadAblation::default()).unwrap()
 }
 
 fn predict(f: &Forest, c: &Cell) -> Vec<f64> {
@@ -109,7 +109,7 @@ fn honors_monotonic(c: &Cell, config: &WalkerConfig) -> bool {
 type CheckFn = fn(&Cell, &Forest) -> Result<(), String>;
 
 /// The stage oracle: `math.fsum` of GTIL's per-tree outputs and the staged
-/// finalization, bit for bit when the model supports exact sums.
+/// finalization, bit for bit.
 fn oracle(c: &Cell, f: &Forest) -> Result<(), String> {
     let Some(o) = &c.oracle else {
         return Err("no oracle; prepare writes one (PREP_POLICY 3)".into());
@@ -121,12 +121,7 @@ fn oracle(c: &Cell, f: &Forest) -> Result<(), String> {
         r.predict_group_stages(c.group(g), &mut stages);
         for (i, (ts, rm)) in stages.tree_sum.iter().zip(&stages.raw_margin).enumerate() {
             let &(row, o_sum, o_margin) = want.next().ok_or("oracle has fewer rows")?;
-            let ok = if f.exact_sums() {
-                ts.to_bits() == o_sum.to_bits() && rm.to_bits() == o_margin.to_bits()
-            } else {
-                (ts - o_sum).abs() <= TOL_F64 * o_sum.abs().max(1.0)
-            };
-            if !ok {
+            if ts.to_bits() != o_sum.to_bits() || rm.to_bits() != o_margin.to_bits() {
                 return Err(format!(
                     "row {row}: tree_sum {ts} vs {o_sum}, raw_margin {rm} vs {o_margin}"
                 ));
@@ -160,10 +155,7 @@ fn native_reference(c: &Cell, f: &Forest) -> Result<(), String> {
 }
 
 fn partial_matches_full(c: &Cell, f: &Forest) -> Result<(), String> {
-    let d = max_diff(&predict(f, c), &full_walk(f, c));
-    (d < TOL_F64)
-        .then_some(())
-        .ok_or_else(|| format!("{d:.2e} from the full walk"))
+    same_bits(&predict(f, c), &full_walk(f, c))
 }
 
 fn single_row(c: &Cell, f: &Forest) -> Result<(), String> {
@@ -171,14 +163,11 @@ fn single_row(c: &Cell, f: &Forest) -> Result<(), String> {
     let (mut one, mut walk) = ([0.0], [0.0]);
     f.predictor().predict_group(&c.data[..nf], &mut one);
     f.predict_full_walk(&c.data[..nf], &mut walk);
-    let d = (one[0] - walk[0]).abs();
-    (d < TOL_F64)
-        .then_some(())
-        .ok_or_else(|| format!("{d:.2e}"))
+    same_bits(&one, &walk)
 }
 
-/// Every runtime flag but `disable_exact_sums` reaches the same leaves with the
-/// same rows, so outputs are bit-identical to production.
+/// Every runtime flag reaches the same leaves with the same rows, so outputs are
+/// bit-identical to production.
 fn runtime_ablations(c: &Cell, f: &Forest) -> Result<(), String> {
     let reference = predict(f, c);
     let monotonic = honors_monotonic(c, f.config());
@@ -188,7 +177,7 @@ fn runtime_ablations(c: &Cell, f: &Forest) -> Result<(), String> {
             disable_predicate_sweep: bits & 2 != 0,
             disable_unsplit: bits & 4 != 0,
             disable_monotonic: bits & 8 != 0,
-            disable_exact_sums: false,
+            ..Default::default()
         };
         // Monotonic scans are correct only when the data honor the contract.
         if a.disable_varying_precompute && !a.disable_monotonic && !monotonic {
@@ -199,46 +188,39 @@ fn runtime_ablations(c: &Cell, f: &Forest) -> Result<(), String> {
             .predict_groups(&c.data, &c.offsets, &mut out);
         same_bits(&out, &reference).map_err(|e| format!("{a:?}: {e}"))?;
     }
-    // Without exact sums, leaves add in f64 in tree order, as the full walk does.
-    let mut out = vec![0.0; c.n_rows];
-    f.research_predictor(Ablation {
-        disable_exact_sums: true,
-        ..Default::default()
-    })
-    .predict_groups(&c.data, &c.offsets, &mut out);
-    same_bits(&out, &full_walk(f, c)).map_err(|e| format!("disable_exact_sums: {e}"))
+    Ok(())
 }
 
-/// With exact sums, tree order and node layout cannot change a prediction.
+/// Exact sums: tree order and node layout cannot change a prediction.
 fn load_options(c: &Cell, f: &Forest) -> Result<(), String> {
     let reference = predict(f, c);
     for o in [
-        LoadOptions {
+        LoadAblation {
             disable_tree_ordering: true,
             ..Default::default()
         },
-        LoadOptions {
+        LoadAblation {
             disable_bitset_intern: true,
             ..Default::default()
         },
-        LoadOptions {
-            prefix_depth: 0,
+        LoadAblation {
+            prefix_depth: Some(0),
             ..Default::default()
         },
-        LoadOptions {
+        LoadAblation {
+            prefix_depth: Some(2),
+            ..Default::default()
+        },
+        LoadAblation {
             disable_tree_ordering: true,
             disable_bitset_intern: true,
-            prefix_depth: 0,
-            ..Default::default()
+            prefix_depth: Some(0),
+            disable_predicate_dedup: true,
         },
     ] {
         let g = c.forest(&o).map_err(|e| format!("{o:?}: {e}"))?;
         let out = predict(&g, c);
-        if f.exact_sums() {
-            same_bits(&out, &reference).map_err(|e| format!("{o:?}: {e}"))?;
-        } else if max_diff(&out, &full_walk(&g, c)) >= TOL_F64 {
-            return Err(format!("{o:?}: differs from its full walk"));
-        }
+        same_bits(&out, &reference).map_err(|e| format!("{o:?}: {e}"))?;
     }
     Ok(())
 }
@@ -427,8 +409,7 @@ fn partial_matches_full_on_first_group(f: &Forest, rows: &[f64]) {
     let (mut full, mut partial) = (vec![0.0; n], vec![0.0; n]);
     f.predict_full_walk(rows, &mut full);
     f.predictor().predict_group(rows, &mut partial);
-    let d = max_diff(&full, &partial);
-    assert!(d < TOL_F64, "partial vs full {d:.2e}");
+    same_bits(&partial, &full).unwrap_or_else(|e| panic!("partial vs full: {e}"));
 }
 
 /// Rewrite the first group's features matching `pick` to `value`, then compare.
@@ -515,13 +496,13 @@ fn categories_out_of_range() {
 
 /// Synthetic groups of `width` rows: the first source group's constant features,
 /// varying features cycled from the data. Exercises the mask width chosen for
-/// `width`, and the 1,024-row pieces above it.
+/// `width`, and the runtime-width masks past 1,024 rows.
 fn wide_groups(width: usize) {
     let Some(c) = panel() else {
         eprintln!("no panel cell; skipped");
         return;
     };
-    let f = c.forest_at_width(width, true).unwrap();
+    let f = c.forest_at_width(width).unwrap();
     let nf = c.n_features;
     let mut data = Vec::new();
     for g in 0..c.n_groups().min(10) {
@@ -542,8 +523,7 @@ fn wide_groups(width: usize) {
     let (mut partial, mut full) = (vec![0.0; n], vec![0.0; n]);
     f.predictor().predict_fixed(&data, width, &mut partial);
     f.predict_full_walk(&data, &mut full);
-    let d = max_diff(&partial, &full);
-    assert!(d < TOL_F64, "width {width}: {d:.2e}");
+    same_bits(&partial, &full).unwrap_or_else(|e| panic!("width {width}: {e}"));
 }
 
 #[test]
@@ -568,5 +548,5 @@ fn counters_record_work() {
         let rows = c.group(g);
         total += r.predict_group_counted(rows, &mut out[..rows.len() / c.n_features]);
     }
-    assert!(total.constant_steps > 0 && total.leaf_hits > 0 && total.leaf_adds > 0);
+    assert!(total.groups > 0 && total.walk_steps > 0 && total.bins_computed == total.groups);
 }

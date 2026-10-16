@@ -12,8 +12,10 @@ use std::time::Instant;
 
 use anyhow::{Context as _, Result};
 use serde_json::{Value, json};
-use treewalker_gbdt::research::{Ablation, COUNTERS_VERSION, Stages, WorkCounters};
-use treewalker_gbdt::{Forest, LoadOptions};
+use treewalker_gbdt::Forest;
+use treewalker_gbdt::research::{
+    Ablation, COUNTERS_VERSION, LoadAblation, Phases, Stages, WorkCounters,
+};
 
 use crate::artifacts::{Cell, ManifestCell, Natives, RunConfig, VariantSpec};
 use crate::external::Precision;
@@ -121,75 +123,15 @@ fn calls_for(g: &Gathered, nf: usize, budget: usize) -> Vec<Call> {
 struct Loaded {
     methods: Vec<TimedMethod>,
     excluded: Vec<Excluded>,
-    /// Forests by [`load_key`], for counters and full walks.
+    /// Forests by load options, for counters and full walks.
     forests: BTreeMap<String, Forest>,
     load_seconds: BTreeMap<String, f64>,
-    /// The run's `exact_sums` setting, which every forest is loaded with.
-    exact_sums: bool,
-    /// The production forest's key in `forests`.
-    base: String,
-    /// Every TreeWalker forest loaded, with the `exact_sums` it reports, by key:
-    /// the `forests` and the 128-row chunks' (`chunked128`).
-    records: BTreeMap<String, Value>,
 }
 
-impl Loaded {
-    /// The production forest: the model with the default layout.
-    fn base(&self) -> &Forest {
-        &self.forests[&self.base]
-    }
-
-    fn record(&mut self, key: &str, forest: &Forest, load: &[String]) {
-        let rec = json!({
-            "load": load,
-            "max_group_width": forest.config().max_group_width(),
-            "exact_sums": forest.exact_sums(),
-        });
-        self.records.insert(key.to_string(), rec);
-    }
-
-    /// Why the loaded forests disagree with the run's `exact_sums`, if they do. With
-    /// it off, every forest must report exact sums off. With it on, a model whose
-    /// leaves allow no exact sums reports off, so every forest must report what the
-    /// production forest reports.
-    fn exact_sums_mismatch(&self) -> Option<String> {
-        let want = if self.exact_sums {
-            self.records.get(&self.base)?["exact_sums"].as_bool()?
-        } else {
-            false
-        };
-        let bad: Vec<&String> = self
-            .records
-            .iter()
-            .filter(|(_, r)| r["exact_sums"].as_bool() != Some(want))
-            .map(|(k, _)| k)
-            .collect();
-        (!bad.is_empty()).then(|| {
-            format!(
-                "the run sets exact_sums = {}, and forests {bad:?} report exact_sums != {want}",
-                self.exact_sums
-            )
-        })
-    }
-}
-
-/// A forest's key: its load flags, sorted and joined by `+`, and `exact_sums_off`
-/// when the run turns exact sums off. The production forest has no load flags.
-fn load_key(spec: &VariantSpec, exact_sums: bool) -> String {
+fn load_key(spec: &VariantSpec) -> String {
     let mut l = spec.load.clone();
     l.sort();
-    if !exact_sums {
-        l.push("exact_sums_off".into());
-    }
     l.join("+")
-}
-
-/// A variant's load options, with the run's `exact_sums`.
-fn load_options(spec: &VariantSpec, exact_sums: bool) -> Result<LoadOptions> {
-    Ok(LoadOptions {
-        exact_sums,
-        ..spec.load_options()?
-    })
 }
 
 fn wanted(ctx: &Context, method: &str) -> bool {
@@ -200,23 +142,17 @@ fn wanted(ctx: &Context, method: &str) -> bool {
 
 fn load_methods(cell: &Cell, mc: &ManifestCell, ctx: &Context, max_rows: usize) -> Result<Loaded> {
     let set = MethodSet::parse(&mc.methods)?;
-    let exact_sums = ctx.config.exact_sums;
-    let base_key = load_key(&VariantSpec::default(), exact_sums);
     let mut l = Loaded {
         methods: Vec::new(),
         excluded: Vec::new(),
         forests: BTreeMap::new(),
         load_seconds: BTreeMap::new(),
-        exact_sums,
-        base: base_key.clone(),
-        records: BTreeMap::new(),
     };
     let t0 = Instant::now();
-    let base = cell.forest(&load_options(&VariantSpec::default(), exact_sums)?)?;
+    let base = cell.forest(&LoadAblation::default())?;
     l.load_seconds
-        .insert(base_key.clone(), t0.elapsed().as_secs_f64());
-    l.record(&base_key, &base, &[]);
-    l.forests.insert(base_key, base.clone());
+        .insert(String::new(), t0.elapsed().as_secs_f64());
+    l.forests.insert(String::new(), base.clone());
 
     if wanted(ctx, "treewalker") {
         l.methods.push(TimedMethod::new(
@@ -236,16 +172,13 @@ fn load_methods(cell: &Cell, mc: &ManifestCell, ctx: &Context, max_rows: usize) 
     }
     if set.full_walk() && cell.max_group_rows() > CHUNK_ROWS && wanted(ctx, "treewalker_chunked128")
     {
-        match cell.forest_at_width(CHUNK_ROWS, exact_sums) {
-            Ok(f) => {
-                l.record("chunked128", &f, &[]);
-                l.methods.push(TimedMethod::new(
-                    "treewalker_chunked128",
-                    "-",
-                    Engine::Chunked(f.predictor()),
-                    max_rows,
-                ));
-            }
+        match cell.forest_at_width(CHUNK_ROWS) {
+            Ok(f) => l.methods.push(TimedMethod::new(
+                "treewalker_chunked128",
+                "-",
+                Engine::Chunked(f.predictor()),
+                max_rows,
+            )),
             Err(e) => l.excluded.push(Excluded {
                 method: "treewalker_chunked128".into(),
                 variant: "-".into(),
@@ -258,18 +191,15 @@ fn load_methods(cell: &Cell, mc: &ManifestCell, ctx: &Context, max_rows: usize) 
             break;
         }
         let id = spec.id();
-        let key = load_key(spec, exact_sums);
+        let key = load_key(spec);
         let forest = if let Some(f) = l.forests.get(&key) {
             f.clone()
         } else {
             let t0 = Instant::now();
-            match load_options(spec, exact_sums).and_then(|o| cell.forest(&o)) {
+            match spec.load_ablation().and_then(|o| cell.forest(&o)) {
                 Ok(f) => {
                     l.load_seconds
                         .insert(key.clone(), t0.elapsed().as_secs_f64());
-                    let mut load = spec.load.clone();
-                    load.sort();
-                    l.record(&key, &f, &load);
                     l.forests.insert(key, f.clone());
                     f
                 }
@@ -569,14 +499,13 @@ fn outputs(
 }
 
 /// Check the stage oracle: `tree_sum` and `raw_margin` must equal the oracle's bit
-/// for bit when the model supports exact sums, and the stages' output must equal
-/// production `predict`'s. Each oracle row's stages go to `stages_t`, so the
-/// analysis can compare them with the oracle and with the baselines.
+/// for bit, and the stages' output must equal production `predict`'s. Each oracle
+/// row's stages go to `stages_t`, so the analysis can compare them with the oracle
+/// and with the baselines.
 fn check_oracle(cell: &Cell, forest: &Forest, suite: &str, stages_t: &mut Table) -> Result<Value> {
     let Some(o) = &cell.oracle else {
         return Ok(json!({"status": "no oracle"}));
     };
-    let exact = forest.exact_sums();
     let mut r = forest.research_predictor(Ablation::default());
     let mut p = forest.predictor();
     let mut stages = Stages::default();
@@ -613,18 +542,9 @@ fn check_oracle(cell: &Cell, forest: &Forest, suite: &str, stages_t: &mut Table)
             } else {
                 margin_max.max(dm)
             };
-            if exact {
-                sum_bad += usize::from(ts.to_bits() != o_sum.to_bits());
-                margin_bad += usize::from(rm.to_bits() != o_margin.to_bits());
-            } else {
-                sum_bad += usize::from(!matches(ts, o_sum, false, 1e-12 * o_sum.abs().max(1.0)));
-                margin_bad += usize::from(!matches(
-                    rm,
-                    o_margin,
-                    false,
-                    1e-12 * o_margin.abs().max(1.0),
-                ));
-            }
+            // Every model sums exactly since 3.0: both stages are bitwise.
+            sum_bad += usize::from(ts.to_bits() != o_sum.to_bits());
+            margin_bad += usize::from(rm.to_bits() != o_margin.to_bits());
             out_bad += usize::from(out[i].to_bits() != stages.output[i].to_bits());
             rows += 1;
         }
@@ -632,11 +552,10 @@ fn check_oracle(cell: &Cell, forest: &Forest, suite: &str, stages_t: &mut Table)
     let passed = sum_bad == 0 && margin_bad == 0 && out_bad == 0 && want.next().is_none();
     Ok(json!({
         "status": if passed { "pass" } else { "fail" },
-        "exact_sums": exact,
         "rows": rows,
         "groups": o.groups.len(),
-        "tree_sum": {"mismatches": sum_bad, "max_abs": sum_max, "bitwise": exact},
-        "raw_margin": {"mismatches": margin_bad, "max_abs": margin_max, "bitwise": exact},
+        "tree_sum": {"mismatches": sum_bad, "max_abs": sum_max, "bitwise": true},
+        "raw_margin": {"mismatches": margin_bad, "max_abs": margin_max, "bitwise": true},
         "output_vs_predict": {"mismatches": out_bad},
     }))
 }
@@ -655,7 +574,7 @@ fn f64_sum_tolerance(forest: &Forest, base_score: f64) -> f64 {
             forest
                 .tree_nodes(t)
                 .iter()
-                .filter(|n| n.skip == -1)
+                .filter(|n| n.is_leaf())
                 .map(|n| n.value.abs())
                 .fold(0.0, f64::max)
         })
@@ -677,41 +596,19 @@ fn validate(
 ) -> (Vec<Check>, Vec<f64>) {
     let nf = cell.n_features;
     let n = *g.offsets.last().unwrap_or(&0);
-    let base = &l.forests[&l.base];
-    let exact = base.exact_sums();
+    let base = &l.forests[""];
     let f64_tol = f64_sum_tolerance(base, cell.oracle.as_ref().map_or(0.0, |o| o.base_score));
     let mut prod = vec![0.0; n];
     base.predictor()
         .predict_groups(&g.rows, &g.offsets, &mut prod);
-    // Full walks per load key: the no-exact-sums variants must match them bit for bit.
-    let mut walks: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     let mut checks = Vec::new();
     let mut failed = vec![false; l.methods.len()];
     for (i, m) in l.methods.iter_mut().enumerate() {
-        let spec = m.spec.clone();
-        let spec = spec.as_ref();
-        let adds_in_f64 = matches!(m.engine, Engine::FullWalk(_))
-            || spec.is_some_and(|s| s.runtime.iter().any(|f| f == "disable_exact_sums"))
-            || !exact;
         let mut targets: Vec<(String, Vec<f64>, bool, f64)> = Vec::new();
         if m.is_treewalker() {
-            if adds_in_f64 {
-                let key = spec.map_or_else(|| l.base.clone(), |s| load_key(s, l.exact_sums));
-                let walk = walks.entry(key.clone()).or_insert_with(|| {
-                    let mut out = vec![0.0; n];
-                    l.forests[&key].predict_full_walk(&g.rows, &mut out);
-                    out
-                });
-                targets.push((
-                    format!("full walk {key}").trim().into(),
-                    walk.clone(),
-                    true,
-                    0.0,
-                ));
-                targets.push(("predict".into(), prod.clone(), false, f64_tol));
-            } else {
-                targets.push(("predict".into(), prod.clone(), true, 0.0));
-            }
+            // Every model sums exactly, so tree order, layout, the full walk and every
+            // variant give production's output bit for bit.
+            targets.push(("predict".into(), prod.clone(), true, 0.0));
         } else {
             let tol = match m.precision() {
                 Precision::F64 => f64_tol,
@@ -820,39 +717,119 @@ fn drop_failed(l: &mut Loaded, failed: &[bool]) {
 // Work counters and ablation signatures
 // ---------------------------------------------------------------------------
 
+/// One counted group: its counters and the time its phases took.
+type Counted = (WorkCounters, Phases);
+
 fn count(
     forest: &Forest,
     ablation: Ablation,
     cell: &Cell,
     per_group: bool,
-) -> (WorkCounters, Vec<WorkCounters>) {
+) -> (Counted, Vec<Counted>) {
     let mut r = forest.research_predictor(ablation);
     let mut out = vec![0.0; cell.max_group_rows()];
-    let mut total = WorkCounters::default();
+    let mut total = Counted::default();
     let mut groups = Vec::new();
     for g in 0..cell.n_groups() {
         let rows = cell.group(g);
         let c = r.predict_group_counted(rows, &mut out[..rows.len() / cell.n_features]);
-        total += c;
+        let p = r.take_phases();
+        total.0 += c;
+        total.1 += p;
         if per_group {
-            groups.push(c);
+            groups.push((c, p));
         }
     }
     (total, groups)
 }
 
+/// The layout the model was built with, the rules' choices on this machine and
+/// their inputs (`Forest::layout_stats`), beside the host's L1D size.
+pub fn layout_stats(forest: &Forest) -> Value {
+    let s = forest.layout_stats();
+    json!({
+        "varying_share": s.varying_share,
+        "lanes": s.lanes,
+        "lanes_constant": s.lanes_constant,
+        "registers": s.registers,
+        "vector_bits": s.vector_bits,
+        "pool_bytes": s.pool_bytes,
+        "leaf_bytes": s.leaf_bytes,
+        "rank_table_bytes": s.rank_table_bytes,
+        "flip_table_bytes": s.flip_table_bytes,
+        "chain_slots": s.chain_slots,
+        "chain_sets": s.chain_sets,
+        "line_bytes": s.line_bytes,
+        "l1_bytes": s.l1_bytes,
+        "l2_share_bytes": s.l2_share_bytes,
+        "cache_source": s.cache_source,
+        "chunk_bytes": s.chunk_bytes,
+        "steps_leaf": s.steps_leaf,
+        "steps_stop": s.steps_stop,
+        "pool_level": s.pool_level,
+        "distance_constant": s.distance_constant,
+        "distance": s.distance,
+        "rate_constant": s.rate_constant,
+        "pool_latency_l1s": s.pool_latency_l1s,
+        "pool_latency_ns": s.pool_latency_ns,
+        "pool_latency_ratio": s.pool_latency_ratio,
+        "prefix_groups": s.prefix_groups,
+        "prefix_trees": s.prefix_trees,
+        "prefix_max_depth": s.prefix_max_depth,
+        "prefix_mean_depth": s.prefix_mean_depth,
+        "prefix_saved_steps": s.prefix_saved_steps,
+        "prefix_cost_steps": s.prefix_cost_steps,
+        "l1d_bytes": crate::system::l1d_bytes(),
+    })
+}
+
+/// The phases' names and times in nanoseconds, in the counters table's order.
+pub fn phase_fields(p: &Phases) -> [(&'static str, u64); 7] {
+    let ns = |d: std::time::Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
+    [
+        ("bins_ns", ns(p.bins)),
+        ("precompute_ns", ns(p.precompute)),
+        ("prefix_ns", ns(p.prefix)),
+        ("walk_ns", ns(p.walk)),
+        ("resolve_ns", ns(p.resolve)),
+        ("leaf_pass_ns", ns(p.leaf_pass)),
+        ("finish_ns", ns(p.finish)),
+    ]
+}
+
 /// What a cell's no-op rules and signatures depend on.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Facts {
     /// The cell declares monotonic features.
     pub monotonic: bool,
-    /// The model supports exact sums.
-    pub exact: bool,
     /// The model has varying predicates: splits on a varying feature. A horizon-1
     /// survival model has none: its time features are constant in training.
     pub varying_predicates: bool,
-    /// Rows times trees: the leaf adds of per-row accumulation.
-    pub row_leaves: u64,
+    /// The walk lanes the rules chose for the model's walks with and without
+    /// varying stops, their restart prefetch distances, and the first's rate.
+    pub lanes: usize,
+    pub lanes_constant: usize,
+    pub distance: usize,
+    pub distance_constant: usize,
+    pub rate_constant: usize,
+    /// Some group is a single row.
+    pub single_rows: bool,
+    /// The mask widths the groups of two or more rows take ([`mask_width`]), in
+    /// increasing order, and the configured widest group's.
+    pub mask_widths: Vec<usize>,
+    pub config_width: usize,
+}
+
+/// The mask width in bits a group of `rows` rows takes: 32 for up to 32 rows, then
+/// 64 to 1,024 by powers of two, then runtime widths of 128-bit units.
+pub const fn mask_width(rows: usize) -> usize {
+    if rows <= 32 {
+        32
+    } else if rows <= 1024 {
+        rows.next_power_of_two()
+    } else {
+        rows.div_ceil(128) * 128
+    }
 }
 
 impl Facts {
@@ -860,12 +837,47 @@ impl Facts {
         let config = forest.config();
         let rows = cell.group(0);
         let first = &rows[..rows.len().min(32 * cell.n_features)];
+        let stats = forest.layout_stats();
+        let sizes = cell.offsets.windows(2).map(|w| w[1] - w[0]);
         Self {
             monotonic: (0..config.n_features())
                 .any(|f| config.is_increasing(f) || config.is_decreasing(f)),
-            exact: forest.exact_sums(),
             varying_predicates: !forest.predicate_masks(first, true).is_empty(),
-            row_leaves: (cell.n_rows * forest.trees().len()) as u64,
+            lanes: stats.lanes,
+            lanes_constant: stats.lanes_constant,
+            distance: stats.distance,
+            distance_constant: stats.distance_constant,
+            rate_constant: stats.rate_constant,
+            single_rows: sizes.clone().any(|s| s == 1),
+            mask_widths: {
+                let mut widths: Vec<usize> = sizes.filter(|&s| s > 1).map(mask_width).collect();
+                widths.sort_unstable();
+                widths.dedup();
+                widths
+            },
+            config_width: mask_width(config.max_group_width()),
+        }
+    }
+
+    /// The mask widths the variant's masked groups take with width dispatch, in
+    /// increasing order: single rows join them when they stop at varying splits.
+    fn dispatched(&self, spec: &VariantSpec) -> Vec<usize> {
+        let g1_off = spec.runtime.iter().any(|x| x == "disable_g1_constant");
+        let mut widths = self.mask_widths.clone();
+        if self.single_rows && g1_off && widths.first() != Some(&32) {
+            widths.insert(0, 32);
+        }
+        widths
+    }
+
+    /// The mask widths the variant's masked groups take: every group takes the
+    /// configured width without width dispatch.
+    fn widths(&self, spec: &VariantSpec) -> Vec<usize> {
+        let c = self.dispatched(spec);
+        if !c.is_empty() && spec.runtime.iter().any(|x| x == "disable_width_dispatch") {
+            vec![self.config_width]
+        } else {
+            c
         }
     }
 }
@@ -873,13 +885,32 @@ impl Facts {
 /// Whether `flag` is a no-op for this variant and cell, and why.
 pub fn no_op(flag: &str, spec: &VariantSpec, facts: &Facts) -> Option<&'static str> {
     let has = |f: &str| spec.runtime.iter().any(|x| x == f);
+    let widths = facts.widths(spec);
+    if let Some((name, value)) = flag.split_once('=') {
+        return match name {
+            // Forced lanes prefetch one item ahead every round.
+            "lanes"
+                if value.parse() == Ok(facts.lanes)
+                    && facts.lanes == facts.lanes_constant
+                    && (facts.distance, facts.distance_constant) == (1, 1)
+                    && facts.rate_constant == 1 =>
+            {
+                Some("the rules choose these lanes for every walk, one item ahead")
+            }
+            _ => None,
+        };
+    }
     match flag {
+        "disable_g1_constant" if !facts.single_rows => Some("no group is a single row"),
+        "disable_width_dispatch" if widths.is_empty() => Some("no group takes the masked path"),
+        "disable_width_dispatch" if facts.dispatched(spec) == [facts.config_width] => {
+            Some("every group takes the configured width")
+        }
         "disable_monotonic" if !has("disable_varying_precompute") => {
             Some("precompute is on, and it ignores monotonicity")
         }
         "disable_monotonic" if !facts.monotonic => Some("the cell has no monotonic features"),
         "disable_predicate_sweep" if has("disable_varying_precompute") => Some("precompute is off"),
-        "disable_exact_sums" if !facts.exact => Some("the model has no exact sums; it adds in f64"),
         "disable_unsplit"
         | "disable_varying_precompute"
         | "disable_predicate_sweep"
@@ -896,27 +927,30 @@ pub fn no_op(flag: &str, spec: &VariantSpec, facts: &Facts) -> Option<&'static s
 ///
 /// Judged by the path's own counters, never by totals differing from all-on: with
 /// two identical rows, exact and per-row accumulation both make 4 leaf adds.
-pub fn signature(flag: &str, v: &WorkCounters, facts: &Facts) -> bool {
+pub fn signature(flag: &str, v: &WorkCounters, _facts: &Facts) -> bool {
     match flag {
-        // The per-row partitions ran, and the precompute did not.
+        // The event scans ran, and the precompute did not.
         "disable_varying_precompute" => {
             v.precompute_row_evals == 0
                 && v.precompute_mask_writes == 0
-                && (v.partition_row_evals > 0 || v.varying_splits == 0)
+                && (v.scan_rows > 0 || v.varying_events == 0)
         }
-        // No split was skipped as unsplit.
-        "disable_unsplit" => v.unsplit_skips == 0,
-        // The brute force wrote the masks, with no sort or sweep.
+        // Empty sides were passed on, wherever an event left one.
+        "disable_unsplit" => v.empty_sides > 0 || v.splits == v.varying_events,
+        // The brute force wrote the masks, with no sort or sweep, unless no group
+        // reads masks: single rows step through varying splits as constants.
         "disable_predicate_sweep" => {
             v.precompute_sweep_compares == 0
                 && v.precompute_sort_compares == 0
-                && v.precompute_mask_writes > 0
+                && (v.precompute_mask_writes > 0 || v.groups == v.single_rows)
         }
-        // Every partition scanned all its active rows: no monotonic early stop.
-        "disable_monotonic" => v.scan_row_evals == v.partition_row_evals,
-        // One add per row per tree: per-row accumulation.
-        "disable_exact_sums" => v.leaf_adds == facts.row_leaves,
-        _ => false,
+        // Every scan evaluated all its rows: no monotonic early stop.
+        "disable_monotonic" => v.scan_evals == v.scan_rows,
+        // No single row stepped through varying splits as constants.
+        "disable_g1_constant" => v.single_rows == 0,
+        // No counter tells these apart from all-on.
+        "disable_width_dispatch" | "disable_restart_prefetch" => true,
+        t => t.starts_with("lanes="),
     }
 }
 
@@ -926,29 +960,18 @@ fn push_counters(
     cell: &str,
     variant: &str,
     g: usize,
-    c: &WorkCounters,
+    (c, p): &Counted,
 ) {
-    t.push(&[
+    let mut row = vec![
         V::S(suite),
         V::S(cell),
         V::S(variant),
         V::U32(g as u32),
         V::U32(COUNTERS_VERSION),
-        V::U64(c.constant_steps),
-        V::U64(c.varying_splits),
-        V::U64(c.unsplit_skips),
-        V::U64(c.recursive_calls),
-        V::U64(c.leaf_hits),
-        V::U64(c.leaf_adds),
-        V::U64(c.partition_row_evals),
-        V::U64(c.scan_row_evals),
-        V::U64(c.scan_compares),
-        V::U64(c.scan_missing_checks),
-        V::U64(c.precompute_row_evals),
-        V::U64(c.precompute_sort_compares),
-        V::U64(c.precompute_sweep_compares),
-        V::U64(c.precompute_mask_writes),
-    ]);
+    ];
+    row.extend(c.fields().iter().map(|&(_, v)| V::U64(v)));
+    row.extend(phase_fields(p).iter().map(|&(_, v)| V::U64(v)));
+    t.push(&row);
 }
 
 /// Record per-group counters for every research variant (and all-on), and check
@@ -960,8 +983,8 @@ fn counters(
     l: &mut Loaded,
     table: &mut Table,
 ) -> Result<BTreeMap<String, Value>> {
-    let facts = Facts::of(l.base(), cell);
-    let mut totals: BTreeMap<(String, Vec<String>), WorkCounters> = BTreeMap::new();
+    let facts = Facts::of(&l.forests[""], cell);
+    let mut totals: BTreeMap<(String, Vec<String>), Counted> = BTreeMap::new();
     let mut total_of =
         |forests: &BTreeMap<String, Forest>, key: &str, rt: &[String], per_group: bool| {
             let mut rt = rt.to_vec();
@@ -977,8 +1000,7 @@ fn counters(
             totals.insert((key.to_string(), rt), t);
             Ok((t, g))
         };
-    let base = l.base.clone();
-    let (_, all_on) = total_of(&l.forests, &base, &[], true)?;
+    let (_, all_on) = total_of(&l.forests, "", &[], true)?;
     for (g, c) in all_on.iter().enumerate() {
         push_counters(table, &ctx.suite, &cell.id, "all-on", g, c);
     }
@@ -989,11 +1011,12 @@ fn counters(
         .collect();
     for (i, spec) in variants {
         let id = spec.id();
-        let key = load_key(&spec, l.exact_sums);
-        let (v, groups) = if id == "all-on" {
+        let key = load_key(&spec);
+        let ((v, phases), groups) = if id == "all-on" {
             (
-                all_on.iter().fold(WorkCounters::default(), |mut a, c| {
-                    a += *c;
+                all_on.iter().fold(Counted::default(), |mut a, c| {
+                    a.0 += c.0;
+                    a.1 += c.1;
                     a
                 }),
                 Vec::new(),
@@ -1025,7 +1048,8 @@ fn counters(
         }
         report.insert(
             id,
-            json!({"flags": flags, "totals": format!("{v}"), "load": spec.load}),
+            json!({"flags": flags, "totals": format!("{v}"), "load": spec.load,
+                   "phases_ns": phase_fields(&phases).iter().copied().collect::<BTreeMap<_, _>>()}),
         );
     }
     drop_failed(l, &failed);
@@ -2033,12 +2057,8 @@ pub fn run_cell(
     // them: every timed input is checked, and no more.
     let order = &timed_groups;
     let vgroups = Gathered::new(&cell, order);
-    if let Some(reason) = loaded.exact_sums_mismatch() {
-        let diag = json!({"exact_sums": cfg.exact_sums, "forests": loaded.records});
-        return Err(refuse(run_dir, ctx.invocation, &cell.id, &reason, &diag));
-    }
     let mut stages_t = output::stages_table();
-    let oracle = check_oracle(&cell, loaded.base(), &ctx.suite, &mut stages_t)?;
+    let oracle = check_oracle(&cell, &loaded.forests[""], &ctx.suite, &mut stages_t)?;
     let oracle_ok = oracle["status"] == "pass" && oracle["rows"].as_u64().unwrap_or(0) > 0;
     if timing && !oracle_ok {
         return Err(refuse(
@@ -2185,7 +2205,7 @@ pub fn run_cell(
         let shared = Shared {
             cell_dir,
             cell: &cell,
-            forest: &loaded.forests[&loaded.base],
+            forest: &loaded.forests[""],
             groups: &timed_groups,
             modes: &modes,
             max_rows,
@@ -2216,7 +2236,7 @@ pub fn run_cell(
                    "settings": m.settings()})
         })
         .collect();
-    let forest = loaded.base();
+    let forest = &loaded.forests[""];
     let manifest = json!({
         "resume_key": resume_key,
         "suite": ctx.suite,
@@ -2228,10 +2248,9 @@ pub fn run_cell(
             "nodes": forest.nodes().len(),
             "bitset_bytes": forest.bitset_bytes(),
             "threshold_type": format!("{:?}", forest.threshold_type()),
-            "exact_sums": forest.exact_sums(),
+            "layout": layout_stats(forest),
         },
         "load_seconds": loaded.load_seconds,
-        "exact_sums": {"setting": cfg.exact_sums, "forests": loaded.records},
         "groups": cell.n_groups(),
         "timed_groups": timed_groups.len(),
         "sample": sample,
@@ -2334,7 +2353,7 @@ mod tests {
             .map(|t| {
                 f.tree_nodes(t)
                     .iter()
-                    .filter(|n| n.skip == -1)
+                    .filter(|n| n.is_leaf())
                     .map(|n| n.value.abs())
                     .fold(0.0, f64::max)
             })
@@ -2361,17 +2380,29 @@ mod tests {
             &std::fs::read(path).unwrap(),
             treewalker_gbdt::ModelFormat::TreeliteBinaryV4,
             config,
-            &LoadOptions::default(),
+            &treewalker_gbdt::LoadOptions::default(),
         )
         .unwrap()
     }
 
     fn facts(f: &Forest, rows: &[f64]) -> Facts {
+        let n = rows.len() / 2;
+        let stats = f.layout_stats();
         Facts {
             monotonic: false,
-            exact: f.exact_sums(),
             varying_predicates: !f.predicate_masks(rows, true).is_empty(),
-            row_leaves: (rows.len() / 2 * f.trees().len()) as u64,
+            lanes: stats.lanes,
+            lanes_constant: stats.lanes_constant,
+            distance: stats.distance,
+            distance_constant: stats.distance_constant,
+            rate_constant: stats.rate_constant,
+            single_rows: n == 1,
+            mask_widths: if n > 1 {
+                vec![mask_width(n)]
+            } else {
+                Vec::new()
+            },
+            config_width: mask_width(f.config().max_group_width()),
         }
     }
 
@@ -2385,11 +2416,12 @@ mod tests {
             .predict_group_counted(rows, &mut out)
     }
 
-    const PATH_FLAGS: [&str; 4] = [
+    const PATH_FLAGS: [&str; 5] = [
         "disable_varying_precompute",
         "disable_unsplit",
         "disable_predicate_sweep",
-        "disable_exact_sums",
+        "disable_g1_constant",
+        "lanes=1",
     ];
 
     #[test]
@@ -2397,7 +2429,7 @@ mod tests {
         let f = fixture_forest(&[0]);
         let rows = [0.5, 1.0];
         let facts = facts(&f, &rows);
-        assert!(facts.varying_predicates && facts.exact);
+        assert!(facts.varying_predicates);
         for flag in PATH_FLAGS {
             let spec = VariantSpec {
                 runtime: vec![flag.into()],
@@ -2412,23 +2444,20 @@ mod tests {
     }
 
     #[test]
-    fn two_identical_rows_keep_the_exact_sums_signature() {
+    fn two_identical_rows_show_every_path() {
         let f = fixture_forest(&[0]);
         let rows = [0.5, 1.0, 0.5, 1.0];
         let facts = facts(&f, &rows);
-        let (exact, per_row) = (
-            counted(&f, &rows, &[]),
-            counted(&f, &rows, &["disable_exact_sums"]),
-        );
-        // Equal totals: two adds per run of two rows, one per row per tree.
-        assert_eq!((exact.leaf_adds, per_row.leaf_adds), (4, 4));
-        assert!(signature("disable_exact_sums", &per_row, &facts));
         for flag in PATH_FLAGS {
             assert!(
                 signature(flag, &counted(&f, &rows, &[flag]), &facts),
                 "{flag}"
             );
         }
+        // One row stopping at varying splits leaves a side of every varying event
+        // empty.
+        let empty = counted(&f, &rows[..2], &["disable_g1_constant", "disable_unsplit"]);
+        assert!(empty.empty_sides > 0);
     }
 
     #[test]
@@ -2450,11 +2479,59 @@ mod tests {
             };
             assert!(no_op(flag, &spec, &facts).is_some(), "{flag}");
         }
-        let spec = VariantSpec {
-            runtime: vec!["disable_exact_sums".into()],
+    }
+
+    #[test]
+    fn the_kernel_flags_are_no_ops_where_the_policy_already_chose_them() {
+        let f = fixture_forest(&[0]);
+        let spec = |flags: &[&str]| VariantSpec {
+            runtime: flags.iter().map(ToString::to_string).collect(),
             load: Vec::new(),
         };
-        assert_eq!(no_op("disable_exact_sums", &spec, &facts), None);
+        let why = |facts: &Facts, flags: &[&str]| no_op(flags[0], &spec(flags), facts);
+        assert_eq!(
+            (mask_width(1), mask_width(32), mask_width(33)),
+            (32, 32, 64)
+        );
+        assert_eq!(
+            (
+                mask_width(65),
+                mask_width(1024),
+                mask_width(1025),
+                mask_width(2049)
+            ),
+            (128, 1024, 1152, 2176)
+        );
+        let policy = f.layout_stats();
+        let lanes = format!("lanes={}", policy.lanes);
+        // A single row: no masks unless its path is off.
+        let one = facts(&f, &[0.5, 1.0]);
+        // The fixture's nodes fit L1, so the rules prefetch nothing, and forced lanes
+        // prefetch one item ahead: no lane count is a no-op.
+        assert_eq!((one.distance, one.distance_constant), (0, 0));
+        assert!(why(&one, &[&lanes]).is_none() && why(&one, &["lanes=1"]).is_none());
+        let prefetching = Facts {
+            distance: 1,
+            distance_constant: 1,
+            lanes_constant: one.lanes,
+            ..one.clone()
+        };
+        assert!(why(&prefetching, &[&lanes]).is_some());
+        // Forced lanes prefetch every round, so not at a rule's rate of 2.
+        let every_other = Facts {
+            rate_constant: 2,
+            ..prefetching
+        };
+        assert!(why(&every_other, &[&lanes]).is_none());
+        assert!(why(&one, &["disable_width_dispatch"]).is_some());
+        assert!(why(&one, &["disable_g1_constant"]).is_none());
+        // Off, it takes 32-bit masks, and the configured 128 rows take 128 bits.
+        assert!(why(&one, &["disable_width_dispatch", "disable_g1_constant"]).is_none());
+        // Two rows of a 128-row config: dispatch matters.
+        let two = facts(&f, &[0.5, 1.0, 0.5, 1.0]);
+        assert!(why(&two, &["disable_g1_constant"]).is_some());
+        assert!(why(&two, &["disable_width_dispatch"]).is_none());
+        assert!(why(&two, &["disable_restart_prefetch"]).is_none());
     }
 
     #[test]
@@ -2841,9 +2918,6 @@ mod timing_tests {
             excluded: Vec::new(),
             forests: BTreeMap::new(),
             load_seconds: BTreeMap::new(),
-            exact_sums: true,
-            base: String::new(),
-            records: BTreeMap::new(),
         };
         for name in ["a", "b", "c"] {
             let mut m = fake(name, &log, 1);
@@ -2893,192 +2967,64 @@ mod timing_tests {
     }
 
     #[test]
-    fn every_forest_is_loaded_with_the_runs_exact_sums() {
-        let (cell, dir) = fixture_cell(&[200, 3, 130], "exact");
-        let variants = vec![
-            VariantSpec::default(),
-            VariantSpec {
-                runtime: vec!["disable_unsplit".into()],
-                load: Vec::new(),
-            },
-            VariantSpec {
-                runtime: Vec::new(),
-                load: vec!["disable_tree_ordering".into()],
-            },
-            VariantSpec {
-                runtime: vec!["disable_varying_precompute".into()],
-                load: vec![
-                    "disable_prefix_grouping".into(),
-                    "disable_bitset_intern".into(),
-                ],
-            },
-        ];
-        for (methods, variants) in [("factorial", Vec::new()), ("ablation", variants)] {
-            let mc = ManifestCell {
-                id: "test/cell".into(),
-                dir: dir.clone(),
-                status: "ready".into(),
-                key: "k".into(),
-                methods: methods.into(),
-                variants,
-                modes: vec!["serving".into()],
-            };
-            for exact_sums in [false, true] {
-                let ctx = context(RunConfig {
-                    exact_sums,
-                    ..RunConfig::default()
-                });
-                let l = load_methods(&cell, &mc, &ctx, 256).unwrap();
-                // Production, research variants of three layouts, and the chunks.
-                let want = if methods == "factorial" { 2 } else { 3 };
-                assert_eq!(l.records.len(), want, "{methods}: {:?}", l.records.keys());
-                for (key, r) in &l.records {
-                    assert_eq!(r["exact_sums"], exact_sums, "{methods} {key}");
-                }
-                for (key, f) in &l.forests {
-                    assert_eq!(f.exact_sums(), exact_sums, "{methods} {key}");
-                    assert_eq!(key.ends_with("exact_sums_off"), !exact_sums, "{key}");
-                }
-                assert_eq!(l.base().exact_sums(), exact_sums);
-                assert_eq!(l.exact_sums_mismatch(), None);
-                if methods == "factorial" {
-                    assert!(l.records.contains_key("chunked128"));
-                    assert!(
-                        l.methods
-                            .iter()
-                            .any(|m| m.method == "treewalker_chunked128")
-                    );
-                }
-            }
-        }
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
     fn the_oracle_rows_stages_are_written_in_the_oracles_order() {
         let (mut cell, dir) = fixture_cell(&[3, 5, 2], "stages");
         // Rows that differ within each group, so every row has its own stages.
         for (i, v) in cell.data.iter_mut().enumerate() {
             *v = (i % 7) as f64 - 3.0;
         }
-        for exact_sums in [false, true] {
-            let forest = cell
-                .forest(&LoadOptions {
-                    exact_sums,
-                    ..LoadOptions::default()
-                })
-                .unwrap();
-            let mut r = forest.research_predictor(Ablation::default());
-            let mut want = Vec::new();
-            let mut stages = Stages::default();
-            for g in [0, 2] {
-                r.predict_group_stages(cell.group(g), &mut stages);
-                for i in 0..stages.output.len() {
-                    let row = cell.offsets[g] + i;
-                    want.push((
-                        g,
-                        row,
-                        stages.tree_sum[i],
-                        stages.raw_margin[i],
-                        stages.output[i],
-                    ));
-                }
+        let forest = cell.forest(&LoadAblation::default()).unwrap();
+        let mut r = forest.research_predictor(Ablation::default());
+        let mut want = Vec::new();
+        let mut stages = Stages::default();
+        for g in [0, 2] {
+            r.predict_group_stages(cell.group(g), &mut stages);
+            for i in 0..stages.output.len() {
+                let row = cell.offsets[g] + i;
+                want.push((
+                    g,
+                    row,
+                    stages.tree_sum[i],
+                    stages.raw_margin[i],
+                    stages.output[i],
+                ));
             }
-            cell.oracle = Some(crate::artifacts::Oracle {
-                groups: vec![0, 2],
-                rows: want
-                    .iter()
-                    .map(|&(_, row, ts, rm, _)| (row, ts, rm))
-                    .collect(),
-                divisor: 1.0,
-                base_score: 0.0,
-                postprocessor: "identity".into(),
-                sigmoid_alpha: 1.0,
-            });
-            let mut t = output::stages_table();
-            let got = check_oracle(&cell, &forest, "s", &mut t).unwrap();
-            assert_eq!(got["status"], "pass");
-            assert_eq!(got["exact_sums"], exact_sums);
-            let rows = t.rows_json();
-            assert_eq!(rows.len(), 5);
-            for (r, &(g, row, ts, rm, out)) in rows.iter().zip(&want) {
-                assert_eq!(
-                    r[..4],
-                    [json!("s"), json!("test/cell"), json!(g), json!(row)]
-                );
-                for (v, w) in r[4..].iter().zip([ts, rm, out]) {
-                    assert_eq!(v.as_f64().unwrap().to_bits(), w.to_bits());
-                }
-            }
-            t.write(&dir.join("stages.parquet")).unwrap();
         }
+        cell.oracle = Some(crate::artifacts::Oracle {
+            groups: vec![0, 2],
+            rows: want
+                .iter()
+                .map(|&(_, row, ts, rm, _)| (row, ts, rm))
+                .collect(),
+            divisor: 1.0,
+            base_score: 0.0,
+            postprocessor: "identity".into(),
+            sigmoid_alpha: 1.0,
+        });
+        let mut t = output::stages_table();
+        let got = check_oracle(&cell, &forest, "s", &mut t).unwrap();
+        assert_eq!(got["status"], "pass");
+        let rows = t.rows_json();
+        assert_eq!(rows.len(), 5);
+        for (r, &(g, row, ts, rm, out)) in rows.iter().zip(&want) {
+            assert_eq!(
+                r[..4],
+                [json!("s"), json!("test/cell"), json!(g), json!(row)]
+            );
+            for (v, w) in r[4..].iter().zip([ts, rm, out]) {
+                assert_eq!(v.as_f64().unwrap().to_bits(), w.to_bits());
+            }
+        }
+        t.write(&dir.join("stages.parquet")).unwrap();
         // No oracle, no rows: the table is still written, empty.
         cell.oracle = None;
         let mut t = output::stages_table();
-        let forest = cell.forest(&LoadOptions::default()).unwrap();
         assert_eq!(
             check_oracle(&cell, &forest, "s", &mut t).unwrap()["status"],
             "no oracle"
         );
         assert_eq!(t.len(), 0);
         std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn forests_that_disagree_with_the_setting_are_refused() {
-        let (cell, dir) = fixture_cell(&[4, 4], "refuse");
-        let mc = ManifestCell {
-            id: "test/cell".into(),
-            dir: dir.clone(),
-            status: "ready".into(),
-            key: "k".into(),
-            methods: "treewalker".into(),
-            variants: Vec::new(),
-            modes: vec!["serving".into()],
-        };
-        let ctx = context(RunConfig {
-            exact_sums: false,
-            ..RunConfig::default()
-        });
-        let mut l = load_methods(&cell, &mc, &ctx, 8).unwrap();
-        assert_eq!(l.exact_sums_mismatch(), None);
-        // A forest loaded with exact sums in a run that turns them off.
-        let exact = cell.forest(&LoadOptions::default()).unwrap();
-        l.record("stray", &exact, &[]);
-        assert!(l.exact_sums_mismatch().unwrap().contains("stray"));
-        // With exact sums on, every forest must report what production reports.
-        l.exact_sums = true;
-        l.records.clear();
-        l.base = String::new();
-        l.record("", &exact, &[]);
-        assert_eq!(l.exact_sums_mismatch(), None);
-        let off = cell.forest_at_width(128, false).unwrap();
-        l.record("chunked128", &off, &[]);
-        assert!(l.exact_sums_mismatch().unwrap().contains("chunked128"));
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn load_keys_carry_the_exact_sums_setting() {
-        let v = VariantSpec {
-            runtime: vec!["disable_unsplit".into()],
-            load: vec![
-                "disable_tree_ordering".into(),
-                "disable_bitset_intern".into(),
-            ],
-        };
-        assert_eq!(
-            load_key(&v, true),
-            "disable_bitset_intern+disable_tree_ordering"
-        );
-        assert_eq!(
-            load_key(&v, false),
-            "disable_bitset_intern+disable_tree_ordering+exact_sums_off"
-        );
-        assert_eq!(load_key(&VariantSpec::default(), true), "");
-        assert_eq!(load_key(&VariantSpec::default(), false), "exact_sums_off");
-        let o = load_options(&v, false).unwrap();
-        assert!(!o.exact_sums && o.disable_tree_ordering && o.disable_bitset_intern);
     }
 
     #[test]

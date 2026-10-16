@@ -179,29 +179,64 @@ fn mismatched_lengths_are_rejected() {
 
 #[test]
 fn bounds_near_usize_max_do_not_overflow() {
-    // Fixed groups of usize::MAX rows: the last group's end is clamped to the row
+    // Fixed groups wider than the input: the last group's end is clamped to the row
     // count instead of computed as start + width.
-    let unbounded = forest(usize::MAX);
+    const MAX: usize = 1 << 20;
+    let wide = forest(MAX);
     let data = rows(1500);
-    let mut p = unbounded.predictor();
+    let mut p = wide.predictor();
     let (mut whole, mut fixed) = (vec![0.0; 1500], vec![f64::NAN; 1500]);
     p.predict_group(&data, &mut whole);
-    p.predict_fixed(&data, usize::MAX, &mut fixed);
+    p.predict_fixed(&data, MAX, &mut fixed);
     assert_eq!(bits(&fixed), bits(&whole));
-    p.predict_fixed(&data, usize::MAX - 1, &mut fixed);
+    p.predict_fixed(&data, MAX - 1, &mut fixed);
     assert_eq!(bits(&fixed), bits(&whole));
+    rejects_with(
+        MAX,
+        "group width 18446744073709551615 exceeds max_group_width 1048576",
+        4,
+        |p, out| p.predict_fixed(&rows(4), usize::MAX, out),
+    );
     // Offsets past the row count fail their check rather than overflow a bound.
-    for max in [32, usize::MAX] {
+    for max in [32, MAX] {
         rejects_with(max, "offsets must end at the row count 4", 4, |p, out| {
             p.predict_groups(&rows(4), &[0, usize::MAX], out);
         });
     }
-    rejects_with(usize::MAX, "offsets must strictly increase", 4, |p, out| {
-        p.predict_groups(&rows(4), &[0, usize::MAX, 4], out);
+    // A decreasing pair fails before its width, which would underflow, is taken.
+    rejects_with(MAX, "offsets must strictly increase", 4, |p, out| {
+        p.predict_groups(&rows(4), &[0, MAX, 4], out);
     });
     rejects("group of 18446744073709551615 rows exceeds", 4, |p, out| {
         p.predict_groups(&rows(4), &[0, usize::MAX, 4], out);
     });
+}
+
+/// The panic message of creating a predictor for groups of up to `max` rows.
+fn predictor_panic(max: usize) -> String {
+    let forest = forest(max);
+    let err = catch_unwind(AssertUnwindSafe(|| forest.predictor())).unwrap_err();
+    err.downcast_ref::<String>()
+        .cloned()
+        .or_else(|| err.downcast_ref::<&str>().map(ToString::to_string))
+        .expect("a panic message")
+}
+
+#[test]
+fn scratch_beyond_memory_is_rejected_when_the_predictor_is_made() {
+    // Scratch grows with max_group_width: past what memory can address, or past what
+    // the allocator grants, creating the predictor panics instead of aborting.
+    let msg = predictor_panic(usize::MAX);
+    assert!(
+        msg.contains("max_group_width 18446744073709551615 needs more scratch"),
+        "{msg}"
+    );
+    let msg = predictor_panic(1 << 56);
+    assert!(
+        msg.contains("max_group_width 72057594037927936 needs")
+            && msg.contains("bytes of scratch, which cannot be allocated"),
+        "{msg}"
+    );
 }
 
 #[test]

@@ -70,24 +70,6 @@ pub struct LoadOptions {
     /// listed sets or two complements, and a bit for each pair of a listed set and a
     /// complement.
     pub max_rank_table_bytes: u64,
-    /// Until the research module's load ablations replace them: keep the trees in the
-    /// model's order instead of sorting trees with similar early splits next to each
-    /// other.
-    pub disable_tree_ordering: bool,
-    /// Until the research module's load ablations replace it: store every categorical
-    /// bitset, even when an identical one is already pooled.
-    pub disable_bitset_intern: bool,
-    /// Until the research module's load ablations replace it: the constant-prefix
-    /// depth, 0 to disable prefix groups; the default is 2.
-    pub prefix_depth: usize,
-    /// Until the research module's load ablations replace it: give every varying node
-    /// its own predicate instead of sharing one between identical splits.
-    pub disable_predicate_dedup: bool,
-    /// Until every model sums exactly: sum each row's leaf values exactly and round
-    /// once, when the model's leaves allow it (the default). False adds them per row
-    /// in `f64`, in the loaded tree order, as the full walk does;
-    /// [`Forest::exact_sums`](crate::Forest::exact_sums) then reports false.
-    pub exact_sums: bool,
 }
 
 impl Default for LoadOptions {
@@ -100,11 +82,6 @@ impl Default for LoadOptions {
             max_json_nesting: 64,
             max_config_bytes: 64 << 10,
             max_rank_table_bytes: 256 << 20,
-            disable_tree_ordering: false,
-            disable_bitset_intern: false,
-            prefix_depth: 2,
-            disable_predicate_dedup: false,
-            exact_sums: true,
         }
     }
 }
