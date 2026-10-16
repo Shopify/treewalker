@@ -1,20 +1,31 @@
 //! A call's groups through the kernel: per group, the bins of its first row and
-//! prefix starts, the walk over chunks of trees and the finish. A single row has bins
-//! for every feature, so its walk steps through varying splits as constants: it needs
-//! no masks and stops only at leaves, which all carry its row. Its one pass per chunk
-//! walks the roots in place and sums the leaf values from the walk's words, without
-//! items, leaf entries or difference arrays.
+//! prefix starts, the varying masks, the walk and resolve passes over chunks of
+//! trees, the leaf pass and the finish, at the narrowest mask width that holds the group:
+//! `u32` or `u64` by value, `Wide` masks up to [`WIDE_ROWS`] rows and runtime-width
+//! masks of [`rows::units`] 128-bit units above, both in an arena. A single
+//! row has bins for every feature, so its walk steps through varying splits as
+//! constants: it needs no masks and stops only at leaves, which all carry its row.
+//! Its one pass per chunk walks the roots in place and sums the leaf values from the
+//! walk's words, without items, leaf entries or difference arrays.
 //!
 //! Scratch lives in [`Scratch`], allocated once per predictor. Trees are processed in
-//! chunks whose working set fits the chunk budget of [`crate::rules::chunk_budget`],
-//! so scratch scales with a chunk rather than the model.
+//! chunks whose working set across passes (walk queues, stops, words, leaf entries
+//! and mask arena, and the predicates' masks) fits the chunk budget of
+//! [`crate::rules::chunk_budget`] at the group's mask width, so scratch scales with
+//! a chunk rather than the model, and wide masks get chunks of fewer trees.
 
 use super::counters::{Clock, Stats};
-use super::passes::{Walks, walk_with};
-use super::scratch::{Common, Scratch, Sums};
+use super::leaves::leaf_pass;
+use super::mask::rows::{self, Unit};
+use super::mask::{Mask, Wide};
+use super::passes::{Pass, Walks, walk_with};
+use super::precompute::{Lefts, Rows, SWEEP_TURNS};
+use super::resolve::{Carrier, Handle};
+use super::scan::{NoScan, Scanner, Scans};
+use super::scratch::{Common, Queues, Scratch, Sums, Width, Words, view};
 use super::walk::{self, MAX_PAD, Pools, Steps};
 use super::{Groups, WorkCounters};
-use crate::exact::{self, Plan, WIDE_SUMS};
+use crate::exact::{self, Plan, WIDE_SUMS, WideRuns};
 use crate::load::layout::LeafValues;
 use crate::model::Model;
 
@@ -100,9 +111,32 @@ impl Model {
                 stats.counters.groups += 1;
                 stats.counters.bins_computed += 1;
             }
-            // Groups of more than one row take the masked walk, which lands next.
-            assert!(constant, "a single row's constant walk");
-            self.constant_group::<STATS, ABLATE>(results, &mut s.common, options, stats);
+            // The rows the group's masks hold: its own, or the widest group's.
+            let held = if options.width_dispatch {
+                results.len()
+            } else {
+                s.common.max_rows
+            };
+            let c = &mut s.common;
+            macro_rules! group {
+                ($m:ty, $c:ty, $q:expr, $u:expr) => {
+                    self.masked_group::<F32, $m, $c, STATS, ABLATE>(
+                        rows, results, c, $q, $u, options, stats,
+                    )
+                };
+            }
+            match Width::of(held) {
+                Width::W32 if constant => {
+                    self.constant_group::<STATS, ABLATE>(results, c, options, stats);
+                }
+                Width::W32 => group!(u32, u32, &mut s.q32, 1),
+                Width::W64 => group!(u64, u64, &mut s.q64, 1),
+                Width::W128 => group!(Wide<2>, Handle, &mut s.handles, 1),
+                Width::W256 => group!(Wide<4>, Handle, &mut s.handles, 1),
+                Width::W512 => group!(Wide<8>, Handle, &mut s.handles, 1),
+                Width::W1024 => group!(Wide<16>, Handle, &mut s.handles, 1),
+                _ => unreachable!("wider groups take runtime-width masks"),
+            }
             if finalize {
                 let t = Clock::<STATS>::start();
                 self.finalize(&mut out[start..end]);
@@ -152,6 +186,221 @@ impl Model {
             bins: bins.as_ptr(),
             dummy: self.layout.dummy(),
         }
+    }
+
+    /// Tree sums of one group at mask type `M` carried by `C`, its masks of
+    /// `runtime_units` units of `M` for runtime-width carriers and one otherwise. `ABLATE` keeps research's
+    /// instantiation apart, as in [`Self::prefix_starts`].
+    #[inline(never)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the group, its scratch and its variant"
+    )]
+    fn masked_group<const F32: bool, M, C, const STATS: bool, const ABLATE: bool>(
+        &self,
+        rows: &[f64],
+        results: &mut [f64],
+        c: &mut Common,
+        queues: &mut Queues<C>,
+        runtime_units: usize,
+        options: Options,
+        stats: &mut Stats,
+    ) where
+        M: Mask + Words,
+        C: Carrier<M>,
+    {
+        let n = results.len();
+        let np = self.varying_predicates.len();
+        let (units, width) = if C::RUNTIME {
+            (runtime_units, Width::of(128 * runtime_units))
+        } else {
+            (1, Width::of(M::WIDTH))
+        };
+        let t = Clock::<STATS>::start();
+        // The all-rows mask, which leaves read, then each predicate's left and right
+        // masks, which the splits with that heavy side read.
+        let counters = &mut stats.counters;
+        if C::RUNTIME {
+            let words = 2 * units;
+            let masks = rows::words_mut(&mut c.masks[..(2 * np + 1) * units]);
+            let (all_rows, sides) = masks.split_at_mut(words);
+            // The sweep's copies of its running left mask, then the left and missing
+            // masks.
+            let bits = rows::words_mut(&mut c.bits);
+            let (lefts, bits) = bits.split_at_mut(SWEEP_TURNS * words);
+            let (left, missing) = bits[..2 * words].split_at_mut(words);
+            let sides = &mut Rows {
+                masks: sides,
+                words,
+            };
+            // Production (not ABLATE) always precomputes by the sweep: the defaults.
+            if ABLATE && !options.precompute {
+            } else if !ABLATE || options.sweep {
+                self.precompute_sweep::<F32, _, _, STATS>(
+                    rows,
+                    &mut c.order,
+                    &mut c.codes,
+                    sides,
+                    lefts,
+                    missing,
+                    counters,
+                );
+            } else {
+                self.precompute_brute_force::<F32, _, _, STATS>(rows, sides, left, counters);
+            }
+            all_rows.fill(u64::MAX);
+        } else {
+            let masks = &mut view::<M>(&mut c.masks)[..=2 * np];
+            let (all_rows, sides) = masks.split_first_mut().expect("the all-rows mask");
+            let (sides, _) = sides.as_chunks_mut::<2>();
+            let (mut left, mut missing) = (M::ZERO, M::ZERO);
+            // Production (not ABLATE) always precomputes by the sweep: the defaults.
+            if ABLATE && !options.precompute {
+            } else if !ABLATE || options.sweep {
+                // The sweep's copies of its running left mask: `left` itself for masks
+                // carried by value, else in the scratch.
+                let lefts = if <[M] as Lefts<M>>::TURNS == 1 {
+                    core::slice::from_mut(&mut left)
+                } else {
+                    &mut view::<M>(&mut c.bits)[..<[M] as Lefts<M>>::TURNS]
+                };
+                self.precompute_sweep::<F32, M, _, STATS>(
+                    rows,
+                    &mut c.order,
+                    &mut c.codes,
+                    sides,
+                    lefts,
+                    &mut missing,
+                    counters,
+                );
+            } else {
+                self.precompute_brute_force::<F32, M, _, STATS>(rows, sides, &mut left, counters);
+            }
+            *all_rows = M::ones_if(true);
+        }
+        let masks = &view::<M>(&mut c.masks)[..(2 * np + 1) * units];
+        let mut clock = t.lap(&mut stats.phases.precompute);
+        let arena = view::<M>(&mut c.arena);
+        let scratch = view::<M>(&mut c.scan).as_mut_ptr();
+        let p = self.pools(&c.bins);
+        let chunks = &c.chunks[width.index()];
+        let mut scanner = Scanner {
+            model: self,
+            rows,
+            monotonic: options.monotonic,
+            counters: WorkCounters::default(),
+        };
+        // Production passes a scan without data, so its passes cannot be merged with
+        // research's, whose scan holds the scanner.
+        let mut scan = Scans::<F32, STATS>(&mut scanner);
+        let walks = Walks::of::<ABLATE>(options, c.tuning.varying);
+        for chunk in chunks {
+            assert!(
+                queues.items.len() > chunk.leaves + MAX_PAD
+                    && queues.next.len() > chunk.leaves
+                    && queues.leaves.len() > chunk.leaves
+                    && c.stops.len() > chunk.leaves + MAX_PAD
+                    && c.words.len() > chunk.leaves + MAX_PAD
+                    && (!C::ARENA || arena.len() >= (chunk.slots + 3) * C::slot_units(units))
+                    && (!C::ARENA || C::RUNTIME || queues.listed.len() > chunk.leaves)
+                    && (!C::RUNTIME || c.scan.len() >= units),
+                "chunk scratch"
+            );
+            let roots = &c.roots[chunk.trees.0..chunk.trees.1];
+            let (stops, words) = (&mut c.stops[..], &mut c.words[..]);
+            let mut pass = Pass {
+                p: &p,
+                roots,
+                n,
+                units,
+                masks,
+                scratch,
+                stats: &mut *stats,
+            };
+            macro_rules! passes {
+                ($scan:expr) => {
+                    match (options.precompute, options.unsplit) {
+                        (true, true) => pass.run::<C, STATS, ABLATE, false, false>(
+                            walks, arena, queues, stops, words, $scan,
+                        ),
+                        (true, false) => pass.run::<C, STATS, ABLATE, false, true>(
+                            walks, arena, queues, stops, words, $scan,
+                        ),
+                        (false, true) => pass.run::<C, STATS, ABLATE, true, false>(
+                            walks, arena, queues, stops, words, $scan,
+                        ),
+                        (false, false) => pass.run::<C, STATS, ABLATE, true, true>(
+                            walks, arena, queues, stops, words, $scan,
+                        ),
+                    }
+                };
+            }
+            // SAFETY: the assert above sizes the scratch for the chunk, and the
+            // layout's children and slots are in range by construction.
+            let (n_leaves, n_full) = unsafe {
+                // Production (not ABLATE) runs the default options only, precompute
+                // and unsplit, so it instantiates only their pass.
+                if ABLATE {
+                    passes!(&mut scan)
+                } else {
+                    pass.run::<C, STATS, ABLATE, false, false>(
+                        walks,
+                        arena,
+                        queues,
+                        stops,
+                        words,
+                        &mut NoScan,
+                    )
+                }
+            };
+            clock = Clock::<STATS>::start();
+            let (full, entries) = queues.leaves[..n_leaves].split_at(n_full);
+            let runs = match (&self.layout.leaves, &mut c.sums) {
+                (LeafValues::Fixed(values), Sums::Fixed(diff)) => {
+                    let half = diff.len() / 2;
+                    let (even, odd) = diff.split_at_mut(half);
+                    leaf_pass::<M, C, _, STATS>(
+                        entries,
+                        full,
+                        arena,
+                        units,
+                        values,
+                        &mut even[..=n],
+                        &mut odd[..=n],
+                    )
+                }
+                (
+                    LeafValues::Wide(values),
+                    Sums::Wide {
+                        wide, diff, sums, ..
+                    },
+                ) => {
+                    let limbs = (n + 1) * wide.limbs();
+                    let half = diff.len() / 2;
+                    let (even, odd) = diff.split_at_mut(half);
+                    leaf_pass::<M, C, _, STATS>(
+                        entries,
+                        full,
+                        arena,
+                        units,
+                        values,
+                        &mut WideRuns::new(*wide, &mut even[..limbs], sums),
+                        &mut WideRuns::new(*wide, &mut odd[..limbs], &mut []),
+                    )
+                }
+                _ => unreachable!("leaf values follow the plan"),
+            };
+            clock = clock.lap(&mut stats.phases.leaf_pass);
+            if STATS {
+                stats.counters.runs_written += runs;
+            }
+        }
+        if STATS {
+            stats.counters.scan_rows += scanner.counters.scan_rows;
+            stats.counters.scan_evals += scanner.counters.scan_evals;
+        }
+        self.finish(results, &mut c.sums);
+        clock.lap(&mut stats.phases.finish);
     }
 
     /// Tree sums of a group whose walks stop only at leaves: rows whose bins hold

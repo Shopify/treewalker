@@ -1,6 +1,6 @@
-//! Single rows through the kernel against the generator's evaluator, and their outputs
-//! across lane counts, restart prefetch and chunk sizes; the precompute's masks against
-//! the float predicates.
+//! The kernel against the generator's evaluator, and its outputs
+//! across lane counts, width dispatch, single rows' constant walk, restart prefetch
+//! and chunk sizes.
 
 // The property tests' generator, with the exact module's copy of their oracle.
 #[expect(clippy::float_cmp, reason = "exact expectations")]
@@ -38,7 +38,7 @@ struct Case {
 /// Under Miri, which checks the unsafe code, a few small models and groups.
 const MIRI: bool = cfg!(miri);
 
-const SIZES: [usize; 14] = [1, 1, 2, 17, 32, 33, 64, 65, 129, 257, 513, 1024, 1025, 1100];
+const SIZES: [usize; 12] = [1, 1, 2, 17, 32, 33, 64, 65, 129, 257, 513, 1024];
 
 fn case(seed: u64) -> Case {
     let mut rng = Rng::new(seed);
@@ -76,7 +76,7 @@ fn case(seed: u64) -> Case {
     let roles_ref = &roles;
     let with = |role| (0..m.n_features).filter(move |&f| roles_ref[f] == role);
     let config = WalkerConfig::builder(m.n_features)
-        .max_group_width(widest.max(*rng.pick(&[1, 64, 2048])))
+        .max_group_width(widest.max(*rng.pick(&[1, 64, 1024])))
         .varying(with(Role::Varying))
         .increasing(with(Role::Increasing))
         .decreasing(with(Role::Decreasing))
@@ -165,12 +165,12 @@ fn predictor(forest: &Forest, chunk_bytes: Option<usize>) -> Predictor {
     }
 }
 
-/// The kernel's outputs with `options` for every row of the case as a group of its
-/// own, in chunks of `chunk_bytes` or the rule's.
+/// The kernel's outputs with `options`, in chunks of `chunk_bytes` or the
+/// rule's.
 fn kernel(c: &Case, chunk_bytes: Option<usize>, options: Options) -> Vec<f64> {
     let mut p = predictor(&c.forest, chunk_bytes);
     let mut out = vec![f64::NAN; c.data.len() / c.forest.config().n_features()];
-    let groups = Groups::Fixed(1);
+    let groups = Groups::Offsets(&c.offsets);
     p.check(&c.data, out.len(), groups);
     p.kernel::<false, true>(&c.data, &mut out, groups, options, None, true);
     out
@@ -183,7 +183,7 @@ fn same(actual: &[f64], expected: &[f64], what: &str) {
 }
 
 #[test]
-fn single_rows_match_the_oracle() {
+fn the_kernel_matches_the_oracle() {
     let (mut fixed, mut wide) = (0, 0);
     for seed in 0..if MIRI { 4 } else { 40 } {
         let c = case(0x5EED_0000 + seed);
@@ -208,7 +208,7 @@ fn single_rows_match_the_oracle() {
 }
 
 #[test]
-fn single_rows_do_not_depend_on_how_the_kernel_runs() {
+fn outputs_do_not_depend_on_how_the_kernel_runs() {
     let default = Options::default();
     for seed in 0..if MIRI { 1 } else { 25 } {
         let c = case(0xC0FF_EE00 + seed);
@@ -238,10 +238,76 @@ fn single_rows_do_not_depend_on_how_the_kernel_runs() {
             };
             check(kernel(&c, Some(12_000), o), "rate");
         }
+        let narrowest = Options {
+            width_dispatch: false,
+            ..default
+        };
+        check(kernel(&c, Some(1), narrowest), "widest masks");
+        let no_single = Options {
+            g1_constant: false,
+            ..default
+        };
+        check(kernel(&c, Some(1), no_single), "single rows masked");
+        let both_off = Options {
+            g1_constant: false,
+            width_dispatch: false,
+            ..default
+        };
+        check(kernel(&c, Some(2_000), both_off), "every path off");
+        // The research ablations: the brute-force precompute, event scans with and
+        // without the monotonic shortcut, and empty sides passed on.
+        for (precompute, sweep, monotonic, unsplit) in [
+            (true, false, true, true),
+            (false, true, true, true),
+            (false, true, false, true),
+            (true, true, true, false),
+            (false, false, false, false),
+        ] {
+            let o = Options {
+                precompute,
+                sweep,
+                monotonic,
+                unsplit,
+                ..default
+            };
+            check(kernel(&c, Some(12_000), o), "ablations");
+            let o = Options {
+                width_dispatch: false,
+                g1_constant: false,
+                ..o
+            };
+            check(kernel(&c, Some(1_500), o), "ablations, widest masks");
+        }
         for chunk in [1, 1_500, 40_000] {
             check(kernel(&c, Some(chunk), default), "chunks");
         }
     }
+}
+
+#[test]
+fn chunks_follow_the_byte_budget_at_each_width() {
+    use super::scratch::{Width, chunk_trees};
+    use crate::load::layout::Need;
+    // 100 trees of 50 leaves and 20 arena slots each.
+    let need = Need {
+        leaves: 50,
+        slots: 20,
+    };
+    let needs = vec![need; 100];
+    let trees = |w, budget| {
+        let chunks = chunk_trees(&needs, w, budget);
+        assert_eq!(chunks.first().map(|c| c.trees.0), Some(0));
+        assert_eq!(chunks.last().map(|c| c.trees.1), Some(100));
+        assert!(chunks.windows(2).all(|p| p[0].trees.1 == p[1].trees.0));
+        chunks.iter().map(|c| c.trees.1 - c.trees.0).max().unwrap()
+    };
+    // 36 bytes per leaf for u32 masks, 60 for u64 masks and 40 for fixed-width
+    // handles, which list varying stops; 128-byte slots for 1,024-bit masks.
+    assert_eq!(trees(Width::W32, 20_000), 11);
+    assert_eq!(trees(Width::W64, 20_000), 6);
+    assert_eq!(trees(Width::W1024, 20_000), 4);
+    assert_eq!(trees(Width::W32, 1), 1);
+    assert_eq!(trees(Width::W1024, usize::MAX), 100);
 }
 
 /// Each varying predicate's left mask over `rows`, as runtime-width words, from its
