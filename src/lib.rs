@@ -75,8 +75,10 @@ mod error;
 // Until the new kernel uses them, the wide accumulator and the runs are unused.
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod exact;
+mod forest;
 mod legacy;
-// The new kernel's parts, unused until the kernel that uses them lands.
+// The new kernel's parts. Every Forest builds the new model, but until the kernel
+// that reads it lands, most of it is unused.
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod load;
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
@@ -91,9 +93,9 @@ mod rules;
 
 pub use config::{LoadOptions, WalkerConfig, WalkerConfigBuilder};
 pub use error::LoadError;
-pub use legacy::forest::Forest;
-pub use legacy::parser::ModelFormat;
+pub use forest::Forest;
 pub use legacy::predict::Predictor;
+pub use load::parse::ModelFormat;
 
 // The README's and the loading guide's Rust examples compile as doctests.
 #[cfg(doctest)]
