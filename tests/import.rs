@@ -442,9 +442,35 @@ fn grouping_schema_and_configuration_validation() {
         .unwrap();
     assert_eq!(roles(&all), [inc, varying, varying, constant]);
     let builder = |nf: usize| WalkerConfig::builder(nf).max_group_width(1).varying([]);
-    for nf in [0, 65, 128, usize::MAX] {
+    // Treelite's num_feature is a 32-bit signed integer.
+    for nf in [0, i32::MAX as usize + 1, usize::MAX] {
         assert!(builder(nf).build().is_err());
     }
+    for nf in [65, 128, 300, i32::MAX as usize] {
+        let c = builder(nf)
+            .varying([nf - 1])
+            .increasing([0])
+            .build()
+            .unwrap();
+        assert!(c.is_varying(nf - 1) && c.is_varying(0) && c.is_increasing(0));
+        assert!(!c.is_varying(nf / 2) && !c.is_varying(nf) && !c.is_decreasing(0));
+    }
+    // Equal role sets compare equal however they were declared.
+    let listed = builder(130).varying(0..130).build().unwrap();
+    let all = WalkerConfig::builder(130)
+        .max_group_width(1)
+        .all_varying()
+        .build()
+        .unwrap();
+    assert_eq!(listed, all);
+    assert_eq!(
+        builder(300).varying([5, 299]).build().unwrap(),
+        builder(300).varying([299, 5]).build().unwrap()
+    );
+    assert_ne!(
+        builder(300).varying([299]).increasing([5]).build().unwrap(),
+        builder(300).varying([5, 299]).build().unwrap()
+    );
     assert!(builder(1).max_group_width(0).build().is_err());
     for width in [129, 1_000_000, usize::MAX] {
         assert!(builder(1).max_group_width(width).build().is_ok());
