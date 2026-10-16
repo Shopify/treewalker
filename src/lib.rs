@@ -80,6 +80,8 @@ mod legacy;
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod load;
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
+mod model;
+#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod predict;
 #[cfg(feature = "research")]
 #[path = "legacy/research.rs"]
