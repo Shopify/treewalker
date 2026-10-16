@@ -1,6 +1,7 @@
-//! The kernel against the exact full walk and the generator's evaluator, and its outputs
-//! across lane counts, width dispatch, single rows' constant walk, restart prefetch
-//! and chunk sizes.
+//! The kernel's outputs across lane counts, width dispatch, single rows' constant walk,
+//! prefetch distances and rates, the research ablations and chunk sizes, and the
+//! precompute's masks against the float predicates. The kernel against the exact oracle
+//! is the property tests' (`tests/property.rs`).
 
 // The property tests' generator, with the exact module's copy of their oracle.
 #[expect(clippy::float_cmp, reason = "exact expectations")]
@@ -29,7 +30,6 @@ enum Role {
 }
 
 struct Case {
-    model: model::Model,
     forest: Forest,
     data: Vec<f64>,
     offsets: Vec<usize>,
@@ -112,7 +112,6 @@ fn case(seed: u64) -> Case {
         }))
         .collect();
     Case {
-        model: m,
         forest,
         data,
         offsets,
@@ -180,34 +179,6 @@ fn same(actual: &[f64], expected: &[f64], what: &str) {
     for (r, (a, e)) in actual.iter().zip(expected).enumerate() {
         assert_eq!(a.to_bits(), e.to_bits(), "{what}: row {r}: {a:e} != {e:e}");
     }
-}
-
-#[test]
-fn the_kernel_matches_the_full_walk_and_the_oracle() {
-    let (mut fixed, mut wide) = (0, 0);
-    for seed in 0..if MIRI { 4 } else { 40 } {
-        let c = case(0x5EED_0000 + seed);
-        let nf = c.forest.config().n_features();
-        let mut full = vec![f64::NAN; c.data.len() / nf];
-        c.forest.predict_full_walk(&c.data, &mut full);
-        let production = kernel(&c, None, Options::default());
-        same(&production, &full, &format!("case {seed}: the full walk"));
-        // The generator's own evaluation of each row, summed by the big-integer oracle.
-        let expected: Vec<f64> = c
-            .data
-            .chunks_exact(nf)
-            .map(|row| c.model.predict(row))
-            .collect();
-        same(&production, &expected, &format!("case {seed}: the oracle"));
-        match c.forest.model.plan {
-            crate::exact::Plan::Fixed(_) => fixed += 1,
-            crate::exact::Plan::Wide(_) => wide += 1,
-        }
-    }
-    assert!(
-        MIRI || (fixed > 10 && wide > 3),
-        "{fixed} with i128 sums, {wide} wide"
-    );
 }
 
 #[test]
