@@ -72,18 +72,8 @@
 
 mod config;
 mod error;
-// Until today's loader is deleted, it calls exact::scale, which the new kernel does
-// not.
-#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod exact;
 mod forest;
-// Today's loader still loads every Forest's input until it is deleted; its model and
-// kernel are unused.
-#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
-mod legacy;
-// Until today's loader is deleted, every load reads its input into memory first, so
-// the decoders' reader and file paths are unused.
-#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod load;
 mod model;
 mod predict;

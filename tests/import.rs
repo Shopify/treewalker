@@ -651,9 +651,24 @@ fn rejects_bad_json_nodes_and_topology() {
         )
         .is_err()
     );
+    // Any u32 category ID loads and routes like the full walk.
     let mut v = simd_json::to_owned_value(&mut bytes("categories_left.json")).unwrap();
-    v["trees"][0]["nodes"][0]["category_list"] = Value::Array(Box::new(vec![u32::MAX.into()]));
-    assert!(matches!(parse_json(&v), Err(LoadError::Limit(_))));
+    v["trees"][0]["nodes"][0]["category_list"] =
+        Value::Array(Box::new(vec![(u32::MAX - 1).into(), u32::MAX.into()]));
+    let forest = parse_json(&v).unwrap();
+    let rows: Vec<f64> = [
+        4_294_967_295.0,
+        4_294_967_295.9,
+        4_294_967_294.0,
+        4_294_967_296.0,
+    ]
+    .iter()
+    .flat_map(|&x| [x, x])
+    .collect();
+    let (mut out, mut reference) = (vec![0.0; 4], vec![0.0; 4]);
+    forest.predictor().predict_group(&rows, &mut out);
+    forest.predict_full_walk(&rows, &mut reference);
+    assert_eq!(out, reference);
 }
 
 // Offset map for mutating *real Treelite-generated* checkpoints. Not a serializer.
@@ -851,15 +866,17 @@ fn real_unsupported_exports_return_capability_errors() {
 }
 
 #[test]
-fn deep_trees_and_deep_json_are_bounded() {
+fn deep_trees_load_and_json_nesting_is_bounded() {
+    // A chain of 300 splits, past the old 256-edge depth limit.
     let mut model = model_json();
     let split = model["trees"][0]["nodes"][0].clone();
     let leaf = model["trees"][0]["nodes"][1].clone();
-    let depth = 258usize;
+    let depth = 300usize;
     let mut nodes = Vec::new();
     for i in 0..depth {
         let mut n = split.clone();
         n["node_id"] = (i as i64).into();
+        n["threshold"] = (i as f64).into();
         n["left_child"] = (if i + 1 == depth { 2 * depth } else { i + 1 } as i64).into();
         n["right_child"] = ((depth + i) as i64).into();
         nodes.push(n);
@@ -867,11 +884,25 @@ fn deep_trees_and_deep_json_are_bounded() {
     for i in depth..=2 * depth {
         let mut n = leaf.clone();
         n["node_id"] = (i as i64).into();
+        n["leaf_value"] = (i as f64).into();
         nodes.push(n);
     }
     model["trees"][0]["num_nodes"] = (nodes.len() as i64).into();
     model["trees"][0]["nodes"] = Value::Array(Box::new(nodes));
-    assert!(matches!(parse_json(&model), Err(LoadError::Limit(_))));
+    let forest = parse_json(&model).unwrap();
+    let feature = split["split_feature_id"].as_u64().unwrap() as usize;
+    let rows: Vec<f64> = (0..128)
+        .flat_map(|r: i32| {
+            let mut row = [0.5; 2];
+            row[feature] = f64::from(r).mul_add(2.5, -10.0);
+            row
+        })
+        .collect();
+    let (mut out, mut reference) = (vec![0.0; 128], vec![0.0; 128]);
+    forest.predictor().predict_group(&rows, &mut out);
+    forest.predict_full_walk(&rows, &mut reference);
+    assert_eq!(out, reference);
+
     let nested = format!("{}0{}", "[".repeat(1000), "]".repeat(1000));
     assert!(matches!(
         Forest::from_bytes(
