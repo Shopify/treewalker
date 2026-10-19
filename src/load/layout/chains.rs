@@ -575,6 +575,7 @@ impl<'a> Graph<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rng::Rng;
 
     /// Sets as bits over a domain of `domain` codes, sorted and distinct as the
     /// build makes them, and as lists: a set with code 0 is the complement of the
@@ -643,27 +644,24 @@ mod tests {
 
     #[test]
     fn covers_are_chains_of_the_fewest() {
-        let mut state = 0x00C4_A125_u64;
-        let mut next = || {
-            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = state;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            z ^ (z >> 31)
-        };
+        let mut rng = Rng::new(0x00C4_A125);
         for round in 0..2000 {
-            let domain = 1 + (next() % 8) as u32;
-            let n = (next() % 13) as usize;
+            let domain = 1 + rng.below_mod(8) as u32;
+            let n = rng.below_mod(13);
             // Mostly small sets, so that some nest.
-            let sparse = next() % 2 == 0;
-            let scale = if next() % 2 == 0 { 1 } else { 41 };
+            let sparse = rng.below_mod(2) == 0;
+            let scale = if rng.below_mod(2) == 0 { 1 } else { 41 };
             let family = Family::new(
                 domain,
                 scale,
                 (0..n)
                     .map(|_| {
-                        let s = next() & ((1 << domain) - 1);
-                        if sparse { s & next() & next() } else { s }
+                        let s = rng.next_u64() & ((1 << domain) - 1);
+                        if sparse {
+                            s & rng.next_u64() & rng.next_u64()
+                        } else {
+                            s
+                        }
                     })
                     .collect(),
             );
@@ -717,24 +715,20 @@ mod tests {
 
     #[test]
     fn covers_of_many_sets_match_a_plain_matching() {
-        let mut state = 0x5EED_u64;
-        let mut next = move || {
-            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = state;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            z ^ (z >> 31)
-        };
+        let mut rng = Rng::new(0x5EED);
         for round in 0..60 {
             // Domains past a word, with codes of every frequency.
-            let domain = 2 + (next() % 150) as u32;
-            let n = 1 + (next() % 300) as usize;
+            let domain = 2 + rng.below_mod(150) as u32;
+            let n = 1 + rng.below_mod(300);
             let mut sets: Vec<(bool, Vec<u32>)> = (0..n)
                 .map(|_| {
-                    let complement = next() % 2 == 0;
-                    let len = (next() % 8) as u32;
+                    let complement = rng.below_mod(2) == 0;
+                    let len = rng.below_mod(8);
                     let mut list: Vec<u32> = (0..len)
-                        .map(|_| 1 + (next() % u64::from(domain - 1)).min(next() % 12) as u32)
+                        .map(|_| {
+                            let code = rng.below_mod(domain as usize - 1);
+                            1 + code.min(rng.below_mod(12)) as u32
+                        })
                         .collect();
                     list.sort_unstable();
                     list.dedup();

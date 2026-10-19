@@ -4,6 +4,7 @@ use super::ops::{WordMaps, add_wide_runs};
 use super::rows::{self, Unit};
 use super::{Mask, Wide, scalar};
 use crate::exact::RunSink;
+use crate::rng::Rng;
 
 /// Group sizes at and around every word and width boundary.
 const SIZES: [usize; 19] = [
@@ -76,23 +77,6 @@ macro_rules! impl_words {
 
 impl_words!(2, 4, 8, 16);
 
-/// SplitMix64.
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
-    }
-}
-
 fn bit(w: &[u64; 16], r: usize) -> bool {
     w[r / 64] >> (r % 64) & 1 != 0
 }
@@ -115,29 +99,29 @@ fn rows(n: usize) -> [u64; 16] {
 /// one run.
 fn random(rng: &mut Rng, n: usize) -> [u64; 16] {
     let mut w = [0; 16];
-    match rng.below(6) {
+    match rng.below_mod(6) {
         0..=1 => {
             for x in &mut w {
-                *x = match rng.below(4) {
-                    0 => rng.next() & rng.next() & rng.next(),
-                    1 => rng.next(),
-                    2 => rng.next() | rng.next(),
-                    _ => !(rng.next() & rng.next() & rng.next() & rng.next()),
+                *x = match rng.below_mod(4) {
+                    0 => rng.next_u64() & rng.next_u64() & rng.next_u64(),
+                    1 => rng.next_u64(),
+                    2 => rng.next_u64() | rng.next_u64(),
+                    _ => !(rng.next_u64() & rng.next_u64() & rng.next_u64() & rng.next_u64()),
                 };
             }
         }
         2..=4 => {
-            let scale = [4, 80, 400][rng.below(3)];
-            let mut r = rng.below(scale.min(n));
+            let scale = [4, 80, 400][rng.below_mod(3)];
+            let mut r = rng.below_mod(scale.min(n));
             while r < n {
-                let len = 1 + rng.below(scale);
+                let len = 1 + rng.below_mod(scale);
                 set_range(&mut w, r, (r + len).min(n));
-                r += len + 1 + rng.below(scale);
+                r += len + 1 + rng.below_mod(scale);
             }
         }
         _ => {
-            let start = rng.below(n);
-            let end = start + 1 + rng.below(n - start);
+            let start = rng.below_mod(n);
+            let end = start + 1 + rng.below_mod(n - start);
             set_range(&mut w, start, end);
         }
     }
@@ -290,7 +274,7 @@ fn check_pair<M: Words>(a: [u64; 16], b: [u64; 16], n: usize, rng: &mut Rng) {
         assert_eq!(M::select(c, ma, mb).words(), scalar::select(c, &a, &b));
     }
     if n > 0 {
-        let r = rng.below(n);
+        let r = rng.below_mod(n);
         let mut flipped = a;
         flipped[r / 64] ^= 1 << (r % 64);
         assert_ne!(ma, M::from_words(&flipped));
@@ -301,11 +285,11 @@ fn check_pair<M: Words>(a: [u64; 16], b: [u64; 16], n: usize, rng: &mut Rng) {
         assert_eq!(once, ma, "flip({r}) twice");
     }
     ma.check_first(n);
-    check_runs(ma, n, 1 + rng.below(1000) as i64);
+    check_runs(ma, n, 1 + rng.below_mod(1000) as i64);
 }
 
 fn check<M: Words>(seed: u64) {
-    let mut rng = Rng(seed);
+    let mut rng = Rng::new(seed);
     let width = M::WIDTH;
 
     // Construction.
@@ -334,7 +318,7 @@ fn check<M: Words>(seed: u64) {
     let sizes = SIZES
         .iter()
         .copied()
-        .chain((0..if MIRI { 0 } else { 8 }).map(|_| 1 + rng.below(width)))
+        .chain((0..if MIRI { 0 } else { 8 }).map(|_| 1 + rng.below_mod(width)))
         .filter(|&n| n <= width)
         .collect::<Vec<_>>();
     for n in sizes {
@@ -350,9 +334,9 @@ fn check<M: Words>(seed: u64) {
         }
         for _ in 0..if MIRI { 4 } else { 300 } {
             let a = random(&mut rng, n);
-            let b = match rng.below(3) {
+            let b = match rng.below_mod(3) {
                 0 => a,
-                1 => fixed[rng.below(fixed.len())],
+                1 => fixed[rng.below_mod(fixed.len())],
                 _ => random(&mut rng, n),
             };
             check_pair::<M>(a, b, n, &mut rng);
@@ -466,30 +450,30 @@ fn random_rows(rng: &mut Rng, n: usize) -> Vec<Unit> {
             w[r / 64] |= 1 << (r % 64);
         }
     };
-    match rng.below(5) {
+    match rng.below_mod(5) {
         0..=1 => {
             for x in w.iter_mut() {
-                *x = match rng.below(5) {
+                *x = match rng.below_mod(5) {
                     0 => 0,
-                    1 => rng.next() & rng.next() & rng.next(),
-                    2 => rng.next(),
+                    1 => rng.next_u64() & rng.next_u64() & rng.next_u64(),
+                    2 => rng.next_u64(),
                     3 => u64::MAX,
-                    _ => rng.next() | rng.next(),
+                    _ => rng.next_u64() | rng.next_u64(),
                 };
             }
         }
         2..=3 => {
-            let scale = [4, 80, 400, 3000][rng.below(4)];
-            let mut r = rng.below(scale.min(n));
+            let scale = [4, 80, 400, 3000][rng.below_mod(4)];
+            let mut r = rng.below_mod(scale.min(n));
             while r < n {
-                let len = 1 + rng.below(scale);
+                let len = 1 + rng.below_mod(scale);
                 set(w, r, (r + len).min(n));
-                r += len + 1 + rng.below(scale);
+                r += len + 1 + rng.below_mod(scale);
             }
         }
         _ => {
-            let start = rng.below(n);
-            let end = start + 1 + rng.below(n - start);
+            let start = rng.below_mod(n);
+            let end = start + 1 + rng.below_mod(n - start);
             set(w, start, end);
         }
     }
@@ -521,7 +505,7 @@ fn row_bit(m: &[Unit], r: usize) -> bool {
 #[test]
 #[expect(clippy::many_single_char_names, reason = "masks and their sides")]
 fn runtime_width() {
-    let mut rng = Rng(7);
+    let mut rng = Rng::new(7);
     let sizes: &[usize] = if MIRI {
         &[1, 65, 128, 129, 1025]
     } else {
@@ -542,7 +526,7 @@ fn runtime_width() {
         assert_eq!(rows::Span::first(n), span_of(&all), "first({n})'s span");
         for _ in 0..if MIRI { 3 } else { 200 } {
             let a = random_rows(&mut rng, n);
-            let b = match rng.below(4) {
+            let b = match rng.below_mod(4) {
                 0 => a.clone(),
                 1 => all.clone(),
                 _ => random_rows(&mut rng, n),
@@ -630,14 +614,14 @@ fn runtime_width() {
 /// units, on masks of random words, sparse words and none.
 #[test]
 fn span_tracker() {
-    let mut rng = Rng(11);
+    let mut rng = Rng::new(11);
     for _ in 0..if MIRI { 20 } else { 2000 } {
-        let start = rng.below(1 << 20);
-        let n = rng.below(40);
-        let word = |rng: &mut Rng| match rng.below(4) {
+        let start = rng.below_mod(1 << 20);
+        let n = rng.below_mod(40);
+        let word = |rng: &mut Rng| match rng.below_mod(4) {
             0 | 1 => 0,
-            2 => 1 << rng.below(64),
-            _ => rng.next(),
+            2 => 1 << rng.below_mod(64),
+            _ => rng.next_u64(),
         };
         let units: Vec<[[u64; 2]; 2]> = (0..n)
             .map(|_| {

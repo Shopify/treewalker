@@ -20,18 +20,12 @@
 
 mod common;
 
-use common::model::{self, Feature, Precision, Settings};
+use common::bits::same;
+use common::groups::{Role, config, group, offsets};
+use common::model::{self, Settings};
 use common::rng::{Rng, mix};
 use treewalker_gbdt::research::LoadAblation;
-use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Role {
-    Constant,
-    Varying,
-    Increasing,
-    Decreasing,
-}
+use treewalker_gbdt::{Forest, LoadOptions, ModelFormat};
 
 /// Generate the case `name` for `sizes`, with ordinary leaves or leaves past the
 /// 126-bit rule (`wide`), and most features constant or all varying; check every row
@@ -73,16 +67,8 @@ fn check(name: &str, sizes: &[usize], wide: bool, all_varying: bool) {
             }
         })
         .collect();
-    let roles_ref = &roles;
-    let with = |role| (0..nf).filter(move |&f| roles_ref[f] == role);
     let widest = *sizes.iter().max().unwrap();
-    let config = WalkerConfig::builder(nf)
-        .max_group_width(widest + rng.below(2) * 100)
-        .varying(with(Role::Varying))
-        .increasing(with(Role::Increasing))
-        .decreasing(with(Role::Decreasing))
-        .build()
-        .unwrap();
+    let config = config(nf, widest + rng.below(2) * 100, &roles);
     // No prefix groups, or the rule's.
     let ablation = LoadAblation {
         prefix_depth: *rng.pick(&[Some(0), None]),
@@ -98,59 +84,16 @@ fn check(name: &str, sizes: &[usize], wide: bool, all_varying: bool) {
     .unwrap_or_else(|e| panic!("{name}: load: {e}"));
     let data: Vec<f64> = sizes
         .iter()
-        .flat_map(|&n| group(&mut rng, &features, &roles, m.precision, n))
+        .flat_map(|&n| group(&mut rng, &features, &roles, m.precision, n, f64::total_cmp))
         .collect();
     let n = data.len() / nf;
     let mut full = vec![f64::NAN; n];
     forest.predict_full_walk(&data, &mut full);
-    let offsets: Vec<usize> = std::iter::once(0)
-        .chain(sizes.iter().scan(0, |end, &n| {
-            *end += n;
-            Some(*end)
-        }))
-        .collect();
     let mut out = vec![f64::NAN; n];
-    forest.predictor().predict_groups(&data, &offsets, &mut out);
-    for (r, (a, e)) in out.iter().zip(&full).enumerate() {
-        assert_eq!(
-            a.to_bits(),
-            e.to_bits(),
-            "{name} sizes {sizes:?}: row {r}: {a:e} != {e:e}"
-        );
-    }
-}
-
-/// One group's rows: constant features equal in every row, monotonic ones ordered.
-fn group(
-    rng: &mut Rng,
-    features: &[Feature],
-    roles: &[Role],
-    precision: Precision,
-    n: usize,
-) -> Vec<f64> {
-    let columns: Vec<Vec<f64>> = features
-        .iter()
-        .zip(roles)
-        .map(|(f, &role)| match role {
-            Role::Constant => vec![model::input(rng, f, precision, true); n],
-            Role::Varying => (0..n)
-                .map(|_| model::input(rng, f, precision, true))
-                .collect(),
-            Role::Increasing | Role::Decreasing => {
-                let mut column: Vec<f64> = (0..n)
-                    .map(|_| model::input(rng, f, precision, false))
-                    .collect();
-                column.sort_by(f64::total_cmp);
-                if role == Role::Decreasing {
-                    column.reverse();
-                }
-                column
-            }
-        })
-        .collect();
-    (0..n)
-        .flat_map(|r| columns.iter().map(move |c| c[r]))
-        .collect()
+    forest
+        .predictor()
+        .predict_groups(&data, &offsets(sizes), &mut out);
+    same(&out, &full, &format!("{name} sizes {sizes:?}"));
 }
 
 #[test]

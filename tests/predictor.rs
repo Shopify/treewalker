@@ -1,21 +1,23 @@
 //! Predictor call contracts: group shapes, empty input, and the panics that reject
 //! invalid calls before any output is written.
+#![expect(clippy::float_cmp, reason = "the generator's exact category test")]
+
+mod common;
+
+use common::bits::bits;
+use common::fixtures;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, Predictor, WalkerConfig};
 
 /// The two-feature sigmoid fixture: feature 0 varies, feature 1 is constant.
 fn forest(max_group_width: usize) -> Forest {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/import/sigmoid_f64.bin"
-    );
     let config = WalkerConfig::builder(2)
         .max_group_width(max_group_width)
         .varying([0])
         .build()
         .unwrap();
     Forest::from_bytes(
-        &std::fs::read(path).unwrap(),
+        &fixtures::bytes("sigmoid_f64.bin"),
         ModelFormat::TreeliteBinaryV4,
         config,
         &LoadOptions::default(),
@@ -29,10 +31,6 @@ fn rows(n: usize) -> Vec<f64> {
     (0..n)
         .flat_map(|r| [(r % 17) as f64 / 4.0 - 1.0, 0.25])
         .collect()
-}
-
-fn bits(values: &[f64]) -> Vec<u64> {
-    values.iter().map(|v| v.to_bits()).collect()
 }
 
 /// Run `call` on a NaN-filled output of `n` rows, require a panic whose message
@@ -169,7 +167,7 @@ fn bounds_near_usize_max_do_not_overflow() {
     assert_eq!(bits(&fixed), bits(&whole));
     rejects_with(
         MAX,
-        "group width 18446744073709551615 exceeds max_group_width 1048576",
+        &format!("group width {} exceeds max_group_width {MAX}", usize::MAX),
         4,
         |p, out| p.predict_fixed(&rows(4), usize::MAX, out),
     );
@@ -183,9 +181,13 @@ fn bounds_near_usize_max_do_not_overflow() {
     rejects_with(MAX, "offsets must strictly increase", 4, |p, out| {
         p.predict_groups(&rows(4), &[0, MAX, 4], out);
     });
-    rejects("group of 18446744073709551615 rows exceeds", 4, |p, out| {
-        p.predict_groups(&rows(4), &[0, usize::MAX, 4], out);
-    });
+    rejects(
+        &format!("group of {} rows exceeds", usize::MAX),
+        4,
+        |p, out| {
+            p.predict_groups(&rows(4), &[0, usize::MAX, 4], out);
+        },
+    );
 }
 
 /// The panic message of creating a predictor for groups of up to `max` rows.
@@ -204,15 +206,24 @@ fn scratch_beyond_memory_is_rejected_when_the_predictor_is_made() {
     // the allocator grants, creating the predictor panics instead of aborting.
     let msg = predictor_panic(usize::MAX);
     assert!(
-        msg.contains("max_group_width 18446744073709551615 needs more scratch"),
+        msg.contains(&format!(
+            "max_group_width {} needs more scratch",
+            usize::MAX
+        )),
         "{msg}"
     );
-    let msg = predictor_panic(1 << 56);
-    assert!(
-        msg.contains("max_group_width 72057594037927936 needs")
-            && msg.contains("bytes of scratch, which cannot be allocated"),
-        "{msg}"
-    );
+    // Past what the allocator grants: a width of 2^56, which only a 64-bit `usize`
+    // holds.
+    #[cfg(target_pointer_width = "64")]
+    {
+        let max = 1 << 56;
+        let msg = predictor_panic(max);
+        assert!(
+            msg.contains(&format!("max_group_width {max} needs"))
+                && msg.contains("bytes of scratch, which cannot be allocated"),
+            "{msg}"
+        );
+    }
 }
 
 #[test]

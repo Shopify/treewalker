@@ -18,7 +18,10 @@
 
 mod common;
 
-use common::model::{self, Feature, Precision, Settings};
+use common::bits::same;
+use common::fixtures::{bytes, values};
+use common::groups::{Role, config, group, offsets};
+use common::model::{self, Settings};
 use common::rng::{Rng, mix};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -124,19 +127,6 @@ fn vector<'a>(vectors: &'a BTreeMap<String, Vector>, name: &str, fingerprint: u6
     &v.outputs
 }
 
-/// Panic at the first row whose bits differ.
-fn same(actual: &[f64], expected: &[f64], what: &str) {
-    assert_eq!(actual.len(), expected.len(), "{what}: lengths");
-    for (r, (&a, &e)) in actual.iter().zip(expected).enumerate() {
-        assert!(
-            a.to_bits() == e.to_bits(),
-            "{what}: row {r}: {a:e} ({:#018x}) != recorded {e:e} ({:#018x})",
-            a.to_bits(),
-            e.to_bits()
-        );
-    }
-}
-
 /// Predict `data` in groups of `sizes` with `predict_group` and `predict_groups`,
 /// and with `predict_fixed` when `fixed` is the width, and compare with `expected`.
 fn check_groups(
@@ -161,14 +151,8 @@ fn check_groups(
         start += size;
     }
     same(&out, expected, &format!("{what}, predict_group"));
-    let offsets: Vec<usize> = std::iter::once(0)
-        .chain(sizes.iter().scan(0, |end, &n| {
-            *end += n;
-            Some(*end)
-        }))
-        .collect();
     out.fill(f64::NAN);
-    predictor.predict_groups(data, &offsets, &mut out);
+    predictor.predict_groups(data, &offsets(sizes), &mut out);
     same(&out, expected, &format!("{what}, predict_groups"));
     if let Some(width) = fixed {
         out.fill(f64::NAN);
@@ -215,20 +199,9 @@ struct Case {
     json: bool,
 }
 
-fn fixture(name: &str) -> Vec<u8> {
-    let path = format!(
-        "{}/tests/fixtures/import/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
-}
-
 /// The two-feature rows every fixture model is recorded on.
 fn fixture_rows() -> Vec<f64> {
-    fixture("data.bin")[16..]
-        .chunks_exact(8)
-        .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
-        .collect()
+    values("data.bin")
 }
 
 /// Each fixture model's encodings: the binary export, and the JSON dump if any.
@@ -236,19 +209,19 @@ fn fixture_rows() -> Vec<f64> {
 type Encodings = Vec<(ModelFormat, Vec<u8>)>;
 
 fn fixture_models() -> Vec<(String, Encodings)> {
-    let manifest: Manifest = simd_json::serde::from_slice(&mut fixture("manifest.json")).unwrap();
+    let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
     manifest
         .models
         .into_iter()
         .map(|case| {
             let mut encodings = vec![(
                 ModelFormat::TreeliteBinaryV4,
-                fixture(&format!("{}.bin", case.name)),
+                bytes(&format!("{}.bin", case.name)),
             )];
             if case.json {
                 encodings.push((
                     ModelFormat::TreeliteJson,
-                    fixture(&format!("{}.json", case.name)),
+                    bytes(&format!("{}.json", case.name)),
                 ));
             }
             (case.name, encodings)
@@ -454,14 +427,6 @@ fn fixtures_match_their_recorded_vectors() {
 // Generated models
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Role {
-    Constant,
-    Varying,
-    Increasing,
-    Decreasing,
-}
-
 /// A generated case: a model, its configuration and load options, and its groups.
 struct Generated {
     name: String,
@@ -526,15 +491,7 @@ fn generated(k: usize) -> Generated {
     } else {
         widest + rng.range(1, 3000)
     };
-    let roles_ref = &roles;
-    let with = |role| (0..nf).filter(move |&f| roles_ref[f] == role);
-    let config = WalkerConfig::builder(nf)
-        .max_group_width(max)
-        .varying(with(Role::Varying))
-        .increasing(with(Role::Increasing))
-        .decreasing(with(Role::Decreasing))
-        .build()
-        .unwrap();
+    let config = config(nf, max, &roles);
     // Prefix depth None is the rule's groups; it hashes as 2, the default it
     // replaced, which keeps the recorded fingerprints.
     let options = LoadAblation {
@@ -543,9 +500,12 @@ fn generated(k: usize) -> Generated {
         prefix_depth: *rng.pick(&[Some(0), Some(1), None, Some(2), Some(3), Some(5)]),
         disable_predicate_dedup: rng.chance(0.1),
     };
+    // Monotonic columns sorted by `partial_cmp`, which keeps -0.0 and 0.0 in their
+    // order: `f64::total_cmp` would change the rows the fingerprints hash.
+    let no_nan = |a: &f64, b: &f64| a.partial_cmp(b).expect("no NaN");
     let data: Vec<f64> = sizes
         .iter()
-        .flat_map(|&n| group(&mut rng, &features, &roles, model.precision, n))
+        .flat_map(|&n| group(&mut rng, &features, &roles, model.precision, n, no_nan))
         .collect();
     let mut h = Fnv::new();
     h.count(bytes.len()).bytes(&bytes).values(&data).count(max);
@@ -575,40 +535,6 @@ fn generated(k: usize) -> Generated {
         fixed,
         data,
     }
-}
-
-/// One group's rows, row-major: each constant feature equal in every row, each
-/// monotonic feature ordered in its direction and free of NaN.
-fn group(
-    rng: &mut Rng,
-    features: &[Feature],
-    roles: &[Role],
-    precision: Precision,
-    n: usize,
-) -> Vec<f64> {
-    let columns: Vec<Vec<f64>> = features
-        .iter()
-        .zip(roles)
-        .map(|(f, &role)| match role {
-            Role::Constant => vec![model::input(rng, f, precision, true); n],
-            Role::Varying => (0..n)
-                .map(|_| model::input(rng, f, precision, true))
-                .collect(),
-            Role::Increasing | Role::Decreasing => {
-                let mut column: Vec<f64> = (0..n)
-                    .map(|_| model::input(rng, f, precision, false))
-                    .collect();
-                column.sort_by(|a, b| a.partial_cmp(b).expect("no NaN"));
-                if role == Role::Decreasing {
-                    column.reverse();
-                }
-                column
-            }
-        })
-        .collect();
-    (0..n)
-        .flat_map(|r| columns.iter().map(move |c| c[r]))
-        .collect()
 }
 
 const GENERATED: usize = 2 * BOUNDARIES.len();
@@ -685,13 +611,7 @@ fn record() {
             &case.options,
         )
         .unwrap();
-        let offsets: Vec<usize> = std::iter::once(0)
-            .chain(case.sizes.iter().scan(0, |end, &n| {
-                *end += n;
-                Some(*end)
-            }))
-            .collect();
-        let outputs = record_outputs(&forest, &case.data, &offsets, &case.name);
+        let outputs = record_outputs(&forest, &case.data, &offsets(&case.sizes), &case.name);
         vectors.insert(
             case.name,
             Vector {

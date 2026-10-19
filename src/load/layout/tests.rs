@@ -1,50 +1,22 @@
 //! Every node of the layout decides like the parsed node it replaces, on fixtures and
 //! generated models, for random and adversarial inputs.
 
-use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use super::*;
 use crate::config::{Choices, WalkerConfig};
 use crate::forest::Forest;
+use crate::load::json;
 use crate::model::Model;
+use crate::rng::Rng;
 use crate::rules::Prefix;
 use crate::{LoadOptions, ModelFormat};
-
-/// SplitMix64.
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
-    }
-
-    fn chance(&mut self, p: f64) -> bool {
-        self.unit() < p
-    }
-
-    fn unit(&mut self) -> f64 {
-        (self.next() >> 11) as f64 / (1u64 << 53) as f64
-    }
-
-    fn pick<T: Copy>(&mut self, items: &[T]) -> T {
-        items[self.below(items.len())]
-    }
-}
 
 fn choices(rng: &mut Rng) -> Choices {
     Choices {
         tree_ordering: !rng.chance(0.2),
         bitset_intern: !rng.chance(0.2),
-        prefix: rng.pick(&[
+        prefix: *rng.pick_mod(&[
             Prefix::Depth(0),
             Prefix::Depth(1),
             Prefix::Rule,
@@ -323,10 +295,10 @@ fn random_rows(rng: &mut Rng, model: &Model, n_rows: usize) -> Vec<Vec<f64>> {
     (0..n_rows)
         .map(|_| {
             (0..nf)
-                .map(|f| match rng.below(10) {
+                .map(|f| match rng.below_mod(10) {
                     0 => (rng.unit() - 0.5) * 200.0,
-                    1 => rng.below(9000) as f64,
-                    _ => rng.pick(&values[f]),
+                    1 => rng.below_mod(9000) as f64,
+                    _ => *rng.pick_mod(&values[f]),
                 })
                 .collect()
         })
@@ -366,16 +338,16 @@ struct Spec {
 
 fn random_spec(rng: &mut Rng) -> Spec {
     let nf = if rng.chance(0.3) {
-        rng.below(64) + 1
+        rng.below_mod(64) + 1
     } else {
-        rng.below(6) + 1
+        rng.below_mod(6) + 1
     };
     let f32 = rng.chance(0.4);
     let kinds = (0..nf)
-        .map(|_| match rng.below(6) {
+        .map(|_| match rng.below_mod(6) {
             0 => Kind::Inline,
-            1 => Kind::Pooled(rng.pick(&[40, 100, 1000, 8159, 100_000, 1 << 31, u32::MAX])),
-            2 => Kind::Mixed(rng.pick(&[20, 40, 8159, u32::MAX])),
+            1 => Kind::Pooled(*rng.pick_mod(&[40, 100, 1000, 8159, 100_000, 1 << 31, u32::MAX])),
+            2 => Kind::Mixed(*rng.pick_mod(&[20, 40, 8159, u32::MAX])),
             _ => Kind::Numeric,
         })
         .collect();
@@ -394,8 +366,10 @@ fn random_spec(rng: &mut Rng) -> Spec {
     ];
     let palettes = (0..nf)
         .map(|_| {
-            let mut p: Vec<f64> = (0..=rng.below(5)).map(|_| rng.pick(&base)).collect();
-            p.extend((0..rng.below(20)).map(|_| ((rng.unit() - 0.5) * 100.0).round() / 8.0));
+            let mut p: Vec<f64> = (0..=rng.below_mod(5))
+                .map(|_| *rng.pick_mod(&base))
+                .collect();
+            p.extend((0..rng.below_mod(20)).map(|_| ((rng.unit() - 0.5) * 100.0).round() / 8.0));
             if !f32 && rng.chance(0.3) {
                 p.extend([f64::MAX, f64::MIN, 1e300]);
             }
@@ -409,7 +383,7 @@ fn random_spec(rng: &mut Rng) -> Spec {
         f32,
         kinds,
         palettes,
-        max_depth: rng.below(12) + 1,
+        max_depth: rng.below_mod(12) + 1,
         wide_leaves: rng.chance(0.15),
     }
 }
@@ -422,16 +396,16 @@ fn num(x: f64) -> String {
 fn write_node(rng: &mut Rng, spec: &Spec, depth: usize, nodes: &mut Vec<String>) -> usize {
     let id = nodes.len();
     nodes.push(String::new());
-    let count = rng.below(1000) + 1;
+    let count = rng.below_mod(1000) + 1;
     if depth >= spec.max_depth || (depth > 0 && rng.chance(0.25)) {
         let value = if spec.wide_leaves && rng.chance(0.5) {
             if spec.f32 {
-                rng.pick(&[1e30, -1e30, 1e-30])
+                *rng.pick_mod(&[1e30, -1e30, 1e-30])
             } else {
-                rng.pick(&[1e300, -1e300, 1e-300])
+                *rng.pick_mod(&[1e300, -1e300, 1e-300])
             }
         } else {
-            (rng.unit() - 0.5) * 2f64.powi(rng.below(20) as i32 - 10)
+            (rng.unit() - 0.5) * 2f64.powi(rng.below_mod(20) as i32 - 10)
         };
         nodes[id] = format!(
             r#"{{"node_id": {id}, "leaf_value": {}, "data_count": {count}}}"#,
@@ -439,7 +413,7 @@ fn write_node(rng: &mut Rng, spec: &Spec, depth: usize, nodes: &mut Vec<String>)
         );
         return id;
     }
-    let f = rng.below(spec.kinds.len());
+    let f = rng.below_mod(spec.kinds.len());
     let default_left = rng.chance(0.5);
     let categorical = match spec.kinds[f] {
         Kind::Numeric => None,
@@ -450,16 +424,18 @@ fn write_node(rng: &mut Rng, spec: &Spec, depth: usize, nodes: &mut Vec<String>)
     let test = if let Some(max) = categorical {
         // Pooled features need more than 30 categories in their splits.
         let n = if max > 31 && rng.chance(0.5) {
-            rng.below(48)
+            rng.below_mod(48)
         } else {
-            rng.below(8)
+            rng.below_mod(8)
         };
         let mut list: Vec<u32> = (0..n)
             .map(|_| {
                 if rng.chance(0.5) {
-                    rng.below(32) as u32
+                    rng.below_mod(32) as u32
                 } else {
-                    rng.below(max as usize + 1) as u32
+                    // `below_mod(max as usize + 1)`, without its overflow on 32-bit
+                    // targets when `max` is `u32::MAX`.
+                    (rng.next_u64() % (u64::from(max) + 1)) as u32
                 }
             })
             .collect();
@@ -482,7 +458,7 @@ fn write_node(rng: &mut Rng, spec: &Spec, depth: usize, nodes: &mut Vec<String>)
         };
         format!(
             r#""node_type": "numerical_test_node", "comparison_op": "{op}", "threshold": {}"#,
-            num(rng.pick(&spec.palettes[f]))
+            num(*rng.pick_mod(&spec.palettes[f]))
         )
     };
     let left = write_node(rng, spec, depth + 1, nodes);
@@ -494,7 +470,7 @@ fn write_node(rng: &mut Rng, spec: &Spec, depth: usize, nodes: &mut Vec<String>)
 }
 
 fn random_model_json(rng: &mut Rng, spec: &Spec) -> String {
-    let n_trees = rng.below(8) + 1;
+    let n_trees = rng.below_mod(8) + 1;
     let mut trees = Vec::new();
     for _ in 0..n_trees {
         let mut nodes = Vec::new();
@@ -506,21 +482,11 @@ fn random_model_json(rng: &mut Rng, spec: &Spec) -> String {
             nodes.join(", ")
         ));
     }
-    let ty = if spec.f32 { "float32" } else { "float64" };
-    let zeros = vec!["0"; n_trees].join(", ");
-    let mut json = String::new();
-    write!(
-        json,
-        r#"{{"threshold_type": "{ty}", "leaf_output_type": "{ty}", "num_feature": {}, "task_type": "kRegressor", "average_tree_output": false, "num_target": 1, "num_class": [1], "leaf_vector_shape": [1, 1], "target_id": [{zeros}], "class_id": [{zeros}], "postprocessor": "identity", "sigmoid_alpha": 1.0, "ratio_c": 1.0, "base_scores": [0.0], "attributes": "{{}}", "trees": [{}]}}"#,
-        spec.kinds.len(),
-        trees.join(", ")
-    )
-    .unwrap();
-    json
+    json::regressor(spec.f32, spec.kinds.len(), &trees)
 }
 
 fn random_config(rng: &mut Rng, nf: usize) -> WalkerConfig {
-    let mut roles: Vec<usize> = (0..nf).map(|_| rng.below(5)).collect();
+    let mut roles: Vec<usize> = (0..nf).map(|_| rng.below_mod(5)).collect();
     if rng.chance(0.2) {
         roles.fill(0);
     }
@@ -536,7 +502,7 @@ fn random_config(rng: &mut Rng, nf: usize) -> WalkerConfig {
 
 #[test]
 fn generated_models_decide_like_the_parsed_nodes() {
-    let mut rng = Rng(0x5EED);
+    let mut rng = Rng::new(0x5EED);
     let (mut categorical, mut chained, mut fixed, mut float) = (0, 0, 0, 0);
     for _ in 0..300 {
         let spec = random_spec(&mut rng);
@@ -566,7 +532,7 @@ fn generated_models_decide_like_the_parsed_nodes() {
 #[test]
 fn fixtures_decide_like_the_parsed_nodes() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/import");
-    let mut rng = Rng(7);
+    let mut rng = Rng::new(7);
     let mut loaded = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
@@ -611,11 +577,7 @@ fn fixtures_decide_like_the_parsed_nodes() {
 // ---------------------------------------------------------------------------
 
 fn one_split(test: &str, default_left: bool, f32: bool) -> Forest {
-    let ty = if f32 { "float32" } else { "float64" };
-    let json = format!(
-        r#"{{"threshold_type": "{ty}", "leaf_output_type": "{ty}", "num_feature": 1, "task_type": "kRegressor", "average_tree_output": false, "num_target": 1, "num_class": [1], "leaf_vector_shape": [1, 1], "target_id": [0], "class_id": [0], "postprocessor": "identity", "sigmoid_alpha": 1.0, "ratio_c": 1.0, "base_scores": [0.0], "attributes": "", "trees": [{{"num_nodes": 3, "has_categorical_split": {}, "nodes": [{{"node_id": 0, "split_feature_id": 0, "default_left": {default_left}, {test}, "left_child": 1, "right_child": 2}}, {{"node_id": 1, "leaf_value": 1.0, "data_count": 1}}, {{"node_id": 2, "leaf_value": 2.0, "data_count": 5}}]}}]}}"#,
-        test.contains("categorical")
-    );
+    let json = json::regressor(f32, 1, &[json::stump(test, default_left, (1, 5))]);
     let config = WalkerConfig::builder(1)
         .max_group_width(8)
         .varying([])
@@ -721,19 +683,14 @@ fn categorical_load(
     let trees: Vec<String> = splits
         .iter()
         .map(|(list, default_left, heavy_left)| {
-            let names: Vec<String> = list.iter().map(u32::to_string).collect();
-            let (l, r) = if *heavy_left { (5, 1) } else { (1, 5) };
-            format!(
-                r#"{{"num_nodes": 3, "has_categorical_split": true, "nodes": [{{"node_id": 0, "split_feature_id": 0, "default_left": {default_left}, "node_type": "categorical_test_node", "category_list": [{}], "category_list_right_child": false, "left_child": 1, "right_child": 2}}, {{"node_id": 1, "leaf_value": 1.0, "data_count": {l}}}, {{"node_id": 2, "leaf_value": 2.0, "data_count": {r}}}]}}"#,
-                names.join(", ")
-            )
+            let test = format!(
+                r#""node_type": "categorical_test_node", "category_list": {list:?}, "category_list_right_child": false"#
+            );
+            let counts = if *heavy_left { (5, 1) } else { (1, 5) };
+            json::stump(&test, *default_left, counts)
         })
         .collect();
-    let json = format!(
-        r#"{{"threshold_type": "float64", "leaf_output_type": "float64", "num_feature": 1, "task_type": "kRegressor", "average_tree_output": false, "num_target": 1, "num_class": [1], "leaf_vector_shape": [1, 1], "target_id": {ids}, "class_id": {ids}, "postprocessor": "identity", "sigmoid_alpha": 1.0, "ratio_c": 1.0, "base_scores": [0.0], "attributes": "", "trees": [{}]}}"#,
-        trees.join(", "),
-        ids = format!("{:?}", vec![0; splits.len()]),
-    );
+    let json = json::regressor(false, 1, &trees);
     let config = WalkerConfig::builder(1)
         .max_group_width(8)
         .varying(if varying { vec![0] } else { vec![] })
@@ -755,7 +712,7 @@ fn nested_heavy_sets_share_a_chain() {
         (vec![1, 2, 3], false, true),
         (vec![1, 2], false, false),
     ];
-    let mut rng = Rng(29);
+    let mut rng = Rng::new(29);
     for varying in [false, true] {
         let forest = categorical_forest(&splits, varying);
         let layout = &forest.model.layout;
@@ -779,7 +736,7 @@ fn chains_stop_at_the_rank_table_cap() {
         max_rank_table_bytes: bytes,
         ..LoadOptions::default()
     };
-    let mut rng = Rng(31);
+    let mut rng = Rng::new(31);
     for (varying, bytes) in [(false, 212), (true, 324)] {
         let forest = categorical_load(&splits, varying, &cap(bytes)).unwrap();
         let (bins, masks) = (&forest.model.layout.bins, &forest.model.masks);
@@ -796,7 +753,7 @@ fn chains_stop_at_the_rank_table_cap() {
 
 #[test]
 fn any_u32_category_takes_a_code() {
-    let mut rng = Rng(11);
+    let mut rng = Rng::new(11);
     for list in [
         vec![u32::MAX],
         vec![0, u32::MAX - 1, u32::MAX],
@@ -823,7 +780,7 @@ fn any_u32_category_takes_a_code() {
 
 #[test]
 fn signed_zero_thresholds_share_a_bin() {
-    let mut rng = Rng(3);
+    let mut rng = Rng::new(3);
     for f32 in [false, true] {
         let json_of = |t: f64| {
             format!(
@@ -847,12 +804,14 @@ fn the_empty_layout_holds_the_dummy() {
 
 #[test]
 fn small_codebooks_rank_like_the_search() {
-    let mut rng = Rng(19);
+    let mut rng = Rng::new(19);
     for _ in 0..500 {
-        let mut book: Vec<u32> = (0..rng.below(64)).map(|_| rng.below(64) as u32).collect();
+        let mut book: Vec<u32> = (0..rng.below_mod(64))
+            .map(|_| rng.below_mod(64) as u32)
+            .collect();
         book.sort_unstable();
         book.dedup();
-        let mut books = vec![7; rng.below(3)];
+        let mut books = vec![7; rng.below_mod(3)];
         let small = CategoryCodes::new(&mut books, &book).unwrap();
         assert!(small.small.is_some());
         let search = CategoryCodes {
