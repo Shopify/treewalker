@@ -1,9 +1,12 @@
 //! Random Treelite models within the loader's supported subset, their Treelite JSON
 //! and v4 binary encodings, and an evaluator that follows the documented semantics
-//! (docs/treelite-loading.md) without the library's normalizations.
+//! (docs/treelite-loading.md) without the library's normalizations. The evaluator's
+//! `sigmoid` comes from the including module: the library's own in its unit tests, the
+//! public one in the integration tests.
 
 use super::oracle;
 use super::rng::Rng;
+use super::sigmoid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Precision {
@@ -203,7 +206,7 @@ impl Model {
             if alpha != 1.0 {
                 v *= alpha;
             }
-            v = 1.0 / (1.0 + (-v).exp());
+            v = sigmoid(v);
         }
         v
     }

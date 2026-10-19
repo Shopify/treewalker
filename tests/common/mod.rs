@@ -13,3 +13,5 @@ pub mod rng;
 
 // The library's configuration, which `groups` builds.
 use treewalker_gbdt::WalkerConfig;
+// The library's sigmoid, which `model`'s evaluator applies.
+use treewalker_gbdt::research::sigmoid;

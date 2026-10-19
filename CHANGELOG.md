@@ -3,7 +3,9 @@
 ## 3.1.0
 
 In 3.1, default x86-64 builds run the kernel at the CPU's instruction-set level. The
-API is unchanged, and outputs are the same at every level.
+API is unchanged, and outputs are the same at every level. Outputs are bit-identical
+to 3.0 except for models with a sigmoid link, which now computes its own `e^-m` rather
+than calling the platform's libm.
 
 ### Changes
 
@@ -15,6 +17,11 @@ API is unchanged, and outputs are the same at every level.
   Outputs are the same at every level. The kernel uses no BF16 instruction: requiring
   it keeps Ice Lake, Tiger Lake and Rocket Lake at x86-64-v3, which ran faster than
   x86-64-v4 on Ice Lake.
+- The sigmoid computes `1 / (1 + e^-m)` with the `e^t` of Arm's optimized routines,
+  which glibc's `exp` is, in a loop that vectorizes, and gives the same bits on every
+  platform; 3.0's last bits came from the platform's libm. Against 3.0 with Apple's
+  libm, 99.92% of outputs are unchanged and the rest move by at most 4 ulp; both are
+  within 2 ulp of the correctly rounded sigmoid for `|m| <= 40`.
 
 ## 3.0.0
 

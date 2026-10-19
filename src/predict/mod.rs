@@ -63,6 +63,7 @@ mod precompute;
 mod resolve;
 mod scan;
 mod scratch;
+mod sigmoid;
 #[cfg(test)]
 mod tests;
 mod walk;
@@ -71,6 +72,8 @@ pub(crate) use counters::Stats;
 pub use counters::WorkCounters;
 #[cfg(feature = "research")]
 pub use counters::{COUNTERS_VERSION, Phases};
+#[cfg(feature = "research")]
+pub use sigmoid::sigmoid;
 
 use crate::model::{Model, ThresholdType};
 use crate::rules::Tuning;

@@ -1,10 +1,8 @@
 //! Small production-shaped cases for Miri, which checks the unsafe code: each runs every
 //! kind of unsafe operation of its path once. The README's development checks list the
 //! commands: x86-64 with SSE2 and with AVX2, and RISC-V for the plain-word fallback; the
-//! lib's `predict::tests::prefetching_walks` adds the walks that prefetch. Miri perturbs
-//! `exp` unless floats are deterministic (`-Zmiri-deterministic-floats`), and the
-//! sigmoid would then differ between two calls; on AArch64 it lacks a NEON intrinsic
-//! the masks use. Whether the kernel is right on every path is the property tests'
+//! lib's `predict::tests::prefetching_walks` adds the walks that prefetch. On AArch64,
+//! Miri lacks a NEON intrinsic the masks use. Whether the kernel is right on every path is the property tests'
 //! question (`tests/property.rs`); natively these cases run once, as under Miri.
 //!
 //! Each case is a list of group sizes on one generated model:
