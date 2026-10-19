@@ -3,8 +3,9 @@
 //! Per varying feature, the sweep sorts the group's non-missing values with their
 //! rows and merges them with the feature's numeric predicates in threshold order,
 //! adding rows to one running left mask, so each row is added once. Rows that already
-//! arrive in order, as a monotonic feature's do, cost the sort one pass: it stops
-//! after finding a single run. Categorical predicates test ranks on the feature's
+//! arrive in order, as a monotonic feature's do, cost the sort one pass, and a few runs
+//! of them, as a feature's that rises and falls, a pass per level of their merge
+//! ([`sort_records`]). Categorical predicates test ranks on the feature's
 //! chains, whose values are small integers: each row's code is computed once per
 //! feature, every row starts in the mask of the first predicate at or past an
 //! unlisted category's rank, each of its code's exceptions moves it to the first
@@ -18,7 +19,7 @@
 
 use super::WorkCounters;
 use crate::load::layout::{BinMap, MaskChain, MaskFeature, MaskPlan};
-use crate::model::{Model, VaryingPredicate, threshold_go_left};
+use crate::model::{Model, ThresholdType, VaryingPredicate};
 use crate::predict::isa::Isa;
 use crate::predict::mask::Mask;
 
@@ -121,8 +122,251 @@ pub(crate) const fn sweep_turns(consecutive: usize, predicates: usize, words: us
 
 /// Whether the rows of `sorted` are in row order, ascending or descending.
 #[inline]
-fn in_row_order(sorted: &[(f64, u32)]) -> bool {
-    sorted.windows(2).all(|w| w[0].1 < w[1].1) || sorted.windows(2).all(|w| w[0].1 > w[1].1)
+fn in_row_order<R: Record>(sorted: &[R]) -> bool {
+    sorted.windows(2).all(|w| w[0].row() < w[1].row())
+        || sorted.windows(2).all(|w| w[0].row() > w[1].row())
+}
+
+/// The order key of `v`, not NaN, at f32: an integer whose order is IEEE's, so that
+/// `key32(a) < key32(b)` exactly when `a < b`, and the keys are equal exactly when
+/// `a == b`. Zeros are made +0.0 first, as `v + 0.0` does: IEEE compares -0.0 and +0.0
+/// as equal, while their bits differ. Then a non-negative value's sign bit is set,
+/// which puts it above every negative value, and a negative value's bits are inverted,
+/// since a larger magnitude orders it lower.
+#[inline(always)]
+const fn key32(v: f32) -> u32 {
+    let bits = (v + 0.0).to_bits();
+    bits ^ ((bits.cast_signed() >> 31).cast_unsigned() | (1 << 31))
+}
+
+/// [`key32`] at f64: `key64(a) < key64(b)` exactly when `a < b`, and the keys are equal
+/// exactly when `a == b`, for `a` and `b` not NaN, zeros made +0.0 first.
+#[inline(always)]
+const fn key64(v: f64) -> u64 {
+    let bits = (v + 0.0).to_bits();
+    bits ^ ((bits.cast_signed() >> 63).cast_unsigned() | (1 << 63))
+}
+
+/// A non-missing value with its row, as the sweep sorts them ([`sort_records`]): its
+/// value's key, an integer whose order is the values' order as the predicates compare
+/// them, computed once rather than at every compare. Each threshold's bound in the same
+/// space is computed once, at load ([`sweep_bounds`]), and the merge compares the
+/// records' keys with it.
+trait Record: Copy {
+    /// The record of value `v`, not NaN, at row `r`.
+    fn new(v: f64, r: u32) -> Self;
+    /// Its key: its value's key, which the merge compares with the bounds, and at f32
+    /// its row below it.
+    fn key(self) -> u64;
+    /// Its value's key alone.
+    fn value(self) -> u64;
+    /// Its row.
+    fn row(self) -> usize;
+    /// The bound of threshold `t`: a value's record's key is below it exactly when the
+    /// value goes left of `t`, as [`crate::model::threshold_go_left`] decides.
+    fn bound(t: f64) -> u64;
+}
+
+/// XGBoost's, which compares `(v as f32) < (t as f32)`: the value's [`key32`] above its
+/// row, 8 bytes, its own key, which orders equal values by row.
+impl Record for u64 {
+    #[inline(always)]
+    fn new(v: f64, r: u32) -> Self {
+        (Self::from(key32(v as f32)) << 32) | Self::from(r)
+    }
+
+    #[inline(always)]
+    fn key(self) -> Self {
+        self
+    }
+
+    #[inline(always)]
+    fn value(self) -> Self {
+        self >> 32
+    }
+
+    #[inline(always)]
+    fn row(self) -> usize {
+        self as u32 as usize
+    }
+
+    /// The threshold's key above row 0: a key is below it exactly when its value's key
+    /// is below the threshold's.
+    #[inline(always)]
+    fn bound(t: f64) -> Self {
+        Self::from(key32(t as f32)) << 32
+    }
+}
+
+/// LightGBM's, which compares `v <= t`: the value's [`key64`], then its row, 16 bytes,
+/// keyed by the value alone.
+impl Record for [u64; 2] {
+    #[inline(always)]
+    fn new(v: f64, r: u32) -> Self {
+        [key64(v), u64::from(r)]
+    }
+
+    #[inline(always)]
+    fn key(self) -> u64 {
+        self[0]
+    }
+
+    #[inline(always)]
+    fn value(self) -> u64 {
+        self[0]
+    }
+
+    #[inline(always)]
+    fn row(self) -> usize {
+        self[1] as usize
+    }
+
+    /// The key above the threshold's: a key is below it exactly when its value's key
+    /// is at most the threshold's. The threshold is not NaN, so its key is below
+    /// `u64::MAX`.
+    #[inline(always)]
+    fn bound(t: f64) -> u64 {
+        key64(t) + 1
+    }
+}
+
+/// Each of `predicates`' thresholds as the sweep's bound ([`Record::bound`]) at the
+/// precision of `threshold_type`, by predicate, 0 for categorical ones: the model holds
+/// them ([`Model::bounds`]), so that the merge reads each predicate's bound rather than
+/// computing it per group.
+pub(crate) fn sweep_bounds(
+    predicates: &[VaryingPredicate],
+    threshold_type: ThresholdType,
+) -> Vec<u64> {
+    let bound = match threshold_type {
+        ThresholdType::F32 => <u64 as Record>::bound,
+        ThresholdType::F64 => <[u64; 2] as Record>::bound,
+    };
+    predicates
+        .iter()
+        .map(|p| match *p {
+            VaryingPredicate::Num { threshold, .. } => bound(threshold.0),
+            VaryingPredicate::CatInline { .. } | VaryingPredicate::CatPool { .. } => 0,
+        })
+        .collect()
+}
+
+/// Sorts `records` by value, with `spare` holding as many records and `ends` as many
+/// run ends; returns the sorted records, in `records` or in `spare`. With `STATS`, the
+/// compares are added to `compares`.
+///
+/// The records' runs come first, as the standard library's sorts find them: each
+/// non-descending, or strictly descending and reversed in place, by key. A monotonic
+/// column is one run and costs one pass. Few runs are then merged in pairs, stably, a
+/// pass per level, `⌈log2 runs⌉` passes in all, so that equal values keep the gather's
+/// row order; more are sorted by [`Record::value`] with the standard library's unstable
+/// sort, which partitions equal values together, in about `log2 n` levels. A merge step
+/// on runs whose values interleave without pattern costs about half a misprediction, 6
+/// to 10 cycles on the M4 and current x86 cores, and a step of the sort's partitions,
+/// which are branch-free, 2 to 3: the merge pays while its levels are at most a third
+/// of the sort's, `3 ⌈log2 runs⌉ <= log2 n`, and the scan stops at the first run past
+/// that.
+#[inline(always)]
+fn sort_records<'a, R: Record, const STATS: bool>(
+    records: &'a mut [R],
+    spare: &'a mut [R],
+    ends: &mut [u32],
+    compares: &mut u64,
+) -> &'a [R] {
+    let n = records.len();
+    // Fewer than two records are sorted, and `ilog2` takes no 0.
+    if n < 2 {
+        return records;
+    }
+    let mut less = |a: R, b: R| {
+        if STATS {
+            *compares += 1;
+        }
+        a.key() < b.key()
+    };
+    let most = 1 << (n.ilog2() / 3);
+    let mut runs = 0;
+    let mut start = 0;
+    while start < n && runs <= most {
+        let mut end = start + 1;
+        let descending = end < n && less(records[end], records[start]);
+        while end < n && less(records[end], records[end - 1]) == descending {
+            end += 1;
+        }
+        if descending {
+            records[start..end].reverse();
+        }
+        ends[runs] = end as u32;
+        runs += 1;
+        start = end;
+    }
+    if runs == 1 {
+        return records;
+    }
+    if runs > most {
+        if STATS {
+            records.sort_unstable_by(|a, b| {
+                *compares += 1;
+                a.value().cmp(&b.value())
+            });
+        } else {
+            records.sort_unstable_by_key(|r| r.value());
+        }
+        return records;
+    }
+    let (mut from, mut to) = (records, spare);
+    while runs > 1 {
+        let mut start = 0;
+        for pair in 0..runs / 2 {
+            let (mid, end) = (ends[2 * pair] as usize, ends[2 * pair + 1] as usize);
+            merge_runs(
+                &from[start..mid],
+                &from[mid..end],
+                &mut to[start..end],
+                &mut less,
+            );
+            ends[pair] = end as u32;
+            start = end;
+        }
+        if runs % 2 == 1 {
+            to[start..n].copy_from_slice(&from[start..n]);
+            ends[runs / 2] = n as u32;
+        }
+        runs = runs.div_ceil(2);
+        core::mem::swap(&mut from, &mut to);
+    }
+    from
+}
+
+/// Merges the sorted runs `a` and `b` into `out`, which holds both, stably: on equal
+/// keys, `a`'s record first. Each source's records are copied while they come first,
+/// so that a branch predicts each step, and runs that alternate in a pattern, as
+/// columns with structure do, merge at about the copy's speed.
+#[inline(always)]
+fn merge_runs<R: Record>(a: &[R], b: &[R], out: &mut [R], less: &mut impl FnMut(R, R) -> bool) {
+    let (mut i, mut j) = (0, 0);
+    'merge: while i < a.len() && j < b.len() {
+        while !less(b[j], a[i]) {
+            out[i + j] = a[i];
+            i += 1;
+            if i == a.len() {
+                break 'merge;
+            }
+        }
+        // b[j] comes first.
+        loop {
+            out[i + j] = b[j];
+            j += 1;
+            if j == b.len() {
+                break 'merge;
+            }
+            if !less(b[j], a[i]) {
+                break;
+            }
+        }
+    }
+    out[i + j..a.len() + j].copy_from_slice(&a[i..]);
+    out[a.len() + j..].copy_from_slice(&b[j..]);
 }
 
 /// The sweep's running left mask as up to [`Lefts::TURNS`] copies: the union of the
@@ -397,10 +641,10 @@ impl Sides<[u64]> for Rows<'_> {
 
 impl Model {
     /// The left and right masks ([`sides`]) of every varying predicate for one
-    /// group, by the sweep, into `out`. `order` and `codes` hold at least a value per
-    /// row, `missing` holds every row, and `lefts` holds the running left mask's
-    /// copies ([`Lefts`]). With `STATS`,
-    /// the work is added to `counters`.
+    /// group, by the sweep, into `out`. `order` holds at least two values per row, as
+    /// [`Record`]s of either precision, and `codes` one, `missing` holds every row, and
+    /// `lefts` holds the running left mask's copies ([`Lefts`]). With `STATS`, the work
+    /// is added to `counters`.
     #[inline(always)]
     #[expect(
         clippy::too_many_arguments,
@@ -414,7 +658,7 @@ impl Model {
     >(
         &self,
         rows: &[f64],
-        order: &mut [(f64, u32)],
+        order: &mut [[u64; 2]],
         codes: &mut [u32],
         out: &mut O,
         lefts: &mut O::Lefts,
@@ -431,49 +675,14 @@ impl Model {
         );
         for feature in &plan.features {
             if !feature.num.is_empty() {
-                let f = feature.feature;
-                missing.clear();
-                let mut len = 0;
-                for (r, row) in rows.chunks_exact(nf).enumerate() {
-                    let v = row[f];
-                    if v.is_nan() {
-                        missing.set(r);
-                    } else {
-                        order[len] = (v, r as u32);
-                        len += 1;
-                    }
-                }
-                let sorted = &mut order[..len];
-                if STATS {
-                    counters.precompute_row_evals += n as u64;
-                    counters.precompute_mask_writes += feature.num.len() as u64;
-                    let compares = &mut counters.precompute_sort_compares;
-                    if F32 {
-                        sorted.sort_unstable_by(|a, b| {
-                            *compares += 1;
-                            (a.0 as f32).total_cmp(&(b.0 as f32))
-                        });
-                    } else {
-                        sorted.sort_unstable_by(|a, b| {
-                            *compares += 1;
-                            a.0.total_cmp(&b.0)
-                        });
-                    }
-                } else if F32 {
-                    sorted.sort_unstable_by(|a, b| (a.0 as f32).total_cmp(&(b.0 as f32)));
-                } else {
-                    sorted.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-                }
-                let turns = <O::Lefts as Lefts<B>>::TURNS > 1
-                    && sweep_turns(len, feature.num.len(), out.words())
-                    && in_row_order(sorted);
-                if turns {
-                    self.merge::<F32, B, O, STATS, SWEEP_TURNS>(
-                        feature, sorted, out, lefts, missing, counters,
+                if F32 {
+                    let order = order.as_flattened_mut();
+                    self.sweep_numeric::<u64, B, O, STATS>(
+                        rows, feature, order, codes, out, lefts, missing, counters,
                     );
                 } else {
-                    self.merge::<F32, B, O, STATS, 1>(
-                        feature, sorted, out, lefts, missing, counters,
+                    self.sweep_numeric::<[u64; 2], B, O, STATS>(
+                        rows, feature, order, codes, out, lefts, missing, counters,
                     );
                 }
             }
@@ -491,11 +700,66 @@ impl Model {
         }
     }
 
+    /// The sweep of `feature`'s numeric predicates: its non-missing values as records
+    /// `R` into `order`, sorted, with the second half of `order` and `ends`, which the
+    /// feature's categorical codes take only later, as the sort's scratch, then merged
+    /// with the predicates, its missing rows into `missing`.
+    #[inline(always)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the group, its scratch and its masks"
+    )]
+    fn sweep_numeric<R: Record, B: Bits + ?Sized, O: Sides<B> + ?Sized, const STATS: bool>(
+        &self,
+        rows: &[f64],
+        feature: &MaskFeature,
+        order: &mut [R],
+        ends: &mut [u32],
+        out: &mut O,
+        lefts: &mut O::Lefts,
+        missing: &mut B,
+        counters: &mut WorkCounters,
+    ) {
+        let (f, nf) = (feature.feature, self.config.n_features());
+        missing.clear();
+        let mut len = 0;
+        for (r, row) in rows.chunks_exact(nf).enumerate() {
+            let v = row[f];
+            if v.is_nan() {
+                missing.set(r);
+            } else {
+                order[len] = R::new(v, r as u32);
+                len += 1;
+            }
+        }
+        if STATS {
+            counters.precompute_row_evals += (rows.len() / nf) as u64;
+            counters.precompute_mask_writes += feature.num.len() as u64;
+        }
+        let (records, spare) = order.split_at_mut(len);
+        let sorted = sort_records::<R, STATS>(
+            records,
+            &mut spare[..len],
+            &mut ends[..len],
+            &mut counters.precompute_sort_compares,
+        );
+        let turns = <O::Lefts as Lefts<B>>::TURNS > 1
+            && sweep_turns(len, feature.num.len(), out.words())
+            && in_row_order(sorted);
+        if turns {
+            self.merge::<R, B, O, STATS, SWEEP_TURNS>(
+                feature, sorted, out, lefts, missing, counters,
+            );
+        } else {
+            self.merge::<R, B, O, STATS, 1>(feature, sorted, out, lefts, missing, counters);
+        }
+    }
+
     /// The sweep's merge of `feature`'s `sorted` values with its numeric predicates,
     /// the running left mask in `T` copies of `lefts`.
     #[inline(always)]
     fn merge<
-        const F32: bool,
+        R: Record,
         B: Bits + ?Sized,
         O: Sides<B> + ?Sized,
         const STATS: bool,
@@ -503,7 +767,7 @@ impl Model {
     >(
         &self,
         feature: &MaskFeature,
-        sorted: &[(f64, u32)],
+        sorted: &[R],
         out: &mut O,
         lefts: &mut O::Lefts,
         missing: &B,
@@ -512,24 +776,20 @@ impl Model {
         lefts.clear::<T>();
         let mut next = 0;
         for p in feature.num.clone() {
-            let VaryingPredicate::Num {
-                threshold,
-                default_left,
-                ..
-            } = self.varying_predicates[p]
-            else {
+            let VaryingPredicate::Num { default_left, .. } = self.varying_predicates[p] else {
                 unreachable!("numeric predicates come first")
             };
-            while let Some(&(v, r)) = sorted.get(next) {
+            let bound = self.bounds[p];
+            while let Some(&x) = sorted.get(next) {
                 if STATS {
                     counters.precompute_sweep_compares += 1;
                 }
-                if !threshold_go_left::<F32>(v, threshold.0) {
+                if x.key() >= bound {
                     break;
                 }
                 // SAFETY: the sweep asserts that `lefts` holds copies of masks like
                 // `missing`, which holds every row, and T <= TURNS.
-                unsafe { lefts.set::<T>(next, r as usize) };
+                unsafe { lefts.set::<T>(next, x.row()) };
                 next += 1;
             }
             out.write_or::<T>(p, lefts, missing, default_left);
@@ -721,7 +981,7 @@ mod tests {
     fn sweep<const F32: bool>(model: &Model, rows: &[f64]) -> Vec<u32> {
         let n = rows.len();
         let mut out = vec![[0; 2]; model.varying_predicates.len()];
-        let (mut order, mut codes) = (vec![(0.0, 0); n], vec![0; n]);
+        let (mut order, mut codes) = (vec![[0; 2]; 2 * n], vec![0; n]);
         let (left, mut missing) = (0u32, 0u32);
         model.precompute_sweep::<F32, u32, _, false>(
             rows,
@@ -801,7 +1061,7 @@ mod tests {
     fn wide_masks(model: &Model, column: &[f64]) -> Vec<Wide<16>> {
         let n = column.len();
         let mut out = vec![[Wide::<16>::ZERO; 2]; model.varying_predicates.len()];
-        let (mut order, mut codes) = (vec![(0.0, 0); n], vec![0; n]);
+        let (mut order, mut codes) = (vec![[0; 2]; 2 * n], vec![0; n]);
         let mut lefts = [Wide::<16>::ZERO; super::SWEEP_TURNS];
         let mut missing = Wide::<16>::ZERO;
         model.precompute_sweep::<false, Wide<16>, _, false>(
@@ -938,6 +1198,164 @@ mod tests {
         let m = masks(&f, &column);
         assert_eq!(mask_of(&f, &m, num(1.0, false)), 0b01000);
         assert_eq!(mask_of(&f, &m, num(1.0, true)), 0b11000);
+    }
+
+    #[test]
+    fn signed_zeros_are_equal_as_values_and_as_thresholds() {
+        // -1e-50 and 1e-50 round to -0.0f32 and +0.0f32.
+        let column = [0.0, -0.0, -1e-30, 1e-30, -1e-50, 1e-50];
+        for (f32, op, want) in [(false, "<=", 0b1_0111), (true, "<", 0b100)] {
+            let splits = [numeric(op, -0.0, false), numeric(op, 0.0, false)];
+            let m = masks(&forest(&splits, f32), &column);
+            assert!(m.iter().all(|&m| m == want), "{op}: {m:?}");
+        }
+    }
+
+    /// Representative values of `$t` in increasing order: the infinities, the
+    /// extremes, the subnormals' bounds, both zeros, and about 1.
+    macro_rules! ascending {
+        ($t:ident) => {{
+            let (tiny, subnormal) = ($t::from_bits(1), $t::MIN_POSITIVE.next_down());
+            [
+                $t::NEG_INFINITY,
+                $t::MIN,
+                $t::MIN.next_up(),
+                -1.0,
+                $t::next_up(-1.0),
+                -$t::MIN_POSITIVE,
+                -subnormal,
+                -tiny,
+                -0.0,
+                0.0,
+                tiny,
+                subnormal,
+                $t::MIN_POSITIVE,
+                $t::next_down(1.0),
+                1.0,
+                $t::next_up(1.0),
+                $t::MAX.next_down(),
+                $t::MAX,
+                $t::INFINITY,
+            ]
+        }};
+    }
+
+    /// Checks that `key` orders every pair of `values` as IEEE compares them.
+    fn orders_as_ieee<T: Copy + PartialOrd + core::fmt::Debug, K: Ord>(
+        values: &[T],
+        key: impl Fn(T) -> K,
+    ) {
+        for &a in values {
+            for &b in values {
+                let ieee = a.partial_cmp(&b).expect("no NaN");
+                assert_eq!(key(a).cmp(&key(b)), ieee, "{a:?} against {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn keys_order_representative_values_as_ieee_compares_them() {
+        let (f64s, f32s) = (ascending!(f64), ascending!(f32));
+        assert!(f64s.is_sorted() && f32s.is_sorted());
+        orders_as_ieee(&f64s, super::key64);
+        orders_as_ieee(&f32s, super::key32);
+    }
+
+    #[test]
+    fn keys_order_random_values_as_ieee_compares_them() {
+        // Random bits, which span the exponents, and values in [-0.5, 0.5) with their
+        // neighbours, with the representative values, every pair of them.
+        let mut rng = crate::rng::Rng::new(0x6B65_7973);
+        let (mut f64s, mut f32s) = (ascending!(f64).to_vec(), ascending!(f32).to_vec());
+        while f64s.len() < 1_000 {
+            let (bits, unit) = (rng.next_u64(), rng.unit() - 0.5);
+            f64s.extend([f64::from_bits(bits), unit, unit.next_up()]);
+            f32s.extend([
+                f32::from_bits(bits as u32),
+                unit as f32,
+                (unit as f32).next_up(),
+            ]);
+        }
+        f64s.retain(|v| !v.is_nan());
+        f32s.retain(|v| !v.is_nan());
+        orders_as_ieee(&f64s, super::key64);
+        orders_as_ieee(&f32s, super::key32);
+    }
+
+    /// Sorts `values` as the sweep's records `R`, counted and not, and checks that the
+    /// records come out sorted by value, as a permutation of the gathered ones, and that
+    /// the counted sort leaves the same. Returns whether equal values kept the rows'
+    /// order, as the standard library's stable sort leaves them.
+    fn sorts<R: super::Record + PartialEq + core::fmt::Debug>(values: &[f64]) -> bool {
+        let n = values.len();
+        let gathered: Vec<R> = (0..n).map(|r| R::new(values[r], r as u32)).collect();
+        let sorted = |stats: bool| {
+            let mut order = gathered.repeat(2);
+            let (records, spare) = order.split_at_mut(n);
+            let (mut ends, mut compares) = (vec![0; n], 0);
+            if stats {
+                super::sort_records::<R, true>(records, spare, &mut ends, &mut compares).to_vec()
+            } else {
+                super::sort_records::<R, false>(records, spare, &mut ends, &mut compares).to_vec()
+            }
+        };
+        let got = sorted(false);
+        assert_eq!(got, sorted(true), "the counted sort");
+        let mut stable = gathered.clone();
+        stable.sort_by_key(|r| r.value());
+        assert!(
+            got.iter()
+                .map(|r| r.value())
+                .eq(stable.iter().map(|r| r.value())),
+            "sorted by value"
+        );
+        let mut rows: Vec<usize> = got.iter().map(|r| r.row()).collect();
+        rows.sort_unstable();
+        assert!(rows.iter().copied().eq(0..n), "a permutation");
+        got == stable
+    }
+
+    #[test]
+    fn the_sort_merges_few_runs_stably_and_sorts_others_by_value() {
+        // Columns of few runs as panels and grids have them, each a group of 4,096
+        // rows or fewer: monotonic, with ties, a bump, sorted blocks of 64 values and
+        // their reverse, and random values, some of few distinct values.
+        let mut rng = crate::rng::Rng::new(0x736F_7274);
+        let mut columns: Vec<Vec<f64>> = Vec::new();
+        for n in [0, 1, 2, 3, 4, 7, 8, 63, 64, 65, 128, 1000, 4096] {
+            let x = |r: usize| r as f64 / n as f64;
+            columns.extend([
+                (0..n).map(x).collect(),
+                (0..n).map(|r| -x(r)).collect(),
+                (0..n).map(|r| (x(r) * 8.0).floor()).collect(),
+                (0..n).map(|r| -(x(r) * 8.0).floor()).collect(),
+                (0..n)
+                    .map(|r| (core::f64::consts::PI * x(r)).sin())
+                    .collect(),
+                (0..n).map(|r| ((r % 64) as f64).sqrt()).collect(),
+                (0..n).map(|r| -((r % 64) as f64).sqrt()).collect(),
+                (0..n).map(|_| rng.unit() - 0.5).collect(),
+                (0..n).map(|_| rng.below(5) as f64).collect(),
+            ]);
+        }
+        // Columns of monotonic blocks of 64 rows have at most a run per block: while
+        // few, they are merged, and equal values keep the rows' order.
+        let mut merged = 0;
+        for values in &columns {
+            let n = values.len();
+            let blocks = values.len().div_ceil(64);
+            let monotonic = values
+                .chunks(64)
+                .all(|c| c.is_sorted() || c.is_sorted_by(|a, b| a > b));
+            let few = monotonic && blocks > 1 && blocks <= 1 << (n.ilog2() / 3);
+            for stable in [sorts::<u64>(values), sorts::<[u64; 2]>(values)] {
+                if few {
+                    assert!(stable, "merged runs keep equal values in row order");
+                    merged += 1;
+                }
+            }
+        }
+        assert!(merged > 0, "no column merged");
     }
 
     #[test]

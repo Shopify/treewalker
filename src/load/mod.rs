@@ -115,6 +115,7 @@ impl Forest {
         )?;
         drop(predicate_ids);
         drop(decoded);
+        let bounds = crate::predict::sweep_bounds(&varying_predicates, threshold_type);
         let masks = layout::MaskPlan::build(
             &layout.bins,
             &feature_ranges,
@@ -150,6 +151,7 @@ impl Forest {
                     items,
                     pool_latency: std::sync::OnceLock::new(),
                 }),
+                bounds,
                 #[cfg(any(test, feature = "research"))]
                 nodes,
             }),

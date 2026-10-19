@@ -216,8 +216,10 @@ pub(super) struct Common {
     pub(super) stops: Vec<u32>,
     pub(super) words: Vec<u64>,
     /// A group's non-missing values of one feature with their rows, sorted for the
-    /// sweep, and its categorical codes, one per row.
-    pub(super) order: Vec<(f64, u32)>,
+    /// sweep as records of either precision (`precompute::Record`: 16 bytes, or 8 at
+    /// f32), two per row, the sort's spare half included, and its categorical codes, one
+    /// per row.
+    pub(super) order: Vec<[u64; 2]>,
     pub(super) codes: Vec<u32>,
     pub(super) sums: Sums,
     /// The machine's rules applied to the model.
@@ -332,7 +334,7 @@ impl Scratch {
                 scan: buffer(runtime_units, <Unit as Mask>::ZERO, rows, need),
                 stops: vec![0; max_leaves + MAX_PAD + 1],
                 words: vec![0; max_leaves + MAX_PAD + 1],
-                order: buffer(rows, (0.0, 0), rows, need),
+                order: buffer(2 * rows, [0; 2], rows, need),
                 codes: buffer(rows, 0, rows, need),
                 sums,
                 tuning,
@@ -375,7 +377,7 @@ fn row_scratch_bytes(model: &Model, rows: usize, n_masks: usize) -> usize {
             .checked_add(1)?
             .checked_mul(2)?
             .checked_mul(sum_bytes?)?;
-        let order = rows.checked_mul(size_of::<(f64, u32)>() + size_of::<u32>())?;
+        let order = rows.checked_mul(2 * size_of::<[u64; 2]>() + size_of::<u32>())?;
         let mask = if rows > WIDE_ROWS {
             units.checked_mul(size_of::<Unit>())?
         } else {

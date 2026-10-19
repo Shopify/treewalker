@@ -442,6 +442,9 @@ pub(crate) struct Model {
     pub(crate) needs: Vec<crate::load::layout::Need>,
     /// The walks' item lengths and the node pool's latency, for the rules.
     pub(crate) rules: Box<crate::rules::RuleInputs>,
+    /// Each varying predicate's threshold as the sweep's bound, by predicate
+    /// ([`crate::predict::sweep_bounds`]).
+    pub(crate) bounds: Vec<u64>,
     /// The parsed nodes, for introspection and the full walk.
     #[cfg(any(test, feature = "research"))]
     pub(crate) nodes: Vec<Node>,

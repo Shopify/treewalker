@@ -316,7 +316,7 @@ fn precomputed_masks(c: &Case, rows: &[f64], sweep: bool) -> Vec<Vec<u64>> {
     let n = rows.len() / model.config.n_features();
     let np = model.varying_predicates.len();
     let words = 2 * crate::predict::mask::rows::units(n);
-    let (mut order, mut codes) = (vec![(0.0, 0); n], vec![0; n]);
+    let (mut order, mut codes) = (vec![[0; 2]; 2 * n], vec![0; n]);
     let counters = &mut super::WorkCounters::default();
     let f32 = model.threshold_type == crate::model::ThresholdType::F32;
     let mut masks = vec![0u64; 2 * np * words];
