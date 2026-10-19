@@ -1,52 +1,47 @@
 //! Wide-mask operations on x86-64: SSE2, part of the baseline, two words per vector;
-//! with AVX2 enabled at build time, four words per vector for masks of 256 bits and up.
+//! at a level with AVX2 ([`Isa`]), four words per vector for masks of 256 bits and up.
+
+use std::marker::PhantomData;
 
 use super::ops::WordMaps;
+use crate::predict::isa::Isa;
 
-#[cfg(target_feature = "avx2")]
 macro_rules! dispatch {
     ($f:ident($($arg:expr),*)) => {
-        if W.is_multiple_of(4) { avx2::$f($($arg),*) } else { sse2::$f($($arg),*) }
-    };
-}
-
-#[cfg(not(target_feature = "avx2"))]
-macro_rules! dispatch {
-    ($f:ident($($arg:expr),*)) => {
-        sse2::$f($($arg),*)
+        if X::AVX2 && W.is_multiple_of(4) { avx2::$f($($arg),*) } else { sse2::$f($($arg),*) }
     };
 }
 
 #[inline]
-pub fn and<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn and<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     dispatch!(and(a, b))
 }
 
 #[inline]
-pub fn and_not<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn and_not<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     dispatch!(and_not(a, b))
 }
 
 #[inline]
-pub fn or<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn or<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     dispatch!(or(a, b))
 }
 
 #[inline]
-pub fn xor<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn xor<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     dispatch!(xor(a, b))
 }
 
 #[inline]
-pub fn is_zero<const W: usize>(a: &[u64; W]) -> bool {
+pub fn is_zero<X: Isa, const W: usize>(a: &[u64; W]) -> bool {
     dispatch!(is_zero(a))
 }
 
 /// With POPCNT, masks of up to 8 words count one word at a time, in fewer instructions
 /// than a vector count and its sum across lanes.
 #[inline]
-pub fn popcount<const W: usize>(a: &[u64; W]) -> u32 {
-    if cfg!(target_feature = "popcnt") && W <= 8 {
+pub fn popcount<X: Isa, const W: usize>(a: &[u64; W]) -> u32 {
+    if X::POPCNT && W <= 8 {
         a.iter().map(|x| x.count_ones()).sum()
     } else {
         dispatch!(popcount(a))
@@ -56,9 +51,9 @@ pub fn popcount<const W: usize>(a: &[u64; W]) -> u32 {
 /// Word maps of one bit per word: AVX-512 tests into a mask register with AVX-512F and
 /// VL; else SSE4.1 compares (AVX2 for 4 words at a time) and a move mask; else one word
 /// at a time.
-pub struct Maps;
+pub struct Maps<X>(PhantomData<X>);
 
-impl WordMaps for Maps {
+impl<X: Isa> WordMaps for Maps<X> {
     #[inline]
     fn stride<const W: usize>() -> u32 {
         1
@@ -66,30 +61,52 @@ impl WordMaps for Maps {
 
     #[inline]
     fn nonzero<const W: usize>(w: &[u64; W]) -> u64 {
-        maps::nonzero(w)
+        maps::nonzero::<X, W>(w)
     }
 
     #[inline]
     fn popcount<const W: usize>(w: &[u64; W]) -> u32 {
-        popcount(w)
+        popcount::<X, W>(w)
     }
 }
 
-#[cfg(all(target_feature = "avx512f", target_feature = "avx512vl"))]
 mod maps {
     use std::arch::x86_64::{
-        _mm_loadu_si128, _mm_test_epi64_mask, _mm256_loadu_si256, _mm256_test_epi64_mask,
+        _mm_castsi128_pd, _mm_cmpeq_epi64, _mm_loadu_si128, _mm_movemask_pd, _mm_setzero_si128,
+        _mm_test_epi64_mask, _mm256_loadu_si256, _mm256_test_epi64_mask,
     };
 
-    /// The mask register's bits of a test of each word against itself, 4 words at a
-    /// time, or 2 when `W` is 2, gathered into one map.
+    use crate::predict::isa::Isa;
+
     #[inline]
-    pub fn nonzero<const W: usize>(w: &[u64; W]) -> u64 {
+    pub fn nonzero<X: Isa, const W: usize>(w: &[u64; W]) -> u64 {
+        if X::AVX512 {
+            nonzero_avx512(w)
+        } else if X::SSE41 {
+            nonzero_sse41::<X, W>(w)
+        } else {
+            nonzero_words(w)
+        }
+    }
+
+    /// One word at a time.
+    #[inline]
+    fn nonzero_words<const W: usize>(w: &[u64; W]) -> u64 {
+        w.iter()
+            .enumerate()
+            .fold(0, |m, (i, &x)| m | u64::from(x != 0) << i)
+    }
+
+    /// The mask register's bits of a test of each word against itself, 4 words at a
+    /// time, or 2 when `W` is 2, gathered into one map. Only levels with AVX-512F and VL
+    /// call it.
+    #[inline]
+    fn nonzero_avx512<const W: usize>(w: &[u64; W]) -> u64 {
         if W.is_multiple_of(4) {
             let (q, _) = w.as_chunks::<4>();
             q.iter().enumerate().fold(0, |m, (j, q)| {
-                // SAFETY: AVX-512F and VL are enabled at build time; `q` holds the 32
-                // bytes read, and the load is unaligned.
+                // SAFETY: the level has AVX-512F and VL; `q` holds the 32 bytes read,
+                // and the load is unaligned.
                 let bits = unsafe {
                     let v = _mm256_loadu_si256(q.as_ptr().cast());
                     _mm256_test_epi64_mask(v, v)
@@ -99,8 +116,8 @@ mod maps {
         } else {
             let (p, _) = w.as_chunks::<2>();
             p.iter().enumerate().fold(0, |m, (j, p)| {
-                // SAFETY: AVX-512F and VL are enabled at build time; `p` holds the 16
-                // bytes read, and the load is unaligned.
+                // SAFETY: the level has AVX-512F and VL; `p` holds the 16 bytes read,
+                // and the load is unaligned.
                 let bits = unsafe {
                     let v = _mm_loadu_si128(p.as_ptr().cast());
                     _mm_test_epi64_mask(v, v)
@@ -109,31 +126,20 @@ mod maps {
             })
         }
     }
-}
-
-#[cfg(all(
-    target_feature = "sse4.1",
-    not(all(target_feature = "avx512f", target_feature = "avx512vl"))
-))]
-mod maps {
-    use std::arch::x86_64::{
-        _mm_castsi128_pd, _mm_cmpeq_epi64, _mm_loadu_si128, _mm_movemask_pd, _mm_setzero_si128,
-    };
 
     /// The words that are 0, by a compare and a move mask per 2 words, or per 4 with
-    /// AVX2.
+    /// AVX2. Only levels with SSE4.1 call it.
     #[inline]
-    fn zero<const W: usize>(w: &[u64; W]) -> u64 {
-        #[cfg(target_feature = "avx2")]
-        if W.is_multiple_of(4) {
+    fn zero<X: Isa, const W: usize>(w: &[u64; W]) -> u64 {
+        if X::AVX2 && W.is_multiple_of(4) {
             use std::arch::x86_64::{
                 _mm256_castsi256_pd, _mm256_cmpeq_epi64, _mm256_loadu_si256, _mm256_movemask_pd,
                 _mm256_setzero_si256,
             };
             let (q, _) = w.as_chunks::<4>();
             return q.iter().enumerate().fold(0, |m, (j, q)| {
-                // SAFETY: AVX2 is enabled at build time; `q` holds the 32 bytes read, and
-                // the load is unaligned.
+                // SAFETY: the level has AVX2; `q` holds the 32 bytes read, and the load
+                // is unaligned.
                 let bits = unsafe {
                     let vec = _mm256_loadu_si256(q.as_ptr().cast());
                     let eq = _mm256_cmpeq_epi64(vec, _mm256_setzero_si256());
@@ -144,8 +150,8 @@ mod maps {
         }
         let (p, _) = w.as_chunks::<2>();
         p.iter().enumerate().fold(0, |m, (j, p)| {
-            // SAFETY: SSE4.1 is enabled at build time; `p` holds the 16 bytes read, and
-            // the load is unaligned.
+            // SAFETY: the level has SSE4.1; `p` holds the 16 bytes read, and the load is
+            // unaligned.
             let bits = unsafe {
                 let vec = _mm_loadu_si128(p.as_ptr().cast());
                 let eq = _mm_cmpeq_epi64(vec, _mm_setzero_si128());
@@ -156,18 +162,8 @@ mod maps {
     }
 
     #[inline]
-    pub fn nonzero<const W: usize>(w: &[u64; W]) -> u64 {
-        !zero(w) & (u64::MAX >> (64 - W))
-    }
-}
-
-#[cfg(not(target_feature = "sse4.1"))]
-mod maps {
-    #[inline]
-    pub fn nonzero<const W: usize>(w: &[u64; W]) -> u64 {
-        w.iter()
-            .enumerate()
-            .fold(0, |m, (i, &x)| m | u64::from(x != 0) << i)
+    fn nonzero_sse41<X: Isa, const W: usize>(w: &[u64; W]) -> u64 {
+        !zero::<X, W>(w) & (u64::MAX >> (64 - W))
     }
 }
 
@@ -180,13 +176,17 @@ pub fn first<const W: usize>(n: usize) -> [u64; W] {
     })
 }
 #[inline]
-pub fn select<const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn select<X: Isa, const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     dispatch!(select(c, a, b))
 }
 
 pub use sse2::Spans;
 
 mod sse2 {
+    use std::marker::PhantomData;
+
+    use crate::predict::isa::Isa;
+
     use std::arch::x86_64::{
         __m128i, _mm_add_epi8, _mm_add_epi32, _mm_add_epi64, _mm_and_si128, _mm_andnot_si128,
         _mm_castps_si128, _mm_castsi128_ps, _mm_cmpeq_epi8, _mm_cvtsi128_si32, _mm_loadu_si128,
@@ -300,13 +300,22 @@ mod sse2 {
         unsafe { _mm_or_si128(_mm_and_si128(m, a), _mm_andnot_si128(m, b)) }
     }
 
-    /// Four lanes, all ones where a word of `a` then `b` is 0: each word's halves
-    /// compared with SSE4.1, gathered by one shuffle.
-    #[cfg(target_feature = "sse4.1")]
+    /// Four lanes, all ones where a word of `a` then `b` is 0: with SSE4.1 each word
+    /// compared whole and gathered by one shuffle, else its halves.
     #[inline]
-    fn zero_words(a: __m128i, b: __m128i) -> __m128i {
+    fn zero_words<X: Isa>(a: __m128i, b: __m128i) -> __m128i {
+        if X::SSE41 {
+            zero_words_sse41(a, b)
+        } else {
+            zero_words_sse2(a, b)
+        }
+    }
+
+    /// [`zero_words`] with SSE4.1: each word compared whole, gathered by one shuffle.
+    #[inline]
+    fn zero_words_sse41(a: __m128i, b: __m128i) -> __m128i {
         use std::arch::x86_64::_mm_cmpeq_epi64;
-        // SAFETY: SSE4.1 is enabled at build time.
+        // SAFETY: the level has SSE4.1.
         unsafe {
             let (a, b) = (
                 _mm_cmpeq_epi64(a, _mm_setzero_si128()),
@@ -317,11 +326,10 @@ mod sse2 {
         }
     }
 
-    /// Four lanes, all ones where a word of `a` then `b` is 0: each word's low halves
-    /// or'ed with its high halves, gathered by two shuffles, then compared.
-    #[cfg(not(target_feature = "sse4.1"))]
+    /// [`zero_words`] with SSE2: each word's low halves or'ed with its high halves,
+    /// gathered by two shuffles, then compared.
     #[inline]
-    fn zero_words(a: __m128i, b: __m128i) -> __m128i {
+    fn zero_words_sse2(a: __m128i, b: __m128i) -> __m128i {
         use std::arch::x86_64::_mm_cmpeq_epi32;
         // SAFETY: SSE2 is always available on x86-64.
         unsafe {
@@ -338,14 +346,15 @@ mod sse2 {
     /// first such index, and whether no word had rows yet. Word indices are below
     /// 2^32.
     #[derive(Clone, Copy)]
-    pub struct Spans {
+    pub struct Spans<X> {
         index: __m128i,
         last: __m128i,
         first: __m128i,
         unseen: __m128i,
+        level: PhantomData<X>,
     }
 
-    impl Spans {
+    impl<X: Isa> Spans<X> {
         /// Spans of masks given from unit `unit` on.
         #[inline]
         pub fn new(unit: usize) -> Self {
@@ -357,6 +366,7 @@ mod sse2 {
                     last: _mm_setzero_si128(),
                     first: _mm_set1_epi32(-1),
                     unseen: _mm_set1_epi32(-1),
+                    level: PhantomData,
                 }
             }
         }
@@ -366,7 +376,7 @@ mod sse2 {
         pub fn add(&mut self, a: &[u64; 2], b: &[u64; 2]) {
             // SAFETY: SSE2 is always available on x86-64.
             unsafe {
-                let zero = zero_words(load(a), load(b));
+                let zero = zero_words::<X>(load(a), load(b));
                 self.last = blend(zero, self.last, self.index);
                 self.first = blend(self.unseen, self.index, self.first);
                 self.unseen = _mm_and_si128(self.unseen, zero);
@@ -396,7 +406,7 @@ mod sse2 {
     }
 }
 
-#[cfg(target_feature = "avx2")]
+/// Only levels with AVX2 call these.
 mod avx2 {
     use std::arch::x86_64::{
         __m256i, _mm_add_epi64, _mm_cvtsi128_si32, _mm_unpackhi_epi64, _mm256_add_epi8,
@@ -416,7 +426,7 @@ mod avx2 {
 
     #[inline]
     fn load(q: &[u64; 4]) -> __m256i {
-        // SAFETY: AVX2 is enabled at build time; `q` holds the 32 bytes read, and the
+        // SAFETY: the level has AVX2; `q` holds the 32 bytes read, and the
         // load is unaligned.
         unsafe { _mm256_loadu_si256(q.as_ptr().cast()) }
     }
@@ -431,7 +441,7 @@ mod avx2 {
         let mut out = [0; W];
         let (o, _) = out.as_chunks_mut::<4>();
         for ((o, a), b) in o.iter_mut().zip(quads(a)).zip(quads(b)) {
-            // SAFETY: AVX2 is enabled at build time; `o` holds the 32 bytes written, and
+            // SAFETY: the level has AVX2; `o` holds the 32 bytes written, and
             // the store is unaligned.
             unsafe { _mm256_storeu_si256(o.as_mut_ptr().cast(), f(load(a), load(b))) };
         }
@@ -440,31 +450,31 @@ mod avx2 {
 
     #[inline]
     pub fn and<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
-        // SAFETY: AVX2 is enabled at build time.
+        // SAFETY: the level has AVX2.
         map(a, b, |x, y| unsafe { _mm256_and_si256(x, y) })
     }
 
     #[inline]
     pub fn and_not<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
-        // SAFETY: AVX2 is enabled at build time.
+        // SAFETY: the level has AVX2.
         map(a, b, |x, y| unsafe { _mm256_andnot_si256(y, x) })
     }
 
     #[inline]
     pub fn or<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
-        // SAFETY: AVX2 is enabled at build time.
+        // SAFETY: the level has AVX2.
         map(a, b, |x, y| unsafe { _mm256_or_si256(x, y) })
     }
 
     #[inline]
     pub fn xor<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
-        // SAFETY: AVX2 is enabled at build time.
+        // SAFETY: the level has AVX2.
         map(a, b, |x, y| unsafe { _mm256_xor_si256(x, y) })
     }
 
     #[inline]
     pub fn is_zero<const W: usize>(a: &[u64; W]) -> bool {
-        // SAFETY: AVX2 is enabled at build time.
+        // SAFETY: the level has AVX2.
         unsafe {
             let acc = quads(a).iter().fold(_mm256_setzero_si256(), |acc, q| {
                 _mm256_or_si256(acc, load(q))
@@ -477,7 +487,7 @@ mod avx2 {
     /// vector and 32 in all, then summed across the vector once.
     #[inline]
     pub fn popcount<const W: usize>(a: &[u64; W]) -> u32 {
-        // SAFETY: AVX2 is enabled at build time.
+        // SAFETY: the level has AVX2.
         unsafe {
             let table = _mm256_setr_epi8(
                 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3,
@@ -499,7 +509,7 @@ mod avx2 {
 
     #[inline]
     pub fn select<const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
-        // SAFETY: AVX2 is enabled at build time.
+        // SAFETY: the level has AVX2.
         let m = unsafe { _mm256_set1_epi64x(i64::from(c).wrapping_neg()) };
         // SAFETY: as above.
         map(a, b, |x, y| unsafe {

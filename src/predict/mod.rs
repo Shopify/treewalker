@@ -54,6 +54,7 @@
 
 mod counters;
 mod finish;
+mod isa;
 mod kernel;
 mod leaves;
 pub(crate) mod mask;
@@ -73,6 +74,7 @@ pub use counters::{COUNTERS_VERSION, Phases};
 
 use crate::model::{Model, ThresholdType};
 use crate::rules::Tuning;
+use isa::Native;
 
 pub(crate) use crate::predictor::{Groups, Predictor};
 pub(crate) use kernel::Options;
@@ -118,10 +120,10 @@ impl Predictor {
         debug_assert!(STATS == stats.is_some(), "a counted call gives its stats");
         let stats = stats.unwrap_or(idle);
         match model.threshold_type {
-            ThresholdType::F64 => model.kernel_groups::<false, STATS, ABLATE>(
+            ThresholdType::F64 => model.kernel_groups::<Native, false, STATS, ABLATE>(
                 data, out, groups, s, options, stats, finalize,
             ),
-            ThresholdType::F32 => model.kernel_groups::<true, STATS, ABLATE>(
+            ThresholdType::F32 => model.kernel_groups::<Native, true, STATS, ABLATE>(
                 data, out, groups, s, options, stats, finalize,
             ),
         }

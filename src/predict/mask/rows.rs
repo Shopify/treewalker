@@ -11,9 +11,11 @@ use std::hint::select_unpredictable;
 use super::ops::add_word_runs;
 use super::{Wide, simd};
 use crate::exact::RunSink;
+use crate::predict::isa::{Isa, Native};
 
-/// The 16-byte unit of a runtime-width mask: two words, one vector.
-pub type Unit = Wide<2>;
+/// The 16-byte unit of a runtime-width mask: two words, one vector, with the
+/// operations of level `X`.
+pub type Unit<X = Native> = Wide<2, X>;
 
 /// Units of a mask of `rows` rows.
 #[must_use]
@@ -23,20 +25,20 @@ pub const fn units(rows: usize) -> usize {
 
 /// The words of `m`, lowest first.
 #[must_use]
-pub const fn words(m: &[Unit]) -> &[u64] {
+pub const fn words<X>(m: &[Unit<X>]) -> &[u64] {
     // SAFETY: a unit is two words without padding (`repr(C)`), so the units' bytes
     // hold twice as many words, at a word-aligned address.
     unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<u64>(), 2 * m.len()) }
 }
 
 /// The words of `m`, lowest first, to write.
-pub const fn words_mut(m: &mut [Unit]) -> &mut [u64] {
+pub const fn words_mut<X>(m: &mut [Unit<X>]) -> &mut [u64] {
     // SAFETY: as in [`words`]; the borrow is exclusive.
     unsafe { std::slice::from_raw_parts_mut(m.as_mut_ptr().cast::<u64>(), 2 * m.len()) }
 }
 
 /// Sets `m` to rows `0..n`. Panics if `n` exceeds its rows.
-pub fn first(m: &mut [Unit], n: usize) {
+pub fn first<X>(m: &mut [Unit<X>], n: usize) {
     let w = words_mut(m);
     assert!(
         n <= 64 * w.len(),
@@ -103,24 +105,24 @@ impl Span {
     clippy::inline_always,
     reason = "resolve's split, once per varying stop"
 )]
-pub unsafe fn split(
-    rows: *const Unit,
-    side: *const Unit,
-    heavy: *mut Unit,
-    light: *mut Unit,
+pub unsafe fn split<X: Isa>(
+    rows: *const Unit<X>,
+    side: *const Unit<X>,
+    heavy: *mut Unit<X>,
+    light: *mut Unit<X>,
     span: Span,
 ) -> (Span, Span) {
     let units = span.units();
-    let mut spans = simd::Spans::new(units.start);
+    let mut spans = simd::Spans::<X>::new(units.start);
     for i in units {
         // SAFETY: the caller guarantees the bounds and that unit i of rows is read
         // before unit i of heavy is written.
         unsafe {
             let (carried, split) = ((*rows.add(i)).0, (*side.add(i)).0);
-            let heavy_rows = simd::and(&carried, &split);
-            let light_rows = simd::and_not(&carried, &split);
-            *heavy.add(i) = Wide(heavy_rows);
-            *light.add(i) = Wide(light_rows);
+            let heavy_rows = simd::and::<X, 2>(&carried, &split);
+            let light_rows = simd::and_not::<X, 2>(&carried, &split);
+            *heavy.add(i) = Wide::new(heavy_rows);
+            *light.add(i) = Wide::new(light_rows);
             spans.add(&heavy_rows, &light_rows);
         }
     }

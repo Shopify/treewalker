@@ -15,7 +15,7 @@ pub(super) trait Scan<M> {
     /// The left rows of varying predicate `pred` among `rows`, the units of a
     /// runtime-width mask from its unit `unit` on, into `left`, which has as many
     /// units.
-    fn left_rows(&mut self, pred: usize, rows: &[Unit], left: &mut [Unit], unit: usize);
+    fn left_rows<X>(&mut self, pred: usize, rows: &[Unit<X>], left: &mut [Unit<X>], unit: usize);
 }
 
 /// Production's [`Scan`], which it never calls: a type without data, unlike
@@ -30,7 +30,7 @@ impl<M> Scan<M> for NoScan {
     }
 
     #[inline(always)]
-    fn left_rows(&mut self, _: usize, _: &[Unit], _: &mut [Unit], _: usize) {}
+    fn left_rows<X>(&mut self, _: usize, _: &[Unit<X>], _: &mut [Unit<X>], _: usize) {}
 }
 
 /// The left rows of a varying predicate among an event's rows, by scanning them: the
@@ -110,7 +110,7 @@ impl<M: Mask, const F32: bool, const STATS: bool> Scan<M> for Scans<'_, '_, F32,
         left
     }
 
-    fn left_rows(&mut self, pred: usize, rows: &[Unit], left: &mut [Unit], unit: usize) {
+    fn left_rows<X>(&mut self, pred: usize, rows: &[Unit<X>], left: &mut [Unit<X>], unit: usize) {
         let mut route = self.0.router::<F32, STATS>(pred);
         let left = rows::words_mut(left);
         left.fill(0);

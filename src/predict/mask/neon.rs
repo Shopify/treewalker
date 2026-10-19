@@ -13,7 +13,10 @@ use std::arch::aarch64::{
     vuzp1q_u32,
 };
 
+use std::marker::PhantomData;
+
 use super::ops::WordMaps;
+use crate::predict::isa::Isa;
 
 /// The mask's words in vector-sized pairs.
 #[inline]
@@ -45,31 +48,31 @@ fn map<const W: usize>(
 }
 
 #[inline]
-pub fn and<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn and<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     // SAFETY: NEON is always available on AArch64.
     map(a, b, |x, y| unsafe { vandq_u64(x, y) })
 }
 
 #[inline]
-pub fn and_not<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn and_not<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     // SAFETY: NEON is always available on AArch64.
     map(a, b, |x, y| unsafe { vbicq_u64(x, y) })
 }
 
 #[inline]
-pub fn or<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn or<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     // SAFETY: NEON is always available on AArch64.
     map(a, b, |x, y| unsafe { vorrq_u64(x, y) })
 }
 
 #[inline]
-pub fn xor<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn xor<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     // SAFETY: NEON is always available on AArch64.
     map(a, b, |x, y| unsafe { veorq_u64(x, y) })
 }
 
 #[inline]
-pub fn is_zero<const W: usize>(a: &[u64; W]) -> bool {
+pub fn is_zero<X: Isa, const W: usize>(a: &[u64; W]) -> bool {
     // SAFETY: NEON is always available on AArch64.
     unsafe {
         let acc = pairs(a)
@@ -82,7 +85,7 @@ pub fn is_zero<const W: usize>(a: &[u64; W]) -> bool {
 /// Byte counts summed in one vector, at most 8 per vector and 64 in all, then summed
 /// across the vector once.
 #[inline]
-pub fn popcount<const W: usize>(a: &[u64; W]) -> u32 {
+pub fn popcount<X: Isa, const W: usize>(a: &[u64; W]) -> u32 {
     // SAFETY: NEON is always available on AArch64.
     unsafe {
         let acc = pairs(a).iter().fold(vdupq_n_u8(0), |acc, p| {
@@ -117,9 +120,9 @@ fn word_map<const W: usize>(a: &[u64; W], f: impl Fn(uint64x2_t) -> uint64x2_t) 
 }
 
 /// Word maps by vector compares, narrowed to `64 / W` bits per word.
-pub struct Maps;
+pub struct Maps<X>(PhantomData<X>);
 
-impl WordMaps for Maps {
+impl<X: Isa> WordMaps for Maps<X> {
     #[inline]
     fn stride<const W: usize>() -> u32 {
         64 / W as u32
@@ -133,7 +136,7 @@ impl WordMaps for Maps {
 
     #[inline]
     fn popcount<const W: usize>(w: &[u64; W]) -> u32 {
-        popcount(w)
+        popcount::<X, W>(w)
     }
 }
 
@@ -161,7 +164,7 @@ pub fn first<const W: usize>(n: usize) -> [u64; W] {
     out
 }
 #[inline]
-pub fn select<const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn select<X: Isa, const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     // SAFETY: NEON is always available on AArch64.
     let m = unsafe { vdupq_n_u64(u64::from(c).wrapping_neg()) };
     // SAFETY: as above.
@@ -173,14 +176,15 @@ pub fn select<const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
 /// mask, hold the next word index, the last index whose word had rows, the first such
 /// index, and whether no word had rows yet. Word indices are below 2^32.
 #[derive(Clone, Copy)]
-pub struct Spans {
+pub struct Spans<X> {
     index: uint32x4_t,
     last: uint32x4_t,
     first: uint32x4_t,
     unseen: uint32x4_t,
+    level: PhantomData<X>,
 }
 
-impl Spans {
+impl<X> Spans<X> {
     /// Spans of masks given from unit `unit` on.
     #[inline]
     pub fn new(unit: usize) -> Self {
@@ -193,6 +197,7 @@ impl Spans {
                 last: vdupq_n_u32(0),
                 first: vdupq_n_u32(u32::MAX),
                 unseen: vdupq_n_u32(u32::MAX),
+                level: PhantomData,
             }
         }
     }

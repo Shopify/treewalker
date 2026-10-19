@@ -2,9 +2,10 @@
 //! walks ([`Walks`]): the lanes and prefetch distance each walk is compiled for.
 
 use super::counters::{Clock, Stats};
+use super::isa::Isa;
 use super::kernel::Options;
 use super::mask::Mask;
-use super::resolve::{COMPRESS, Carrier, LISTED_SLACK, Resolve, Splits};
+use super::resolve::{Carrier, LISTED_SLACK, Resolve, Splits, compress};
 use super::scan::Scan;
 use super::scratch::Queues;
 use super::walk::{self, Item, MAX_PAD, Pools, Steps, lanes_of, pad};
@@ -136,6 +137,7 @@ impl<M: Mask> Pass<'_, M> {
     /// valid for [`walk::walk`].
     #[inline(never)]
     pub(super) unsafe fn run<
+        X: Isa,
         C: Carrier<M>,
         const STATS: bool,
         const ABLATE: bool,
@@ -155,7 +157,7 @@ impl<M: Mask> Pass<'_, M> {
         // past the last leaf entry and position: the scratch gives both that many more
         // than the chunk's leaves plus one, which the items' length bounds with the most
         // padding (`Model::masked_group` asserts it).
-        if C::ARENA && !C::RUNTIME && COMPRESS {
+        if C::ARENA && !C::RUNTIME && compress::<X>() {
             let room = queues.items.len() - MAX_PAD + LISTED_SLACK;
             assert!(
                 queues.leaves.len() >= room && queues.listed.len() >= room,
@@ -219,7 +221,7 @@ impl<M: Mask> Pass<'_, M> {
                 res.out = next;
                 let leaves_before = res.n_leaves;
                 let items_in_pass = n;
-                n = super::resolve::resolve::<M, C, SCAN, EMPTY, STATS>(
+                n = super::resolve::resolve::<X, M, C, SCAN, EMPTY, STATS>(
                     &mut res,
                     items_in_pass,
                     scan,

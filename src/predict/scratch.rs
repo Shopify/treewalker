@@ -118,7 +118,7 @@ unsafe impl Words for u32 {}
 unsafe impl Words for u64 {}
 
 // SAFETY: arrays of u64, 16-byte aligned, 16 to 128 bytes.
-unsafe impl<const W: usize> Words for Wide<W> {}
+unsafe impl<const W: usize, X: Copy> Words for Wide<W, X> {}
 
 /// `units` as a slice of `T`.
 pub(super) const fn view<T: Words>(units: &mut [Unit]) -> &mut [T] {

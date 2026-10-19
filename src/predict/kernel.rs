@@ -15,6 +15,7 @@
 //! a chunk rather than the model, and wide masks get chunks of fewer trees.
 
 use super::counters::{Clock, Stats};
+use super::isa::Isa;
 use super::leaves::leaf_pass;
 use super::mask::rows::{self, Unit};
 use super::mask::{Mask, Wide};
@@ -81,7 +82,7 @@ impl Model {
         clippy::too_many_arguments,
         reason = "the call, its scratch and its variant"
     )]
-    pub(super) fn kernel_groups<const F32: bool, const STATS: bool, const ABLATE: bool>(
+    pub(super) fn kernel_groups<X: Isa, const F32: bool, const STATS: bool, const ABLATE: bool>(
         &self,
         data: &[f64],
         out: &mut [f64],
@@ -120,22 +121,22 @@ impl Model {
             let c = &mut s.common;
             macro_rules! group {
                 ($m:ty, $c:ty, $q:expr, $u:expr) => {
-                    self.masked_group::<F32, $m, $c, STATS, ABLATE>(
+                    self.masked_group::<X, F32, $m, $c, STATS, ABLATE>(
                         rows, results, c, $q, $u, options, stats,
                     )
                 };
             }
             match Width::of(held) {
-                _ if held > WIDE_ROWS => group!(Unit, Slot, &mut s.slots, rows::units(held)),
+                _ if held > WIDE_ROWS => group!(Unit<X>, Slot, &mut s.slots, rows::units(held)),
                 Width::W32 if constant => {
                     self.constant_group::<STATS, ABLATE>(results, c, options, stats);
                 }
                 Width::W32 => group!(u32, u32, &mut s.q32, 1),
                 Width::W64 => group!(u64, u64, &mut s.q64, 1),
-                Width::W128 => group!(Wide<2>, Handle, &mut s.handles, 1),
-                Width::W256 => group!(Wide<4>, Handle, &mut s.handles, 1),
-                Width::W512 => group!(Wide<8>, Handle, &mut s.handles, 1),
-                Width::W1024 => group!(Wide<16>, Handle, &mut s.handles, 1),
+                Width::W128 => group!(Wide<2, X>, Handle, &mut s.handles, 1),
+                Width::W256 => group!(Wide<4, X>, Handle, &mut s.handles, 1),
+                Width::W512 => group!(Wide<8, X>, Handle, &mut s.handles, 1),
+                Width::W1024 => group!(Wide<16, X>, Handle, &mut s.handles, 1),
                 _ => unreachable!("wider groups take runtime-width masks"),
             }
             if finalize {
@@ -197,7 +198,7 @@ impl Model {
         clippy::too_many_arguments,
         reason = "the group, its scratch and its variant"
     )]
-    fn masked_group<const F32: bool, M, C, const STATS: bool, const ABLATE: bool>(
+    fn masked_group<X: Isa, const F32: bool, M, C, const STATS: bool, const ABLATE: bool>(
         &self,
         rows: &[f64],
         results: &mut [f64],
@@ -321,16 +322,16 @@ impl Model {
             macro_rules! passes {
                 ($scan:expr) => {
                     match (options.precompute, options.unsplit) {
-                        (true, true) => pass.run::<C, STATS, ABLATE, false, false>(
+                        (true, true) => pass.run::<X, C, STATS, ABLATE, false, false>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (true, false) => pass.run::<C, STATS, ABLATE, false, true>(
+                        (true, false) => pass.run::<X, C, STATS, ABLATE, false, true>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (false, true) => pass.run::<C, STATS, ABLATE, true, false>(
+                        (false, true) => pass.run::<X, C, STATS, ABLATE, true, false>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (false, false) => pass.run::<C, STATS, ABLATE, true, true>(
+                        (false, false) => pass.run::<X, C, STATS, ABLATE, true, true>(
                             walks, arena, queues, stops, words, $scan,
                         ),
                     }
@@ -344,7 +345,7 @@ impl Model {
                 if ABLATE {
                     passes!(&mut scan)
                 } else {
-                    pass.run::<C, STATS, ABLATE, false, false>(
+                    pass.run::<X, C, STATS, ABLATE, false, false>(
                         walks,
                         arena,
                         queues,

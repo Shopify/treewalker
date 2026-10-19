@@ -3,43 +3,45 @@
 
 use std::array::from_fn;
 use std::hint::select_unpredictable;
+use std::marker::PhantomData;
 
 use super::ops::WordMaps;
+use crate::predict::isa::Isa;
 
 #[inline]
-pub fn and<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn and<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     from_fn(|i| a[i] & b[i])
 }
 
 #[inline]
-pub fn and_not<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn and_not<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     from_fn(|i| a[i] & !b[i])
 }
 
 #[inline]
-pub fn or<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn or<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     from_fn(|i| a[i] | b[i])
 }
 
 #[inline]
-pub fn xor<const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn xor<X: Isa, const W: usize>(a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     from_fn(|i| a[i] ^ b[i])
 }
 
 #[inline]
-pub fn is_zero<const W: usize>(a: &[u64; W]) -> bool {
+pub fn is_zero<X: Isa, const W: usize>(a: &[u64; W]) -> bool {
     a.iter().fold(0, |acc, &x| acc | x) == 0
 }
 
 #[inline]
-pub fn popcount<const W: usize>(a: &[u64; W]) -> u32 {
+pub fn popcount<X: Isa, const W: usize>(a: &[u64; W]) -> u32 {
     a.iter().map(|x| x.count_ones()).sum()
 }
 
 /// Word maps of one bit per word.
-pub struct Maps;
+pub struct Maps<X>(PhantomData<X>);
 
-impl WordMaps for Maps {
+impl<X: Isa> WordMaps for Maps<X> {
     #[inline]
     fn stride<const W: usize>() -> u32 {
         1
@@ -54,7 +56,7 @@ impl WordMaps for Maps {
 
     #[inline]
     fn popcount<const W: usize>(w: &[u64; W]) -> u32 {
-        popcount(w)
+        popcount::<X, W>(w)
     }
 }
 
@@ -67,7 +69,7 @@ pub fn first<const W: usize>(n: usize) -> [u64; W] {
     })
 }
 #[inline]
-pub fn select<const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
+pub fn select<X: Isa, const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
     from_fn(|i| select_unpredictable(c, a[i], b[i]))
 }
 
@@ -75,14 +77,15 @@ pub fn select<const W: usize>(c: bool, a: &[u64; W], b: &[u64; W]) -> [u64; W] {
 /// increasing order: per word of a unit of each mask, the last index whose word had
 /// rows, the first such index, and whether no word had rows yet.
 #[derive(Clone, Copy)]
-pub struct Spans {
+pub struct Spans<X> {
     index: u32,
     last: [u32; 4],
     first: [u32; 4],
     unseen: [bool; 4],
+    level: PhantomData<X>,
 }
 
-impl Spans {
+impl<X> Spans<X> {
     /// Spans of masks given from unit `unit` on; word indices are below 2^32.
     #[inline]
     pub const fn new(unit: usize) -> Self {
@@ -91,6 +94,7 @@ impl Spans {
             last: [0; 4],
             first: [u32::MAX; 4],
             unseen: [true; 4],
+            level: PhantomData,
         }
     }
 
