@@ -2,9 +2,10 @@
 //! prefix starts, the varying masks, the walk and resolve passes over chunks of
 //! trees, the leaf pass and the finish, at the narrowest mask width that holds the group:
 //! `u32` or `u64` by value, `Wide` masks up to [`WIDE_ROWS`] rows and runtime-width
-//! masks of [`rows::units`] 128-bit units above, both in an arena. A single
-//! row has bins for every feature, so its walk steps through varying splits as
-//! constants: it needs no masks and stops only at leaves, which all carry its row.
+//! masks of [`rows::units`] 128-bit units above, both in an arena; then the call's
+//! outputs, finalized at once. A single row has bins for every feature, so its walk
+//! steps through varying splits as constants: it needs no masks and stops only at
+//! leaves, which all carry its row.
 //! Its one pass per chunk walks the roots in place and sums the leaf values from the
 //! walk's words, without items, leaf entries or difference arrays.
 //!
@@ -120,7 +121,8 @@ impl Model {
     }
 
     /// Tree sums, or with `finalize` outputs, of every group of a call, through the
-    /// kernel. With `STATS`, the work and phase times are added to `stats`; with
+    /// kernel; `finalize` turns the whole call's sums into outputs at once, after its
+    /// groups. With `STATS`, the work and phase times are added to `stats`; with
     /// `ABLATE`, `options` apply, otherwise the defaults do. The input must have
     /// passed [`super::Predictor::check`].
     #[expect(
@@ -184,11 +186,13 @@ impl Model {
                 Width::W1024 => group!(Wide<16, X>, Handle, &mut s.handles, 1),
                 _ => unreachable!("wider groups take runtime-width masks"),
             }
-            if finalize {
-                let t = Clock::<STATS>::start();
-                self.finalize_at::<X>(&mut out[start..end]);
-                t.lap(&mut stats.phases.finish);
-            }
+        }
+        // Once over the call's output, which its groups cover: each value takes the
+        // same operations wherever it sits in the slice.
+        if finalize {
+            let t = Clock::<STATS>::start();
+            self.finalize_at::<X>(out);
+            t.lap(&mut stats.phases.finish);
         }
     }
 

@@ -151,7 +151,7 @@ pub struct Phases {
     pub resolve: Duration,
     /// Leaf passes.
     pub leaf_pass: Duration,
-    /// Prefix sums into tree sums, and finalization.
+    /// Prefix sums into tree sums, per group, and the call's finalization, once.
     pub finish: Duration,
 }
 
