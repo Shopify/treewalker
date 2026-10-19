@@ -74,6 +74,22 @@ impl Default for Options {
     }
 }
 
+impl Options {
+    /// Whether to precompute the varying predicates' masks: always in production
+    /// (not `ABLATE`), else as `precompute` says.
+    #[inline(always)]
+    const fn precompute<const ABLATE: bool>(self) -> bool {
+        !ABLATE || self.precompute
+    }
+
+    /// Whether to precompute by the sweep rather than by brute force: always in
+    /// production (not `ABLATE`), else as `sweep` says.
+    #[inline(always)]
+    const fn sweep<const ABLATE: bool>(self) -> bool {
+        !ABLATE || self.sweep
+    }
+}
+
 impl Model {
     /// [`Self::kernel_groups`] at level `X` ([`Isa`]), inside the level's trampoline, so
     /// that the code it inlines compiles with the level's features.
@@ -230,8 +246,9 @@ impl Model {
         let layout = &self.layout;
         for group in &self.prefix_groups {
             let (base, k) = (group.node_base as usize, group.depth as usize);
-            let bail = (0..k)
-                .find(|&j| !layout.nodes[base + j].goes_heavy(&c.bins))
+            let bail = layout.nodes[base..base + k]
+                .iter()
+                .position(|n| !n.goes_heavy(&c.bins))
                 .unwrap_or(k);
             if STATS {
                 counters.prefix_steps += (bail + 1).min(k) as u64;
@@ -357,19 +374,20 @@ impl Model {
                 words,
             };
             // Production (not ABLATE) always precomputes by the sweep: the defaults.
-            if ABLATE && !options.precompute {
-            } else if !ABLATE || options.sweep {
-                self.precompute_sweep::<F32, _, _, STATS>(
-                    rows,
-                    &mut c.order,
-                    &mut c.codes,
-                    sides,
-                    lefts,
-                    missing,
-                    counters,
-                );
-            } else {
-                self.precompute_brute_force::<F32, _, _, STATS>(rows, sides, left, counters);
+            if options.precompute::<ABLATE>() {
+                if options.sweep::<ABLATE>() {
+                    self.precompute_sweep::<F32, _, _, STATS>(
+                        rows,
+                        &mut c.order,
+                        &mut c.codes,
+                        sides,
+                        lefts,
+                        missing,
+                        counters,
+                    );
+                } else {
+                    self.precompute_brute_force::<F32, _, _, STATS>(rows, sides, left, counters);
+                }
             }
             all_rows.fill(u64::MAX);
         } else {
@@ -378,26 +396,29 @@ impl Model {
             let (sides, _) = sides.as_chunks_mut::<2>();
             let (mut left, mut missing) = (M::ZERO, M::ZERO);
             // Production (not ABLATE) always precomputes by the sweep: the defaults.
-            if ABLATE && !options.precompute {
-            } else if !ABLATE || options.sweep {
-                // The sweep's copies of its running left mask: `left` itself for masks
-                // carried by value, else in the scratch.
-                let lefts = if <[M] as Lefts<M>>::TURNS == 1 {
-                    core::slice::from_mut(&mut left)
+            if options.precompute::<ABLATE>() {
+                if options.sweep::<ABLATE>() {
+                    // The sweep's copies of its running left mask: `left` itself for
+                    // masks carried by value, else in the scratch.
+                    let lefts = if <[M] as Lefts<M>>::TURNS == 1 {
+                        core::slice::from_mut(&mut left)
+                    } else {
+                        &mut view::<M>(&mut c.bits)[..<[M] as Lefts<M>>::TURNS]
+                    };
+                    self.precompute_sweep::<F32, M, _, STATS>(
+                        rows,
+                        &mut c.order,
+                        &mut c.codes,
+                        sides,
+                        lefts,
+                        &mut missing,
+                        counters,
+                    );
                 } else {
-                    &mut view::<M>(&mut c.bits)[..<[M] as Lefts<M>>::TURNS]
-                };
-                self.precompute_sweep::<F32, M, _, STATS>(
-                    rows,
-                    &mut c.order,
-                    &mut c.codes,
-                    sides,
-                    lefts,
-                    &mut missing,
-                    counters,
-                );
-            } else {
-                self.precompute_brute_force::<F32, M, _, STATS>(rows, sides, &mut left, counters);
+                    self.precompute_brute_force::<F32, M, _, STATS>(
+                        rows, sides, &mut left, counters,
+                    );
+                }
             }
             *all_rows = M::ones_if(true);
         }
