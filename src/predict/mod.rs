@@ -75,6 +75,7 @@ pub use counters::{COUNTERS_VERSION, Phases};
 use crate::model::{Model, ThresholdType};
 use crate::rules::Tuning;
 use isa::Native;
+pub(crate) use isa::{Level, level};
 
 pub(crate) use crate::predictor::{Groups, Predictor};
 pub(crate) use kernel::Options;
@@ -119,13 +120,24 @@ impl Predictor {
         let Workspace { kernel: s, idle } = &mut self.workspace;
         debug_assert!(STATS == stats.is_some(), "a counted call gives its stats");
         let stats = stats.unwrap_or(idle);
-        match model.threshold_type {
-            ThresholdType::F64 => model.kernel_groups::<Native, false, STATS, ABLATE>(
-                data, out, groups, s, options, stats, finalize,
-            ),
-            ThresholdType::F32 => model.kernel_groups::<Native, true, STATS, ABLATE>(
-                data, out, groups, s, options, stats, finalize,
-            ),
+        macro_rules! at {
+            ($x:ty) => {
+                match model.threshold_type {
+                    ThresholdType::F64 => model.kernel_groups_at::<$x, false, STATS, ABLATE>(
+                        data, out, groups, s, options, stats, finalize,
+                    ),
+                    ThresholdType::F32 => model.kernel_groups_at::<$x, true, STATS, ABLATE>(
+                        data, out, groups, s, options, stats, finalize,
+                    ),
+                }
+            };
+        }
+        match self.level {
+            Level::Native => at!(Native),
+            #[cfg(dispatch)]
+            Level::V3 => at!(isa::V3),
+            #[cfg(dispatch)]
+            Level::V4 => at!(isa::V4),
         }
     }
 }

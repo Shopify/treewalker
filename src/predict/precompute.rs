@@ -19,6 +19,7 @@
 use super::WorkCounters;
 use crate::load::layout::{BinMap, MaskChain, MaskFeature, MaskPlan};
 use crate::model::{Model, VaryingPredicate, threshold_go_left};
+use crate::predict::isa::Isa;
 use crate::predict::mask::Mask;
 
 /// A predicate's masks of both sides: its left rows and their complement, which
@@ -278,17 +279,35 @@ impl<M: Mask> Sides<M> for [[M; 2]] {
         unsafe { &mut self.get_unchecked_mut(p)[0] }
     }
 
-    // Never inlined: once per chain, and inlined it would take registers and stack in
-    // masked_group (the u64 instance's frame grew by 16 bytes) for code most groups
-    // never run.
-    #[inline(never)]
+    // Never inlined, and at the masks' level: once per chain, and inlined it would take
+    // registers and stack in masked_group (the u64 instance's frame grew by 16 bytes)
+    // for code most groups never run.
+    #[cfg_attr(not(dispatch), inline(always))]
+    #[cfg_attr(dispatch, inline(never))]
     fn chain(&mut self, points: &[(u32, bool)], all: &M) {
-        let mut union = M::ZERO;
-        for &(p, invert) in points {
-            let p = p as usize;
-            union = union.or(self[p][0]);
-            self[p] = sides(if invert { all.and_not(union) } else { union });
+        if M::Level::NATIVE {
+            return chain_sides::<M>(self, points, all);
         }
+        M::Level::with3(
+            #[inline(always)]
+            |out, points, all| chain_sides::<M>(out, points, all),
+            self,
+            points,
+            all,
+        );
+    }
+}
+
+/// [`Sides::chain`] of fixed-width masks, compiled with the features of the level that
+/// runs it.
+#[cfg_attr(dispatch, inline(always))]
+#[cfg_attr(not(dispatch), inline(never))]
+fn chain_sides<M: Mask>(out: &mut [[M; 2]], points: &[(u32, bool)], all: &M) {
+    let mut union = M::ZERO;
+    for &(p, invert) in points {
+        let p = p as usize;
+        union = union.or(out[p][0]);
+        out[p] = sides(if invert { all.and_not(union) } else { union });
     }
 }
 

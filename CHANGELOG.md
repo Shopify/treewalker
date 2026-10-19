@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.1.0
+
+In 3.1, default x86-64 builds run the kernel at the CPU's instruction-set level. The
+API is unchanged, and outputs are the same at every level.
+
+### Changes
+
+- On x86-64, a build that enables AVX2 and FMA (`-C target-cpu=x86-64-v3` or a CPU that
+  has them) compiles the kernel for its own features, as 3.0 did. Other x86-64 builds,
+  the default `x86-64` among them, also compile it for x86-64-v3 and for x86-64-v4 with
+  VPOPCNTDQ, BITALG and BF16 (Sapphire Rapids and Zen 4 on), and each predictor runs
+  the highest the CPU has; `TREEWALKER_ISA=base`, `v3` or `v4` asks for a lower one.
+  Outputs are the same at every level. The kernel uses no BF16 instruction: requiring
+  it keeps Ice Lake, Tiger Lake and Rocket Lake at x86-64-v3, which ran faster than
+  x86-64-v4 on Ice Lake.
+
 ## 3.0.0
 
 3.0 replaces the prediction kernel. The new one walks several trees at once on

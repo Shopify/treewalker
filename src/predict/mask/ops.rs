@@ -13,6 +13,10 @@ use crate::predict::isa::{Isa, Native};
 /// `u32` and `u64` are carried by value; [`Wide`] masks are meant to live in an arena
 /// and be read by reference.
 pub trait Mask: Copy + Eq + Send + Sync + 'static {
+    /// The level its operations are compiled for ([`Isa`]): [`Wide`]'s own, and
+    /// [`Native`] for the words, whose operations do not depend on one.
+    type Level: Isa;
+
     /// Rows the mask holds.
     const WIDTH: usize;
 
@@ -72,6 +76,7 @@ pub trait Mask: Copy + Eq + Send + Sync + 'static {
 macro_rules! impl_word_mask {
     ($ty:ty) => {
         impl Mask for $ty {
+            type Level = Native;
             const WIDTH: usize = <$ty>::BITS as usize;
             const ZERO: Self = 0;
 
@@ -160,7 +165,9 @@ impl_word_mask!(u64);
 
 /// Row mask of `W` 64-bit words, `64 * W` rows: bit `r` is bit `r % 64` of word
 /// `r / 64`, its operations those of level `X` ([`Isa`]). [`Mask`] is implemented for
-/// `W` of 2, 4, 8 and 16. Aligned to a NEON or SSE2 vector.
+/// `W` of 2, 4, 8 and 16. Aligned to a NEON or SSE2 vector. Where the build dispatches
+/// to levels, its operations are `#[inline(always)]`, for the reason the x86-64
+/// backend's are.
 #[derive(Clone, Copy, Debug)]
 #[repr(C, align(16))]
 pub struct Wide<const W: usize, X = Native>(pub [u64; W], pub PhantomData<X>);
@@ -176,7 +183,8 @@ impl<const W: usize, X> Wide<W, X> {
 macro_rules! impl_wide_mask {
     ($($w:literal),*) => {$(
         impl<X: Isa> PartialEq for Wide<$w, X> {
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn eq(&self, o: &Self) -> bool {
                 simd::is_zero::<X, $w>(&simd::xor::<X, $w>(&self.0, &o.0))
             }
@@ -185,6 +193,7 @@ macro_rules! impl_wide_mask {
         impl<X: Isa> Eq for Wide<$w, X> {}
 
         impl<X: Isa> Mask for Wide<$w, X> {
+            type Level = X;
             const WIDTH: usize = 64 * $w;
             const ZERO: Self = Self::new([0; $w]);
 
@@ -194,7 +203,8 @@ macro_rules! impl_wide_mask {
                 assert!(n <= Self::WIDTH, "first({n}) exceeds WIDTH={}", Self::WIDTH);
                 Self::new(simd::first(n))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn ones_if(c: bool) -> Self {
                 Self::new([u64::from(c).wrapping_neg(); $w])
             }
@@ -210,35 +220,43 @@ macro_rules! impl_wide_mask {
             fn flip(&mut self, r: usize) {
                 self.0[r / 64] ^= 1 << (r % 64);
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn and(self, o: Self) -> Self {
                 Self::new(simd::and::<X, $w>(&self.0, &o.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn and_not(self, o: Self) -> Self {
                 Self::new(simd::and_not::<X, $w>(&self.0, &o.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn or(self, o: Self) -> Self {
                 Self::new(simd::or::<X, $w>(&self.0, &o.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn xor(self, o: Self) -> Self {
                 Self::new(simd::xor::<X, $w>(&self.0, &o.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn is_zero(&self) -> bool {
                 simd::is_zero::<X, $w>(&self.0)
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn popcount(&self) -> u32 {
                 simd::popcount::<X, $w>(&self.0)
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn select(c: bool, a: Self, b: Self) -> Self {
                 Self::new(simd::select::<X, $w>(c, &a.0, &b.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn for_each_row(&self, mut f: impl FnMut(usize)) {
                 for (i, &w) in self.0.iter().enumerate() {
                     let mut m = w;

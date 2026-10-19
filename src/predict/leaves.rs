@@ -1,15 +1,53 @@
 //! The leaf pass: each leaf entry's value added to its rows' runs in the difference
 //! arrays.
 
+use super::isa::Isa;
 use super::mask::Mask;
 use super::resolve::Carrier;
 use super::walk::Item;
 use crate::exact::RunSink;
 
+/// [`leaf_pass`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+/// with the body compiled inside the level's trampoline; elsewhere inlined.
+#[cfg_attr(not(dispatch), inline(always))]
+pub(super) fn leaf_pass_at<
+    X: Isa,
+    M: Mask,
+    C: Carrier<M>,
+    S: RunSink + ?Sized,
+    const STATS: bool,
+>(
+    entries: &[Item<C>],
+    full: &[Item<C>],
+    arena: &[M],
+    u: usize,
+    values: &[S::Value],
+    even: &mut S,
+    odd: &mut S,
+) -> u64 {
+    if X::NATIVE {
+        return leaf_pass::<M, C, S, STATS>(entries, full, arena, u, values, even, odd);
+    }
+    X::with7(
+        #[inline(always)]
+        |entries, full, arena, u, values, even, odd| {
+            leaf_pass::<M, C, S, STATS>(entries, full, arena, u, values, even, odd)
+        },
+        entries,
+        full,
+        arena,
+        u,
+        values,
+        even,
+        odd,
+    )
+}
+
 /// Add each leaf entry's value to its rows: each of `full`, the first pass's entries,
 /// which carry all rows, to a running sum in registers, and each of `entries` to its
 /// runs, alternating between the sinks `even` and `odd`; with `STATS`, returns the
 /// number of runs, a full entry being one. Arena masks have `u` units of `M`.
+#[cfg_attr(dispatch, inline(always))]
 pub(super) fn leaf_pass<M: Mask, C: Carrier<M>, S: RunSink + ?Sized, const STATS: bool>(
     entries: &[Item<C>],
     full: &[Item<C>],

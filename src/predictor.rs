@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::forest::Forest;
 use crate::model::Model;
-use crate::predict::{Options, Workspace};
+use crate::predict::{Level, Options, Workspace, level};
 
 /// How the rows of one call divide into groups.
 #[derive(Clone, Copy)]
@@ -65,9 +65,18 @@ impl Groups<'_> {
 /// of `n_features`, if `out` does not hold one value per row, or if the grouping is
 /// invalid as documented on the call. Groups may have any width up to the configured
 /// `max_group_width`.
+///
+/// On x86-64, unless the build enables AVX2 and FMA, a predictor runs the kernel compiled
+/// for the highest of x86-64-v3 and x86-64-v4 (with VPOPCNTDQ, BITALG and BF16: Sapphire
+/// Rapids and Zen 4 on) that the CPU has, chosen when it is created; the environment
+/// variable `TREEWALKER_ISA` set to `base`, `v3` or `v4` asks for a lower one. Other
+/// builds run the kernel compiled for their own features and do not read it. Outputs are
+/// the same at every level.
 pub struct Predictor {
     pub(crate) model: Arc<Model>,
     pub(crate) workspace: Workspace,
+    /// The instruction-set level the kernel runs at, chosen when the predictor is made.
+    pub(crate) level: Level,
 }
 
 impl std::fmt::Debug for Predictor {
@@ -99,6 +108,7 @@ impl Forest {
         Predictor {
             workspace: Workspace::new(&self.model),
             model: Arc::clone(&self.model),
+            level: level(),
         }
     }
 }

@@ -25,7 +25,7 @@
 
 use std::hint::select_unpredictable;
 
-use super::isa::{Isa, Native};
+use super::isa::{DISPATCH, Isa, Native};
 use super::mask::rows::{self, Span, Unit};
 use super::mask::{Mask, Wide};
 use super::scan::Scan;
@@ -481,9 +481,13 @@ pub(super) const fn compress<X: Isa>() -> bool {
 }
 
 /// Entries past the last that listing fixed-width handles' varying stops may write, in
-/// `leaves` and in `listed`: `list_avx512` stores a block of 8 whole; 0 for the
-/// loop item by item.
-pub(super) const LISTED_SLACK: usize = if compress::<Native>() { 7 } else { 0 };
+/// `leaves` and in `listed`: `list_avx512` stores a block of 8 whole, where the build
+/// or a level it may dispatch to compresses; 0 for the loop item by item.
+pub(super) const LISTED_SLACK: usize = if compress::<Native>() || DISPATCH {
+    7
+} else {
+    0
+};
 
 /// Turn a pass's stops into the next pass's items, returned as a count, and leaf
 /// entries.

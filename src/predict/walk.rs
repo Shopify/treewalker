@@ -14,6 +14,7 @@
 
 use std::hint::select_unpredictable;
 
+use super::isa::Isa;
 use crate::load::layout::{FLAG_LEAF, LayoutNode, SLOT_SHIFT, STOPS_VARYING};
 
 pub(super) use crate::rules::{MAX_DISTANCE, MAX_LANES};
@@ -166,6 +167,47 @@ macro_rules! lanes {
     }};
 }
 
+/// [`walk`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+/// with the body compiled inside the level's trampoline; elsewhere inlined.
+///
+/// # Safety
+///
+/// As for [`walk`].
+#[cfg_attr(not(dispatch), inline(always))]
+#[cfg_attr(dispatch, inline(never))]
+pub(super) unsafe fn walk_at<
+    X: Isa,
+    I: Start,
+    const K: usize,
+    const VARYING: bool,
+    const D: usize,
+    const R: usize,
+    const STATS: bool,
+>(
+    p: &Pools,
+    items: *const I,
+    stops: *mut u32,
+    words: *mut u64,
+    steps: &mut Steps,
+) {
+    if X::NATIVE {
+        // SAFETY: the caller's, which `walk` shares.
+        return unsafe { walk::<I, K, VARYING, D, R, STATS>(p, items, stops, words, steps) };
+    }
+    X::with5(
+        #[inline(always)]
+        |p, items, stops, words, steps| {
+            // SAFETY: as above.
+            unsafe { walk::<I, K, VARYING, D, R, STATS>(p, items, stops, words, steps) }
+        },
+        p,
+        items,
+        stops,
+        words,
+        steps,
+    );
+}
+
 /// One pass over the items `items[..n]`, which are followed by
 /// `pad(lanes, D)` items on the dummy, with the lanes of [`lanes_of`] for `K` and
 /// `VARYING`.
@@ -200,7 +242,8 @@ macro_rules! lanes {
 ///
 /// `items` holds `n + pad(lanes, D)` items on nodes of `p`, `stops` and `words` have
 /// room for `n + lanes` entries, and `p` is valid as [`step`] requires.
-#[inline(never)]
+#[cfg_attr(dispatch, inline(always))]
+#[cfg_attr(not(dispatch), inline(never))]
 pub(super) unsafe fn walk<
     I: Start,
     const K: usize,

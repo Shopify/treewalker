@@ -1,12 +1,30 @@
 //! The finish: each row's exact sum rounded once from the difference arrays, then the
 //! model's averaging, base score and link function.
 
+use super::isa::Isa;
 use super::scratch::Sums;
 use crate::exact::{self, Plan};
 use crate::model::{Model, Postprocessor};
 
 impl Model {
+    /// [`Self::finish`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    #[cfg_attr(not(dispatch), inline(always))]
+    pub(super) fn finish_at<X: Isa>(&self, results: &mut [f64], sums: &mut Sums) {
+        if X::NATIVE {
+            return self.finish(results, sums);
+        }
+        X::with3(
+            #[inline(always)]
+            |m: &Self, results, sums| m.finish(results, sums),
+            self,
+            results,
+            sums,
+        );
+    }
+
     /// Prefix-sum both difference arrays into `results`, clearing them.
+    #[cfg_attr(dispatch, inline(always))]
     pub(super) fn finish(&self, results: &mut [f64], sums: &mut Sums) {
         let n = results.len();
         match (sums, self.plan) {
@@ -91,11 +109,28 @@ impl Model {
         }
     }
 
+    /// [`Self::finalize`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    #[cfg_attr(not(dispatch), inline(always))]
+    #[cfg_attr(dispatch, inline)]
+    pub(super) fn finalize_at<X: Isa>(&self, values: &mut [f64]) {
+        if X::NATIVE {
+            return self.finalize(values);
+        }
+        X::with2(
+            #[inline(always)]
+            |m: &Self, values| m.finalize(values),
+            self,
+            values,
+        );
+    }
+
     /// Turn tree sums into outputs: [`Self::apply_margin`] then [`Self::apply_link`],
     /// in one pass, each value through the same operations in the same order; the
     /// identities are skipped per call, as there.
     #[expect(clippy::float_cmp, reason = "exact fast-path identities")]
-    #[inline]
+    #[cfg_attr(dispatch, inline(always))]
+    #[cfg_attr(not(dispatch), inline)]
     pub(super) fn finalize(&self, values: &mut [f64]) {
         let out = self.output;
         let (divisor, base) = (out.divisor, out.base_score);
