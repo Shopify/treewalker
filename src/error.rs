@@ -1,5 +1,6 @@
 //! Errors returned by the import APIs.
 
+use std::collections::TryReserveError;
 use std::io;
 
 /// Failure to read, validate, or represent a model or grouping configuration.
@@ -24,6 +25,11 @@ pub enum LoadError {
 }
 
 impl LoadError {
+    /// A reservation's result, its failure the [`Limit`](Self::Limit) of memory.
+    pub(crate) fn reserve(reserved: Result<(), TryReserveError>) -> Result<(), Self> {
+        reserved.map_err(|e| Self::Limit(e.to_string()))
+    }
+
     /// The error with `context`, such as the node it concerns, before its message;
     /// I/O and configuration errors are returned as they are.
     pub(crate) fn at(self, context: &str) -> Self {

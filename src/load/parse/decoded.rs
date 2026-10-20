@@ -308,9 +308,7 @@ impl Store {
     /// A new segment of `n` nodes.
     fn segment(&mut self, n: usize) -> Result<(), crate::LoadError> {
         let mut segment = Vec::new();
-        segment
-            .try_reserve_exact(n)
-            .map_err(|e| crate::LoadError::Limit(e.to_string()))?;
+        crate::LoadError::reserve(segment.try_reserve_exact(n))?;
         self.segments.push(segment);
         Ok(())
     }
@@ -344,8 +342,7 @@ impl Store {
             return Ok(());
         }
         let mut all = Vec::new();
-        all.try_reserve_exact(self.len + 1)
-            .map_err(|e| crate::LoadError::Limit(e.to_string()))?;
+        crate::LoadError::reserve(all.try_reserve_exact(self.len + 1))?;
         // Each segment freed once copied.
         for segment in std::mem::take(&mut self.segments) {
             all.extend_from_slice(&segment);

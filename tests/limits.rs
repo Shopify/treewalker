@@ -89,19 +89,10 @@ fn check(m: &Model, config: WalkerConfig, ablation: &LoadAblation, rows: &[f64])
     forest
 }
 
-/// The number of varying predicates, from the forest's debug output.
+/// The number of varying predicates: one left mask each, for a row of the two
+/// features.
 fn predicates(forest: &Forest) -> usize {
-    let debug = format!("{forest:?}");
-    let at = debug
-        .find("varying_predicates: ")
-        .expect("a predicate count")
-        + 20;
-    debug[at..]
-        .split(|c: char| !c.is_ascii_digit())
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap()
+    forest.predicate_masks(&[0.0, 0.0], true).len()
 }
 
 #[test]

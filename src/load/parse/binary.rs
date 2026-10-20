@@ -130,9 +130,7 @@ impl<R: Read> Stream<R> {
         let need = self.at + n;
         let len = need.max((2 * self.buf.len()).clamp(64 << 10, STREAM_BLOCK));
         if self.buf.len() < len {
-            self.buf
-                .try_reserve(len - self.buf.len())
-                .map_err(|e| LoadError::Limit(e.to_string()))?;
+            LoadError::reserve(self.buf.try_reserve(len - self.buf.len()))?;
             self.buf.resize(len, 0);
         }
         while self.filled < need {
@@ -300,18 +298,11 @@ impl<S: Source> Reader<S> {
         kind: ThresholdType,
         field: &str,
     ) -> Result<(), LoadError> {
-        if kind == ThresholdType::F64 {
-            self.array::<f64>(into, Length::Exact(n), field)?;
-        } else {
-            let len = self.scalar::<u64>(field)?;
-            if len != n as u64 {
-                return Err(LoadError::MalformedModel(format!(
-                    "{field}: length {len}, expected {n}"
-                )));
-            }
-            self.bytes(n * 4, into, field)?;
+        match kind {
+            ThresholdType::F64 => self.array::<f64>(into, Length::Exact(n), field),
+            ThresholdType::F32 => self.array::<f32>(into, Length::Exact(n), field),
         }
-        Ok(())
+        .map(drop)
     }
     fn string(&mut self, max: usize, field: &str) -> Result<String, LoadError> {
         let mut s = self.vec::<u8>(Length::Max(max), field)?;
@@ -794,9 +785,7 @@ fn read_tree(
     }
     let category_start = ctx.decoded.categories.len() as u32;
     b.temp.clear();
-    b.temp
-        .try_reserve(n)
-        .map_err(|e| LoadError::Limit(e.to_string()))?;
+    LoadError::reserve(b.temp.try_reserve(n))?;
     if !decode_fast(&f, ctx, &mut b.temp, &mut b.categorical)? {
         b.temp.clear();
         for i in 0..n {
@@ -951,7 +940,7 @@ fn decode_fast(
         // The threshold as `validation::threshold` normalizes it: float64 `<` becomes
         // `<=` the next float down; float32 thresholds arrive rounded.
         let value = if f64_model && less {
-            super::tree::next_down(threshold)
+            threshold.next_down()
         } else {
             threshold
         };

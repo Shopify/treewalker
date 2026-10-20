@@ -85,6 +85,7 @@ impl Model {
     }
 
     /// The link function: identity, or the sigmoid of `alpha` times the margin.
+    #[cfg(feature = "research")]
     #[expect(clippy::float_cmp, reason = "exact fast-path identity")]
     #[inline(always)]
     pub(crate) fn apply_link(&self, values: &mut [f64]) {

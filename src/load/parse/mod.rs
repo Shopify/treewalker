@@ -10,7 +10,7 @@
 //! its comparison: LightGBM splits on `val <= threshold` in f64, XGBoost on
 //! `val < threshold` in f32. The decoder reads the threshold type from the header:
 //!
-//! - F64: a `<=` threshold is kept, and a `<` threshold becomes `next_down(t)`, so
+//! - F64: a `<=` threshold is kept, and a `<` threshold becomes `t.next_down()`, so
 //!   that every F64 split compares `<=`.
 //! - F32: thresholds are kept, and splits compare `(val as f32) < (t as f32)`.
 

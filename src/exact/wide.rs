@@ -66,7 +66,7 @@ impl Wide {
     /// If a value is not finite.
     #[cfg(test)]
     pub fn new(values: impl IntoIterator<Item = f64>, n_trees: usize) -> Self {
-        let (min_exp, max_top) = super::extent(values).expect("finite values");
+        let super::Extent { min_exp, max_top } = super::extent(values).expect("finite values");
         Self::spanning(min_exp, max_top, n_trees)
     }
 

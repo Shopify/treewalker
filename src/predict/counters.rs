@@ -15,125 +15,113 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "research")]
 pub const COUNTERS_VERSION: u32 = 6;
 
-/// Work done by one or more counted predictions, summed over their groups.
-///
-/// The definitions are those of [`COUNTERS_VERSION`]. Counters of a disabled path
-/// stay 0: with precompute on, the `scan_*` counters; with it off, the `precompute_*`
-/// counters.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct WorkCounters {
-    /// Groups predicted, single rows included.
-    pub groups: u64,
-    /// Single-row groups whose walks stepped through varying splits as constants.
-    pub single_rows: u64,
-    /// Bin fills: one per group, from its first row.
-    pub bins_computed: u64,
-    /// Row values the precompute evaluates: per numerical feature, one missing-value
-    /// check per row in the threshold sweep; one evaluation per row for each
-    /// categorical predicate, and for every predicate in the brute force.
-    pub precompute_row_evals: u64,
-    /// Comparisons made sorting each numerical feature's rows for the sweep.
-    pub precompute_sort_compares: u64,
-    /// Threshold comparisons in the sweep's merge of sorted rows and thresholds.
-    pub precompute_sweep_compares: u64,
-    /// Predicate masks computed by the precompute: one per predicate per group,
-    /// each written with its complement.
-    pub precompute_mask_writes: u64,
-    /// Rows the event scans visit, with precompute off: a varying event scans its
-    /// rows for the predicate's mask. A monotonic scan stops comparing at the first
-    /// row past the threshold.
-    pub scan_rows: u64,
-    /// Predicate evaluations in the event scans; below `scan_rows` only when a
-    /// monotonic scan stops early.
-    pub scan_evals: u64,
-    /// Shared prefix splits evaluated: per group and prefix group, up to the first
-    /// split that leaves the shared path.
-    pub prefix_steps: u64,
-    /// Nodes the walk lanes step through, dummies excluded.
-    pub walk_steps: u64,
-    /// Lane steps the walk loops run, dummies included: lanes times loop iterations.
-    /// `walk_steps / lane_slots` is the lane utilization.
-    pub lane_slots: u64,
-    /// Walk passes, per chunk of trees.
-    pub passes: u64,
-    /// Walk stops at varying splits.
-    pub varying_events: u64,
-    /// Varying events whose rows go both ways.
-    pub splits: u64,
-    /// Sides with no rows that varying events pass on as items, which only
-    /// `disable_unsplit` does.
-    pub empty_sides: u64,
-    /// Walk stops at leaves.
-    pub leaf_events: u64,
-    /// Runs of rows the leaf pass adds a leaf value to, two difference-array writes
-    /// each.
-    pub runs_written: u64,
-    /// Mask-arena slots taken by splits of masks wider than 64 bits.
-    pub arena_slots: u64,
-}
-
+/// [`WorkCounters`] from its one list of fields, with `+=` and its fields' names and
+/// values, which `Display` and [`WorkCounters::fields`] read: no counter can be in some
+/// of them only.
 macro_rules! counters {
-    ($($field:ident),*) => {
-        impl std::fmt::Display for WorkCounters {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let mut first = true;
-                $(
-                    if !first {
-                        f.write_str(", ")?;
-                    }
-                    first = false;
-                    write!(f, "{}={}", stringify!($field), self.$field)?;
-                )*
-                let _ = first;
-                Ok(())
+    ($(#[$meta:meta])* pub struct WorkCounters { $($(#[$doc:meta])* pub $field:ident: u64,)* }) => {
+        $(#[$meta])*
+        pub struct WorkCounters {
+            $($(#[$doc])* pub $field: u64,)*
+        }
+
+        /// The number of counters.
+        const COUNTERS: usize = [$(stringify!($field)),*].len();
+
+        impl WorkCounters {
+            const fn pairs(&self) -> [(&'static str, u64); COUNTERS] {
+                [$((stringify!($field), self.$field)),*]
             }
         }
 
         impl std::ops::AddAssign for WorkCounters {
             fn add_assign(&mut self, rhs: Self) {
-                $( self.$field += rhs.$field; )*
-            }
-        }
-
-        impl WorkCounters {
-            /// Every counter's name and value, in declaration order.
-            #[cfg(feature = "research")]
-            #[must_use]
-            pub const fn fields(&self) -> [(&'static str, u64); count!($($field)*)] {
-                [$( (stringify!($field), self.$field) ),*]
+                $(self.$field += rhs.$field;)*
             }
         }
     };
 }
 
-#[cfg(feature = "research")]
-macro_rules! count {
-    () => { 0 };
-    ($head:ident $($tail:ident)*) => { 1 + count!($($tail)*) };
+counters! {
+    /// Work done by one or more counted predictions, summed over their groups.
+    ///
+    /// The definitions are those of [`COUNTERS_VERSION`]. Counters of a disabled path
+    /// stay 0: with precompute on, the `scan_*` counters; with it off, the `precompute_*`
+    /// counters.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    #[non_exhaustive]
+    pub struct WorkCounters {
+        /// Groups predicted, single rows included.
+        pub groups: u64,
+        /// Single-row groups whose walks stepped through varying splits as constants.
+        pub single_rows: u64,
+        /// Bin fills: one per group, from its first row.
+        pub bins_computed: u64,
+        /// Row values the precompute evaluates: per numerical feature, one missing-value
+        /// check per row in the threshold sweep; one evaluation per row for each
+        /// categorical predicate, and for every predicate in the brute force.
+        pub precompute_row_evals: u64,
+        /// Comparisons made sorting each numerical feature's rows for the sweep.
+        pub precompute_sort_compares: u64,
+        /// Threshold comparisons in the sweep's merge of sorted rows and thresholds.
+        pub precompute_sweep_compares: u64,
+        /// Predicate masks computed by the precompute: one per predicate per group,
+        /// each written with its complement.
+        pub precompute_mask_writes: u64,
+        /// Rows the event scans visit, with precompute off: a varying event scans its
+        /// rows for the predicate's mask. A monotonic scan stops comparing at the first
+        /// row past the threshold.
+        pub scan_rows: u64,
+        /// Predicate evaluations in the event scans; below `scan_rows` only when a
+        /// monotonic scan stops early.
+        pub scan_evals: u64,
+        /// Shared prefix splits evaluated: per group and prefix group, up to the first
+        /// split that leaves the shared path.
+        pub prefix_steps: u64,
+        /// Nodes the walk lanes step through, dummies excluded.
+        pub walk_steps: u64,
+        /// Lane steps the walk loops run, dummies included: lanes times loop iterations.
+        /// `walk_steps / lane_slots` is the lane utilization.
+        pub lane_slots: u64,
+        /// Walk passes, per chunk of trees.
+        pub passes: u64,
+        /// Walk stops at varying splits.
+        pub varying_events: u64,
+        /// Varying events whose rows go both ways.
+        pub splits: u64,
+        /// Sides with no rows that varying events pass on as items, which only
+        /// `disable_unsplit` does.
+        pub empty_sides: u64,
+        /// Walk stops at leaves.
+        pub leaf_events: u64,
+        /// Runs of rows the leaf pass adds a leaf value to, two difference-array writes
+        /// each.
+        pub runs_written: u64,
+        /// Mask-arena slots taken by splits of masks wider than 64 bits.
+        pub arena_slots: u64,
+    }
 }
 
-counters!(
-    groups,
-    single_rows,
-    bins_computed,
-    precompute_row_evals,
-    precompute_sort_compares,
-    precompute_sweep_compares,
-    precompute_mask_writes,
-    scan_rows,
-    scan_evals,
-    prefix_steps,
-    walk_steps,
-    lane_slots,
-    passes,
-    varying_events,
-    splits,
-    empty_sides,
-    leaf_events,
-    runs_written,
-    arena_slots
-);
+impl WorkCounters {
+    /// Every counter's name and value, in declaration order.
+    #[cfg(feature = "research")]
+    #[must_use]
+    pub const fn fields(&self) -> [(&'static str, u64); COUNTERS] {
+        self.pairs()
+    }
+}
+
+impl std::fmt::Display for WorkCounters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, (name, value)) in self.pairs().into_iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{name}={value}")?;
+        }
+        Ok(())
+    }
+}
 
 /// Time a counted prediction spends in each phase, summed over its groups.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -51,11 +51,12 @@ const BAIL_STEPS: f64 = 0.5;
 pub(crate) type Token = (u32, u8, u64);
 
 /// A node of a tree's heavy path: its token if it can be part of a prefix (a
-/// constant split), and its probability of going heavy.
+/// constant split), and its heavy share, in 65,535ths of the rows reaching it, which
+/// the sorts that compare tokens do not read.
 #[derive(Clone, Copy)]
 pub(crate) struct PathNode {
     pub(crate) token: Option<Token>,
-    pub(crate) heavy: f64,
+    pub(crate) heavy: u16,
 }
 
 /// The trees' heavy paths: node `depth` of tree `t`'s heavy path is its node
@@ -166,7 +167,9 @@ pub(crate) fn prefix_groups(
                 // The split's probability of going heavy, over the run's trees.
                 let p = order[i..j]
                     .iter()
-                    .map(|&t| node_at(t, depth).map_or(0.5, |n| n.heavy))
+                    .map(|&t| {
+                        node_at(t, depth).map_or(0.5, |n| f64::from(n.heavy) / f64::from(u16::MAX))
+                    })
                     .sum::<f64>()
                     / (j - i) as f64;
                 let parent = &trie[at];

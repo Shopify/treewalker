@@ -146,9 +146,7 @@ impl ResearchPredictor {
         let n = rows.len() / self.inner.model.config.n_features();
         self.inner.check(rows, n, Groups::One);
         stages.tree_sum.resize(n, 0.0);
-        let mut tree_sum = std::mem::take(&mut stages.tree_sum);
-        self.run::<false>(rows, &mut tree_sum, Groups::One, None, false);
-        stages.tree_sum = tree_sum;
+        self.run::<false>(rows, &mut stages.tree_sum, Groups::One, None, false);
         let model: &Model = &self.inner.model;
         stages.raw_margin.clone_from(&stages.tree_sum);
         model.apply_margin(&mut stages.raw_margin);

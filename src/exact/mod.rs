@@ -25,19 +25,15 @@ pub use runs::RunSink;
 pub(crate) use wide::add_in_turns;
 pub use wide::{WIDE_SUMS, Wide, WideLeaf, WideRuns};
 
-/// Smallest e such that every leaf value times 2^e is an integer, provided sums over
-/// `n_trees` trees cannot overflow. `None` if a leaf is not finite or the leaf
-/// exponents span too wide a range for `i128`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "models pick their sums through Plan")
-)]
+/// The [`fixed_scale`] of `leaf_values`; `None` also if a leaf is not finite.
+#[cfg(test)]
 pub fn scale(leaf_values: impl IntoIterator<Item = f64>, n_trees: usize) -> Option<i32> {
-    let (min_exp, max_top) = extent(leaf_values)?;
+    let Extent { min_exp, max_top } = extent(leaf_values)?;
     fixed_scale(min_exp, max_top, n_trees)
 }
 
-/// `v` times 2^e. Exact when `e` is the [`scale`] of a set of values containing `v`.
+/// `v` times 2^e. Exact when `e` is the [`fixed_scale`] of a set of values containing
+/// `v`.
 #[inline]
 pub fn to_fixed(v: f64, e: i32) -> i128 {
     let (m, ex) = decompose(v);
@@ -123,10 +119,9 @@ pub(super) const fn decompose(v: f64) -> (u64, i32) {
     }
 }
 
-/// The exponent of the lowest set bit of any nonzero value, and the exponent just
-/// above the highest set bit of any. `(i32::MAX, i32::MIN)` if every value is zero,
-/// `None` if one is not finite.
-pub(super) fn extent(values: impl IntoIterator<Item = f64>) -> Option<(i32, i32)> {
+/// The [`Extent`] of `values`, `None` if one is not finite.
+#[cfg(test)]
+pub(super) fn extent(values: impl IntoIterator<Item = f64>) -> Option<Extent> {
     let mut extent = Extent::default();
     for v in values {
         if !v.is_finite() {
@@ -134,10 +129,12 @@ pub(super) fn extent(values: impl IntoIterator<Item = f64>) -> Option<(i32, i32)
         }
         extent.add(v);
     }
-    Some((extent.min_exp, extent.max_top))
+    Some(extent)
 }
 
-/// The [`extent`] of finite values, added one at a time.
+/// The exponent of the lowest set bit of any nonzero value of a set, and the exponent
+/// just above the highest set bit of any, `(i32::MAX, i32::MIN)` if every value is
+/// zero: from finite values, added one at a time.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Extent {
     min_exp: i32,
@@ -172,7 +169,9 @@ const fn tree_bits(n_trees: usize) -> i32 {
     (usize::BITS - n_trees.leading_zeros()) as i32
 }
 
-/// The 126-bit rule of [`scale`], on an [`extent`].
+/// The 126-bit rule: the smallest e such that every value of the extent times 2^e is
+/// an integer, provided sums over `n_trees` trees cannot overflow. `None` if the
+/// values' exponents span too wide a range for `i128`.
 fn fixed_scale(min_exp: i32, max_top: i32, n_trees: usize) -> Option<i32> {
     if min_exp == i32::MAX {
         return Some(0);
@@ -187,7 +186,7 @@ fn fixed_scale(min_exp: i32, max_top: i32, n_trees: usize) -> Option<i32> {
 /// How a model's leaf values are summed exactly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Plan {
-    /// In `i128` at the [`scale`] e, with [`to_fixed`] and [`to_f64`].
+    /// In `i128` at the [`fixed_scale`] e, with [`to_fixed`] and [`to_f64`].
     Fixed(i32),
     /// In a [`Wide`] accumulator, for leaves past the 126-bit rule.
     Wide(Wide),
@@ -195,15 +194,14 @@ pub enum Plan {
 
 impl Plan {
     /// The plan for a model's leaf values and tree count: [`Plan::Fixed`] when
-    /// [`scale`] finds a scale, otherwise [`Plan::Wide`].
+    /// [`fixed_scale`] finds a scale, otherwise [`Plan::Wide`].
     ///
     /// # Panics
     ///
     /// If a leaf is not finite; the loader rejects such models.
     #[cfg(test)]
     pub fn new(leaf_values: impl IntoIterator<Item = f64>, n_trees: usize) -> Self {
-        let (min_exp, max_top) = extent(leaf_values).expect("finite leaf values");
-        Self::of(Extent { min_exp, max_top }, n_trees)
+        Self::of(extent(leaf_values).expect("finite leaf values"), n_trees)
     }
 
     /// The plan for leaf values of `extent` over `n_trees` trees.

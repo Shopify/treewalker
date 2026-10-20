@@ -151,16 +151,14 @@ fn chain_slots(
             );
             code
         }));
-        lists[at..].sort_unstable();
-        let mut len = at;
-        for i in at..lists.len() {
-            if len == at || lists[len - 1] != lists[i] {
-                lists[len] = lists[i];
-                len += 1;
-            }
-        }
-        lists.truncate(len);
-        spans.push((at as u32, len as u32, side == 1));
+        // Already sorted and distinct: a split's categories ascend (an inline word's
+        // bits from the lowest, a list as encoded), the codebook keeps their order,
+        // and missing's code is below every category's.
+        debug_assert!(
+            lists[at..].is_sorted_by(|a, b| a < b),
+            "a heavy set's codes ascend"
+        );
+        spans.push((at as u32, lists.len() as u32, side == 1));
     }
     let set_bytes = lists.len() as u64 * 4;
     // The distinct sets, by size, then listed before complemented, then by list.
@@ -251,10 +249,7 @@ fn chain_slots(
         .map_err(|_| LoadError::Limit("the rank tables exceed u32 exceptions".into()))?;
     // By code, each code's in chain order: a counting sort.
     let offsets = tables.offsets.len();
-    tables
-        .offsets
-        .try_reserve_exact(domain + 1)
-        .map_err(|e| LoadError::Limit(e.to_string()))?;
+    LoadError::reserve(tables.offsets.try_reserve_exact(domain + 1))?;
     tables.offsets.resize(offsets + domain + 1, 0);
     let bounds = &mut tables.offsets[offsets..];
     for &(e, _, _) in &found {
@@ -265,10 +260,7 @@ fn chain_slots(
         bounds[e + 1] += bounds[e];
     }
     debug_assert_eq!(bounds[domain], end);
-    tables
-        .exceptions
-        .try_reserve_exact(found.len())
-        .map_err(|e| LoadError::Limit(e.to_string()))?;
+    LoadError::reserve(tables.exceptions.try_reserve_exact(found.len()))?;
     tables.exceptions.resize(end as usize, [0, 0]);
     let mut next = bounds[..domain].to_vec();
     for &(e, c, rank) in &found {

@@ -127,54 +127,23 @@ pub(crate) fn sort_varying_predicates(predicates: &mut Vec<VaryingPredicate>) ->
 }
 
 /// Each varying feature's ranges of numeric and categorical predicates, from
-/// `predicates` sorted by [`sort_varying_predicates`].
-///
-/// Index loops rather than `chunk_by` and `partition_point`, whose collected form
-/// compiles to different load code (checked against the post-LTO assembly).
+/// `predicates` sorted by [`sort_varying_predicates`]: by feature, numeric first.
 pub(crate) fn build_feature_ranges(predicates: &[VaryingPredicate]) -> Vec<FeatureRange> {
-    if predicates.is_empty() {
-        return Vec::new();
-    }
-
-    let mut ranges = Vec::new();
-    let mut i = 0;
-    while i < predicates.len() {
-        let feature = predicates[i].feature();
-        let group_start = i;
-
-        // Scan numerical predicates (kind ordinal 0).
-        let num_start = i;
-        while i < predicates.len()
-            && predicates[i].feature() == feature
-            && pred_kind_ordinal(&predicates[i]) == 0
-        {
-            i += 1;
-        }
-        let num_end = i;
-
-        // Scan categorical predicates (kind ordinal 1).
-        let cat_start = i;
-        while i < predicates.len()
-            && predicates[i].feature() == feature
-            && pred_kind_ordinal(&predicates[i]) == 1
-        {
-            i += 1;
-        }
-        let cat_end = i;
-
-        debug_assert!(
-            i > group_start,
-            "empty feature group at index {group_start}"
-        );
-
-        ranges.push(FeatureRange {
-            feature,
-            num: num_start as u32..num_end as u32,
-            cat: cat_start as u32..cat_end as u32,
-        });
-    }
-
-    ranges
+    let mut start = 0;
+    predicates
+        .chunk_by(|a, b| a.feature() == b.feature())
+        .map(|group| {
+            let numeric = group.partition_point(|p| pred_kind_ordinal(p) == 0);
+            let (middle, end) = (start + numeric as u32, start + group.len() as u32);
+            let range = FeatureRange {
+                feature: group[0].feature(),
+                num: start..middle,
+                cat: middle..end,
+            };
+            start = end;
+            range
+        })
+        .collect()
 }
 
 #[cfg(test)]
