@@ -22,6 +22,10 @@ than calling the platform's libm.
   platform; 3.0's last bits came from the platform's libm. Against 3.0 with Apple's
   libm, 99.92% of outputs are unchanged and the rest move by at most 4 ulp; both are
   within 2 ulp of the correctly rounded sigmoid for `|m| <= 40`.
+- Debug builds check the predictor's contract that a group's constant features are
+  equal in every row, on the features that constant splits read, and panic naming
+  the feature and the row; a missing value equals a missing one. Release builds do
+  not check it, as before.
 
 ## 3.0.0
 

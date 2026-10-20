@@ -468,7 +468,8 @@ fn rejects_bad_json_nodes_and_topology() {
         4_294_967_296.0,
     ]
     .iter()
-    .flat_map(|&x| [x, x])
+    // Feature 1 is constant, so the same in every row of the group.
+    .flat_map(|&x| [x, 0.0])
     .collect();
     let (mut out, mut reference) = (vec![0.0; 4], vec![0.0; 4]);
     forest.predictor().predict_group(&rows, &mut out);

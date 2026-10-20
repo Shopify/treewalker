@@ -415,9 +415,14 @@ fn fixture_cell(sizes: &[usize], tag: &str) -> (Cell, PathBuf) {
 #[test]
 fn the_oracle_rows_stages_are_written_in_the_oracles_order() {
     let (mut cell, dir) = fixture_cell(&[3, 5, 2], "stages");
-    // Rows that differ within each group, so every row has its own stages.
+    // Rows whose varying feature 0 differs within each group, so every row has its
+    // own stages; feature 1 is constant, so the same in every row.
     for (i, v) in cell.data.iter_mut().enumerate() {
-        *v = (i % 7) as f64 - 3.0;
+        *v = if i % 2 == 0 {
+            (i % 7) as f64 - 3.0
+        } else {
+            0.0
+        };
     }
     let forest = cell.forest(&LoadAblation::default()).unwrap();
     let mut r = forest.research_predictor(Ablation::default());

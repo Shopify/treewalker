@@ -55,7 +55,8 @@ impl Groups<'_> {
 ///
 /// Every call takes row-major `f64` input, `n_features` values per row in the trained
 /// column order, and writes one output per row. Within a group, constant features
-/// must be equal in every row; this contract is not checked. Outputs do not depend
+/// must be equal in every row; debug builds check this contract on the features that
+/// constant splits read, and release builds do not check it. Outputs do not depend
 /// on whether monotonic features follow their declared direction. Empty input is a
 /// no-op.
 ///
@@ -205,6 +206,33 @@ impl Predictor {
                         pair[1] - pair[0] <= max_width,
                         "group of {} rows exceeds max_group_width {max_width}",
                         pair[1] - pair[0]
+                    );
+                }
+            }
+        }
+        #[cfg(debug_assertions)]
+        self.check_constant(data, nf, groups);
+    }
+
+    /// Panic unless every constant feature a split reads is equal in every row of each
+    /// group, a missing value (NaN) to a missing one: the bins of those features come
+    /// from the group's first row.
+    #[cfg(debug_assertions)]
+    #[expect(clippy::float_cmp, reason = "the contract is equality")]
+    fn check_constant(&self, data: &[f64], nf: usize, groups: Groups<'_>) {
+        let n_rows = data.len() / nf;
+        for g in 0..groups.count(n_rows) {
+            let (start, end) = groups.bounds(g, n_rows);
+            let rows = &data[start * nf..end * nf];
+            for f in self.model.layout.bins.constant_features() {
+                let first = rows[f];
+                for (r, row) in rows.chunks_exact(nf).enumerate().skip(1) {
+                    let v = row[f];
+                    assert!(
+                        v == first || (v.is_nan() && first.is_nan()),
+                        "constant feature {f} differs within a group: {first} in its first \
+                         row, {v} in row {}",
+                        start + r
                     );
                 }
             }

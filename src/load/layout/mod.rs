@@ -402,6 +402,13 @@ impl BinMap {
             })
     }
 
+    /// The constant features that splits read, whose bins come from a group's first
+    /// row.
+    #[cfg(debug_assertions)]
+    pub(crate) fn constant_features(&self) -> impl Iterator<Item = usize> + '_ {
+        self.constant.iter().map(|b| b.feature)
+    }
+
     /// A varying feature's categorical slots, if it has categorical splits.
     pub(crate) fn varying_categories(&self, feature: usize) -> Option<CategoryBins> {
         let i = self

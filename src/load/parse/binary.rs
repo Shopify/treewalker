@@ -966,6 +966,19 @@ fn decode_fast(
     if !ok {
         return Ok(false);
     }
+    // What the fast path accepts, decode_node accepts too and decodes alike. Checked
+    // on the nodes decoded here; decode_node would intern a categorical split's list.
+    #[cfg(debug_assertions)]
+    for (i, fast) in temp.iter().enumerate() {
+        if f.node_type[i] != 2 {
+            let slow = decode_node(i, n, ctx, f).expect("decode_node accepts the node");
+            let bits = |t: &TempNode| (t.value.to_bits(), t.left, t.right, t.feature, t.flags);
+            debug_assert!(
+                bits(fast) == bits(&slow) && fast.weight.to_bits() == slow.weight.to_bits(),
+                "node {i} decodes as decode_node decodes it"
+            );
+        }
+    }
     for &i in categorical.iter() {
         let i = i as usize;
         temp[i] = decode_node(i, n, ctx, f).map_err(|e| e.at(&format!("node {i}")))?;
