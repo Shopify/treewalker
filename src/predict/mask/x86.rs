@@ -48,18 +48,6 @@ pub fn is_zero<X: Isa, const W: usize>(a: &[u64; W]) -> bool {
     dispatch!(is_zero(a))
 }
 
-/// With POPCNT, masks of up to 8 words count one word at a time, in fewer instructions
-/// than a vector count and its sum across lanes.
-#[cfg_attr(dispatch, inline(always))]
-#[cfg_attr(not(dispatch), inline)]
-pub fn popcount<X: Isa, const W: usize>(a: &[u64; W]) -> u32 {
-    if X::POPCNT && W <= 8 {
-        a.iter().map(|x| x.count_ones()).sum()
-    } else {
-        dispatch!(popcount(a))
-    }
-}
-
 /// Word maps of one bit per word: AVX-512 tests into a mask register with AVX-512F and
 /// VL; else SSE4.1 compares (AVX2 for 4 words at a time) and a move mask; else one word
 /// at a time.
@@ -76,12 +64,6 @@ impl<X: Isa> WordMaps for Maps<X> {
     #[cfg_attr(not(dispatch), inline)]
     fn nonzero<const W: usize>(w: &[u64; W]) -> u64 {
         maps::nonzero::<X, W>(w)
-    }
-
-    #[cfg_attr(dispatch, inline(always))]
-    #[cfg_attr(not(dispatch), inline)]
-    fn popcount<const W: usize>(w: &[u64; W]) -> u32 {
-        popcount::<X, W>(w)
     }
 }
 
@@ -217,11 +199,10 @@ mod sse2 {
     use crate::predict::isa::Isa;
 
     use std::arch::x86_64::{
-        __m128i, _mm_add_epi8, _mm_add_epi32, _mm_add_epi64, _mm_and_si128, _mm_andnot_si128,
-        _mm_castps_si128, _mm_castsi128_ps, _mm_cmpeq_epi8, _mm_cvtsi128_si32, _mm_loadu_si128,
-        _mm_movemask_epi8, _mm_or_si128, _mm_sad_epu8, _mm_set1_epi8, _mm_set1_epi32,
-        _mm_set1_epi64x, _mm_setr_epi32, _mm_setzero_si128, _mm_shuffle_ps, _mm_srli_epi64,
-        _mm_storeu_si128, _mm_sub_epi8, _mm_unpackhi_epi64, _mm_xor_si128,
+        __m128i, _mm_add_epi32, _mm_and_si128, _mm_andnot_si128, _mm_castps_si128,
+        _mm_castsi128_ps, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128,
+        _mm_set1_epi32, _mm_set1_epi64x, _mm_setr_epi32, _mm_setzero_si128, _mm_shuffle_ps,
+        _mm_storeu_si128, _mm_xor_si128,
     };
 
     /// The mask's words in vector-sized pairs.
@@ -285,30 +266,6 @@ mod sse2 {
                 .iter()
                 .fold(_mm_setzero_si128(), |acc, p| _mm_or_si128(acc, load(p)));
             _mm_movemask_epi8(_mm_cmpeq_epi8(acc, _mm_setzero_si128())) == 0xFFFF
-        }
-    }
-
-    /// Byte counts by halving (SSE2 has no byte lookup), summed in one vector, at most 8
-    /// per vector and 64 in all, then summed across the vector once.
-    #[inline]
-    pub fn popcount<const W: usize>(a: &[u64; W]) -> u32 {
-        // SAFETY: SSE2 is always available on x86-64.
-        unsafe {
-            let m1 = _mm_set1_epi8(0x55);
-            let m2 = _mm_set1_epi8(0x33);
-            let m4 = _mm_set1_epi8(0x0f);
-            let acc = pairs(a).iter().fold(_mm_setzero_si128(), |acc, p| {
-                let v = load(p);
-                let v = _mm_sub_epi8(v, _mm_and_si128(_mm_srli_epi64::<1>(v), m1));
-                let v = _mm_add_epi8(
-                    _mm_and_si128(v, m2),
-                    _mm_and_si128(_mm_srli_epi64::<2>(v), m2),
-                );
-                let v = _mm_and_si128(_mm_add_epi8(v, _mm_srli_epi64::<4>(v)), m4);
-                _mm_add_epi8(acc, v)
-            });
-            let s = _mm_sad_epu8(acc, _mm_setzero_si128());
-            _mm_cvtsi128_si32(_mm_add_epi64(s, _mm_unpackhi_epi64(s, s))) as u32
         }
     }
 
@@ -439,11 +396,9 @@ mod sse2 {
 /// Only levels with AVX2 call these.
 mod avx2 {
     use std::arch::x86_64::{
-        __m256i, _mm_add_epi64, _mm_cvtsi128_si32, _mm_unpackhi_epi64, _mm256_add_epi8,
-        _mm256_and_si256, _mm256_andnot_si256, _mm256_castsi256_si128, _mm256_extracti128_si256,
-        _mm256_loadu_si256, _mm256_or_si256, _mm256_sad_epu8, _mm256_set1_epi8, _mm256_set1_epi64x,
-        _mm256_setr_epi8, _mm256_setzero_si256, _mm256_shuffle_epi8, _mm256_srli_epi16,
-        _mm256_storeu_si256, _mm256_testz_si256, _mm256_xor_si256,
+        __m256i, _mm256_and_si256, _mm256_andnot_si256, _mm256_loadu_si256, _mm256_or_si256,
+        _mm256_set1_epi64x, _mm256_setzero_si256, _mm256_storeu_si256, _mm256_testz_si256,
+        _mm256_xor_si256,
     };
 
     /// The mask's words in vector-sized quads. Callers pass `W` divisible by 4.
@@ -519,32 +474,6 @@ mod avx2 {
                 acc = _mm256_or_si256(acc, load(q));
             }
             _mm256_testz_si256(acc, acc) == 1
-        }
-    }
-
-    /// Nibble counts by table lookup, summed in one vector, at most 8 per byte per
-    /// vector and 32 in all, then summed across the vector once.
-    #[cfg_attr(dispatch, inline(always))]
-    #[cfg_attr(not(dispatch), inline)]
-    pub fn popcount<const W: usize>(a: &[u64; W]) -> u32 {
-        // SAFETY: the level has AVX2.
-        unsafe {
-            let table = _mm256_setr_epi8(
-                0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3,
-                2, 3, 3, 4,
-            );
-            let low = _mm256_set1_epi8(0x0f);
-            let mut acc = _mm256_setzero_si256();
-            for q in quads(a) {
-                let v = load(q);
-                let lo = _mm256_shuffle_epi8(table, _mm256_and_si256(v, low));
-                let hi =
-                    _mm256_shuffle_epi8(table, _mm256_and_si256(_mm256_srli_epi16::<4>(v), low));
-                acc = _mm256_add_epi8(acc, _mm256_add_epi8(lo, hi));
-            }
-            let s = _mm256_sad_epu8(acc, _mm256_setzero_si256());
-            let s = _mm_add_epi64(_mm256_castsi256_si128(s), _mm256_extracti128_si256::<1>(s));
-            _mm_cvtsi128_si32(_mm_add_epi64(s, _mm_unpackhi_epi64(s, s))) as u32
         }
     }
 

@@ -1,6 +1,6 @@
 //! The new masks against the plain-word reference in `scalar` and a row-by-row scan.
 
-use super::ops::{WordMaps, add_wide_runs};
+use super::ops::{WordMaps, add_wide_runs, count_rows};
 use super::rows::{self, Unit};
 use super::{Mask, Wide, scalar};
 use crate::exact::RunSink;
@@ -242,7 +242,8 @@ fn check_runs<M: Words>(m: M, n: usize, v: i64) {
 }
 
 /// The vector nonzero-word map of `w` against the reference's, word by word: each
-/// word's `stride` bits all set or all clear, and no bits past the last word.
+/// word's `stride` bits all set or all clear, and no bits past the last word; and the
+/// rows `count_rows` counts against `count_ones`.
 fn check_maps<const W: usize>(w: &[u64; W]) {
     type Fast = super::simd::Maps<Native>;
     type Reference = scalar::Maps<Native>;
@@ -257,7 +258,8 @@ fn check_maps<const W: usize>(w: &[u64; W]) {
         }
     }
     assert_eq!(Fast::nonzero(w), want, "{w:x?}");
-    assert_eq!(Fast::popcount(w), Reference::popcount(w));
+    let rows: u32 = w.iter().map(|x| x.count_ones()).sum();
+    assert_eq!(count_rows(w), rows, "{w:x?}");
 }
 
 fn check_pair<M: Words>(a: [u64; 16], b: [u64; 16], n: usize, rng: &mut Rng) {
@@ -268,7 +270,6 @@ fn check_pair<M: Words>(a: [u64; 16], b: [u64; 16], n: usize, rng: &mut Rng) {
     assert_eq!(ma.or(mb).words(), scalar::or::<Native, _>(&a, &b));
     assert_eq!(ma.xor(mb).words(), scalar::xor::<Native, _>(&a, &b));
     assert_eq!(ma.is_zero(), scalar::is_zero::<Native, _>(&a));
-    assert_eq!(ma.popcount(), scalar::popcount::<Native, _>(&a));
     assert_eq!(ma == mb, a == b);
     assert_eq!(ma, M::from_words(&a));
     for c in [false, true] {
@@ -387,7 +388,6 @@ fn scalar_reference() {
     assert_eq!(scalar::and_not::<Native, _>(&a, &b), [0b0100, u64::MAX - 1]);
     assert_eq!(scalar::or::<Native, _>(&a, &b), [0b1110, u64::MAX]);
     assert_eq!(scalar::xor::<Native, _>(&a, &b), [0b0110, u64::MAX - 1]);
-    assert_eq!(scalar::popcount::<Native, _>(&a), 66);
     assert!(scalar::is_zero::<Native, _>(&[0u64; 4]));
     assert!(!scalar::is_zero::<Native, _>(&[0, 0, 0, 1 << 63]));
     assert_eq!(scalar::select::<Native, _>(true, &a, &b), a);
