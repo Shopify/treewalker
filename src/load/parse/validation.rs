@@ -156,6 +156,18 @@ pub(super) fn threshold(value: f64, op: &str, kind: ThresholdType) -> Result<f64
     }
 }
 
+/// A node's training weight, the data count or hessian sum that orders its children
+/// heavy first: finite and not negative.
+pub(super) fn weight(value: f64) -> Result<f64, LoadError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(LoadError::MalformedModel(format!(
+            "invalid node statistic {value}"
+        )))
+    }
+}
+
 /// A leaf value as the kernel sums it, rounded to float32 for float32 models; it must
 /// be finite.
 pub(super) fn leaf(value: f64, kind: ThresholdType) -> Result<f64, LoadError> {

@@ -38,6 +38,25 @@ than calling the platform's libm.
   `LoadOptions::max_json_nesting`, as they do for one past `max_config_bytes` and as
   the model loaders do for nesting. 3.0 returned `MalformedConfig`, with the limit's
   message inside its own.
+- A model whose category lists take more than `u32::MAX` entries in all, or whose
+  categorical features' codebooks do, fails to load with `LoadError::Limit`, as one
+  past the other 32-bit index tables does. 3.0 converted the offsets past them to 32
+  bits without a check, and so read the wrong lists. Only a model loaded with
+  `LoadOptions` caps raised far past their defaults can have that many: the lists
+  take at least 4 bytes of a binary model per entry.
+- The JSON reader validates a node's statistics as the binary reader does: only the
+  one it takes as the training weight, the data count if present, else the hessian
+  sum, which must be finite and not negative, with the binary reader's error; `gain`
+  is not read. 3.0 rejected a JSON model with any invalid `gain`, `sum_hess` or
+  `data_count`, which the same model in binary loaded with.
+- A split whose children's training weights are finite but sum past `f64::MAX`
+  gives its heavy child the share of their weight it has, which the research API's
+  `Node::heavy` reports, rather than 0. The share guides layout choices only, so
+  outputs are unchanged.
+- Debug builds load a binary checkpoint whose node count, guessed from its trees'
+  headers before decoding, is wrong, as release builds do, by copying the nodes.
+  Only a crafted checkpoint can make the guess wrong and still decode; 3.0's debug
+  builds panicked on it.
 
 ## 3.0.0
 

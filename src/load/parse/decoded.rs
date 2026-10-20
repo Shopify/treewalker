@@ -287,19 +287,13 @@ struct Store {
     segments: Vec<Vec<LayoutNode>>,
     /// The nodes in all segments.
     len: usize,
-    /// The node count the decoder announced.
-    expected: Option<usize>,
 }
 
 impl Store {
     /// A store for `nodes` nodes, if they are known and node indices can hold them.
     fn new(nodes: Option<usize>) -> Result<Self, crate::LoadError> {
-        let nodes = nodes.filter(|&n| n < u32::MAX as usize);
-        let mut store = Self {
-            expected: nodes,
-            ..Self::default()
-        };
-        if let Some(n) = nodes {
+        let mut store = Self::default();
+        if let Some(n) = nodes.filter(|&n| n < u32::MAX as usize) {
             store.segment(n.saturating_add(1))?;
         }
         Ok(store)
@@ -334,10 +328,13 @@ impl Store {
     }
 
     /// The nodes in one vector with room for exactly one more, the layout's dummy.
+    ///
+    /// A count given in advance can be wrong for a model that decodes: the binary
+    /// decoder's count guesses the trees' optional fields, and a crafted checkpoint
+    /// can make the guesses end at its end on another count. The nodes are then
+    /// copied, as when no count was given.
     fn seal(&mut self) -> Result<(), crate::LoadError> {
         let exact = self.segments.len() == 1 && self.segments[0].capacity() == self.len + 1;
-        // A decoder that counts the nodes in advance counts the trees it decodes.
-        debug_assert!(self.expected.is_none_or(|n| n == self.len));
         if exact {
             return Ok(());
         }

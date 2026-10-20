@@ -232,14 +232,11 @@ impl CategoryCodes {
     /// The codes of the codebook `book`, which is appended to `books` with its
     /// table if it has one.
     fn new(books: &mut Vec<u32>, book: &[u32]) -> Result<Self, LoadError> {
-        let at = |books: &Vec<u32>| {
-            u32::try_from(books.len())
-                .map_err(|_| LoadError::Limit("codebooks exceed u32 entries".into()))
-        };
-        let start = at(books)?;
+        let start = crate::load::u32_extent(books.len(), book.len(), "codebooks")?;
         books.extend_from_slice(book);
         let small = if book.iter().all(|&c| c < SMALL_CATEGORIES) {
-            let table = at(books)?;
+            let table =
+                crate::load::u32_extent(books.len(), SMALL_CATEGORIES as usize + 1, "codebooks")?;
             let mut codes = [NO_CATEGORY; SMALL_CATEGORIES as usize + 1];
             for (j, &c) in book.iter().enumerate() {
                 codes[c as usize] = j as u32 + FIRST_CATEGORY;
