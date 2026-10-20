@@ -27,6 +27,18 @@ than calling the platform's libm.
   the feature and the row; a missing value equals a missing one. Release builds do
   not check it, as before.
 
+### Fixes
+
+- A `WalkerConfig` takes memory in proportion to the features it declares. 3.0 kept
+  each role as a bitset up to its largest index, so a 120-byte configuration that
+  declared feature 2,147,483,646 varying took about 768 MiB while it was built and
+  256 MiB after.
+- `WalkerConfig::from_json` and `from_file`, and their `_with` forms, return
+  `LoadError::Limit` for a configuration nested deeper than
+  `LoadOptions::max_json_nesting`, as they do for one past `max_config_bytes` and as
+  the model loaders do for nesting. 3.0 returned `MalformedConfig`, with the limit's
+  message inside its own.
+
 ## 3.0.0
 
 3.0 replaces the prediction kernel. The new one walks several trees at once on

@@ -9,18 +9,18 @@
 //!
 //! # Feature sets
 //!
-//! Each role is a bitset over feature indices, up to the highest index declared
-//! for it, or "every feature" for [`WalkerConfigBuilder::all_varying`]. A lookup is
-//! one bounds check and one bit test, and the sets take memory in proportion to the
-//! declarations, not to `n_features`. A model has at most `i32::MAX` features, the
-//! range of Treelite's `num_feature`.
+//! Each role is the sorted list of the feature indices declared for it, or "every
+//! feature" for [`WalkerConfigBuilder::all_varying`]. A lookup is a binary search,
+//! and the sets take memory in proportion to the declarations, not to the largest
+//! index or to `n_features`. A model has at most `i32::MAX` features, the range of
+//! Treelite's `num_feature`.
 
 use crate::LoadError;
 use serde::Deserialize;
 use std::path::Path;
 
 /// Raw JSON schema from the training pipeline.
-/// Only used for deserialization — fields are immediately converted to bitmasks.
+/// Only used for deserialization: fields are immediately converted to feature sets.
 #[derive(Deserialize)]
 struct WalkerConfigFile {
     n_features: usize,
@@ -111,96 +111,124 @@ impl Default for Choices {
     }
 }
 
-/// A set of feature indices: every feature, or the set bits of `words`, which has
-/// no trailing zero word. Canonical, so equal sets compare equal.
+/// A set of feature indices: every feature, or `indices`, sorted and distinct, each
+/// below the set's `n_features`. Canonical, so equal sets compare equal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FeatureSet {
     all: bool,
-    words: Vec<u64>,
+    /// At most `i32::MAX` features, so each index fits.
+    indices: Vec<u32>,
 }
 
 impl FeatureSet {
     const ALL: Self = Self {
         all: true,
-        words: Vec::new(),
+        indices: Vec::new(),
     };
 
-    /// Whether `feature` is in the set, for a feature below the set's `n_features`.
+    /// Whether `feature` is in the set, for a feature below the set's `n_features`:
+    /// a binary search of the indices.
     #[inline]
     const fn contains(&self, feature: usize) -> bool {
-        let words = self.words.as_slice();
-        self.all || (feature / 64 < words.len() && (words[feature / 64] >> (feature % 64)) & 1 != 0)
+        if self.all {
+            return true;
+        }
+        let indices = self.indices.as_slice();
+        let (mut lo, mut hi) = (0, indices.len());
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let at = indices[mid] as usize;
+            if at == feature {
+                return true;
+            }
+            if at < feature {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        false
     }
 
     /// The set of `indices`, each below `n_features` and listed once.
     fn of(indices: &[usize], n_features: usize, label: &str) -> Result<Self, LoadError> {
-        let mut words = Vec::new();
+        let mut sorted = Vec::with_capacity(indices.len());
         for &i in indices {
             if i >= n_features {
                 return Err(LoadError::MalformedConfig(format!(
                     "{label}: index {i} >= n_features {n_features}"
                 )));
             }
-            if words.len() <= i / 64 {
-                words.resize(i / 64 + 1, 0);
-            }
-            let bit = 1u64 << (i % 64);
-            if words[i / 64] & bit != 0 {
-                return Err(LoadError::MalformedConfig(format!(
-                    "{label}: duplicate index {i}"
-                )));
-            }
-            words[i / 64] |= bit;
+            sorted.push(i as u32);
         }
-        Ok(Self { all: false, words }.canonical(n_features))
+        sorted.sort_unstable();
+        let duplicate = sorted
+            .windows(2)
+            .find_map(|w| (w[0] == w[1]).then_some(w[0]));
+        if let Some(i) = duplicate {
+            return Err(LoadError::MalformedConfig(format!(
+                "{label}: duplicate index {i}"
+            )));
+        }
+        Ok(Self {
+            all: false,
+            indices: sorted,
+        }
+        .canonical(n_features))
     }
 
-    /// The union of two sets over `n_features`.
+    /// The union of two sets over `n_features`: a merge of their indices.
     fn union(&self, other: &Self, n_features: usize) -> Self {
         if self.all || other.all {
             return Self::ALL;
         }
-        let (long, short) = if self.words.len() >= other.words.len() {
-            (self, other)
-        } else {
-            (other, self)
-        };
-        let mut words = long.words.clone();
-        for (w, s) in words.iter_mut().zip(&short.words) {
-            *w |= s;
+        let (ours, theirs) = (self.indices.as_slice(), other.indices.as_slice());
+        let mut indices = Vec::with_capacity(ours.len() + theirs.len());
+        let (mut i, mut j) = (0, 0);
+        while i < ours.len() && j < theirs.len() {
+            let (x, y) = (ours[i], theirs[j]);
+            indices.push(x.min(y));
+            i += usize::from(x <= y);
+            j += usize::from(y <= x);
         }
-        Self { all: false, words }.canonical(n_features)
+        indices.extend_from_slice(&ours[i..]);
+        indices.extend_from_slice(&theirs[j..]);
+        Self {
+            all: false,
+            indices,
+        }
+        .canonical(n_features)
     }
 
-    /// The lowest index in both sets, if any.
+    /// The lowest index in both sets, if any: a merge of their indices up to the
+    /// first they share.
     fn first_common(&self, other: &Self, n_features: usize) -> Option<usize> {
         match (self.all, other.all) {
             (true, true) => Some(0),
             (true, false) => other.first(),
             (false, true) => self.first(),
-            (false, false) => self
-                .words
-                .iter()
-                .zip(&other.words)
-                .position(|(a, b)| a & b != 0)
-                .map(|i| 64 * i + (self.words[i] & other.words[i]).trailing_zeros() as usize),
+            (false, false) => {
+                let (ours, theirs) = (self.indices.as_slice(), other.indices.as_slice());
+                let (mut i, mut j) = (0, 0);
+                while i < ours.len() && j < theirs.len() && ours[i] != theirs[j] {
+                    let (x, y) = (ours[i], theirs[j]);
+                    i += usize::from(x < y);
+                    j += usize::from(y < x);
+                }
+                (i < ours.len() && j < theirs.len()).then(|| ours[i] as usize)
+            }
         }
         .filter(|&f| f < n_features)
     }
 
     fn first(&self) -> Option<usize> {
-        let i = self.words.iter().position(|&w| w != 0)?;
-        Some(64 * i + self.words[i].trailing_zeros() as usize)
+        self.indices.first().map(|&f| f as usize)
     }
 
-    /// Every feature as `ALL`, and no trailing zero word.
-    fn canonical(mut self, n_features: usize) -> Self {
-        let count: usize = self.words.iter().map(|w| w.count_ones() as usize).sum();
-        if self.all || count == n_features {
+    /// Every feature as `ALL`.
+    fn canonical(self, n_features: usize) -> Self {
+        if self.all || self.indices.len() == n_features {
             return Self::ALL;
-        }
-        while self.words.last() == Some(&0) {
-            self.words.pop();
         }
         self
     }
@@ -298,8 +326,7 @@ impl WalkerConfig {
                 options.max_config_bytes
             )));
         }
-        crate::load::parse::validate_json_depth(bytes, options.max_json_nesting)
-            .map_err(|e| LoadError::MalformedConfig(e.to_string()))?;
+        crate::load::parse::validate_json_depth(bytes, options.max_json_nesting)?;
         let mut data = bytes.to_vec();
         let f: WalkerConfigFile = simd_json::serde::from_slice(&mut data)
             .map_err(|e| LoadError::MalformedConfig(e.to_string()))?;

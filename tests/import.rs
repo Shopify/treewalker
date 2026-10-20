@@ -824,4 +824,15 @@ fn input_caps_are_options() {
     };
     let c = WalkerConfig::from_json_with(config.as_bytes(), &raised).unwrap();
     assert!(c.is_varying(19_999) && !c.is_varying(20_000));
+    // A configuration nested past its cap is a Limit, as a model is.
+    let config = br#"{"n_features":2,"max_group_width":4,"varying_features":[0],"mono_inc_features":[],"mono_dec_features":[]}"#;
+    let flat = LoadOptions {
+        max_json_nesting: 1,
+        ..defaults
+    };
+    assert!(WalkerConfig::from_json_with(config, &defaults).is_ok());
+    match WalkerConfig::from_json_with(config, &flat) {
+        Err(LoadError::Limit(msg)) => assert!(msg.starts_with("JSON nesting exceeds 1"), "{msg}"),
+        other => panic!("{other:?}"),
+    }
 }
