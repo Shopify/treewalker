@@ -469,11 +469,27 @@ impl Decoded {
         &self.splits.all[node.id() as usize]
     }
 
-    /// The node store, for the layout to rewrite in place.
-    pub(crate) fn take_nodes(&mut self) -> Vec<LayoutNode> {
-        std::mem::take(&mut self.store)
-            .segments
-            .pop()
-            .unwrap_or_default()
+    /// What the layout build reads, its nodes to rewrite in place. The rest of the
+    /// decoded forest goes.
+    pub(crate) fn into_layout_source(self) -> LayoutSource {
+        let Self {
+            mut store,
+            trees,
+            splits,
+            ..
+        } = self;
+        LayoutSource {
+            trees,
+            splits: splits.all,
+            nodes: store.segments.pop().unwrap_or_default(),
+        }
     }
+}
+
+/// The decoded forest as the layout build takes it: its trees, its splits, and its
+/// nodes, sealed in one vector with room for the layout's dummy.
+pub(crate) struct LayoutSource {
+    pub(crate) trees: Vec<DecodedTree>,
+    pub(crate) splits: Vec<Split>,
+    pub(crate) nodes: Vec<LayoutNode>,
 }

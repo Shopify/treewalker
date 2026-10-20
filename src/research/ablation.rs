@@ -223,12 +223,9 @@ impl Forest {
         options: &LoadOptions,
         ablation: &LoadAblation,
     ) -> Result<Self, LoadError> {
-        let config = WalkerConfig::from_file_with(config_path, options)?;
-        let format = ModelFormat::from_path(model_path.as_ref())?;
-        Self::from_file_with(
-            std::fs::File::open(model_path)?,
-            format,
-            config,
+        Self::load_choosing(
+            model_path.as_ref(),
+            config_path.as_ref(),
             options,
             &ablation.choices(),
         )

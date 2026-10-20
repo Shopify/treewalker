@@ -23,7 +23,7 @@ impl std::fmt::Debug for Forest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let m = &*self.model;
         f.debug_struct("Forest")
-            .field("trees", &m.trees.len())
+            .field("trees", &m.tree_starts.len())
             .field("nodes", &(m.layout.nodes.len() - 1))
             .field("category_list_bytes", &(4 * m.categories.len()))
             .field("varying_predicates", &m.varying_predicates.len())
@@ -51,15 +51,27 @@ impl Forest {
         config_path: impl AsRef<Path>,
         options: &LoadOptions,
     ) -> Result<Self, LoadError> {
-        let config = WalkerConfig::from_file_with(config_path, options)?;
-        let format = ModelFormat::from_path(model_path.as_ref())?;
-        Self::from_file_with(
-            std::fs::File::open(model_path)?,
-            format,
-            config,
+        Self::load_choosing(
+            model_path.as_ref(),
+            config_path.as_ref(),
             options,
             &Choices::default(),
         )
+    }
+
+    /// [`Self::load_with`] with the layout's `choices`. Binary decoding counts the
+    /// model file's nodes first.
+    pub(crate) fn load_choosing(
+        model_path: &Path,
+        config_path: &Path,
+        options: &LoadOptions,
+        choices: &Choices,
+    ) -> Result<Self, LoadError> {
+        let config = WalkerConfig::from_file_with(config_path, options)?;
+        let format = ModelFormat::from_path(model_path)?;
+        let file = std::fs::File::open(model_path)?;
+        let parsed = parse::parse_file(file, format, &config, options, choices)?;
+        Self::build(parsed, config, options, choices)
     }
 
     /// Load a model from memory with explicit format and validated grouping metadata.
@@ -98,19 +110,6 @@ impl Forest {
         choices: &Choices,
     ) -> Result<Self, LoadError> {
         let parsed = parse::parse_reader(reader, format, &config, options, choices)?;
-        Self::build(parsed, config, options, choices)
-    }
-
-    /// [`Self::from_reader_with`] of a model file, whose binary decoding counts the
-    /// nodes first.
-    pub(crate) fn from_file_with(
-        file: std::fs::File,
-        format: ModelFormat,
-        config: WalkerConfig,
-        options: &LoadOptions,
-        choices: &Choices,
-    ) -> Result<Self, LoadError> {
-        let parsed = parse::parse_file(file, format, &config, options, choices)?;
         Self::build(parsed, config, options, choices)
     }
 
