@@ -449,7 +449,15 @@ impl RunSink for WideRuns<'_> {
         unsafe { v.sub_from(self.limbs.as_mut_ptr().add(at * self.n)) };
     }
 
-    #[inline]
+    #[cfg_attr(
+        dispatch,
+        expect(
+            clippy::inline_always,
+            reason = "each level's leaf pass compiles it with the level's features, not the baseline's"
+        ),
+        inline(always)
+    )]
+    #[cfg_attr(not(dispatch), inline)]
     fn add_all_of(&mut self, turn: &mut usize, values: impl Iterator<Item = WideLeaf>) {
         assert!(!self.sums.is_empty(), "a sink without sums of every row");
         // SAFETY: the sums are WIDE_SUMS accumulators of `n` slots, and the values
@@ -457,9 +465,17 @@ impl RunSink for WideRuns<'_> {
         *turn += unsafe { add_in_turns(self.sums.as_mut_ptr(), self.n, *turn, values) };
     }
 
-    /// One pass over the slots: the sums' slot sums are those of adding each sum in
-    /// turn, as i64 adds are associative modulo 2^64 and the slots' headroom bounds
-    /// every partial sum.
+    /// One pass over the slots ([`fold`]): the sums' slot sums are those of adding
+    /// each sum in turn, as i64 adds are associative modulo 2^64 and the slots'
+    /// headroom bounds every partial sum.
+    #[cfg_attr(
+        dispatch,
+        expect(
+            clippy::inline_always,
+            reason = "each level's leaf pass compiles it with the level's features"
+        ),
+        inline(always)
+    )]
     fn flush(&mut self, _: usize) {
         let n = self.n;
         if self.sums.is_empty() {
@@ -469,10 +485,21 @@ impl RunSink for WideRuns<'_> {
         let (s1, rest) = rest.split_at_mut(n);
         let (s2, s3) = rest.split_at_mut(n);
         const { assert!(WIDE_SUMS == 4, "one slice per sum") };
-        let sums = s0.iter_mut().zip(s1).zip(s2.iter_mut().zip(s3));
-        for (a, ((x0, x1), (x2, x3))) in self.limbs[..n].iter_mut().zip(sums) {
-            *a += *x0 + *x1 + (*x2 + *x3);
-            (*x0, *x1, *x2, *x3) = (0, 0, 0, 0);
-        }
+        fold(&mut self.limbs[..n], s0, s1, s2, s3);
+    }
+}
+
+/// Adds the sums `s0` to `s3` to `acc` and clears them, slot by slot. The slices are
+/// separate `&mut` arguments so that LLVM knows they do not overlap: read through
+/// [`WideRuns`]' fields they might, and it checked their bounds against each other at
+/// run time before taking the vector loop. `#[inline]` at every level: LLVM inlines it
+/// into each leaf pass, keeping that knowledge, while its copies inlined by
+/// `#[inline(always)]` into the levels' trampolines had the checks again.
+#[inline]
+fn fold(acc: &mut [i64], s0: &mut [i64], s1: &mut [i64], s2: &mut [i64], s3: &mut [i64]) {
+    let sums = s0.iter_mut().zip(s1).zip(s2.iter_mut().zip(s3));
+    for (a, ((x0, x1), (x2, x3))) in acc.iter_mut().zip(sums) {
+        *a += *x0 + *x1 + (*x2 + *x3);
+        (*x0, *x1, *x2, *x3) = (0, 0, 0, 0);
     }
 }
