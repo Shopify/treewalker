@@ -49,6 +49,11 @@ than calling the platform's libm.
   sum, which must be finite and not negative, with the binary reader's error; `gain`
   is not read. 3.0 rejected a JSON model with any invalid `gain`, `sum_hess` or
   `data_count`, which the same model in binary loaded with.
+- When the latency probe times L1 at 0 ns, as a clock too coarse to time it can, or
+  `TREEWALKER_LATENCY_NS` gives latencies whose ratios overflow, the prefetch rule
+  takes the assumed latency ratios. In 3.0 the infinite ratio overflowed the
+  restart prefetch distance in `Forest::predictor`: a panic in builds with overflow
+  checks, and no restart prefetch in others.
 - A split whose children's training weights are finite but sum past `f64::MAX`
   gives its heavy child the share of their weight it has, which the research API's
   `Node::heavy` reports, rather than 0. The share guides layout choices only, so
