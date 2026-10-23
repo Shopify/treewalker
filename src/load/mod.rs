@@ -112,6 +112,11 @@ impl Forest {
             decoded.into_layout_source(),
         )?;
         drop(predicate_ids);
+        // The walks start at the roots' links.
+        let mut tree_roots = tree_starts;
+        for root in &mut tree_roots {
+            *root = layout::node_link(*root as usize);
+        }
         let bounds = crate::predict::sweep_bounds(&varying_predicates, threshold_type);
         let masks = layout::MaskPlan::build(
             &layout.bins,
@@ -139,7 +144,7 @@ impl Forest {
                 threshold_type,
                 prefix_groups,
                 prefix,
-                tree_starts,
+                tree_roots,
                 steps,
                 plan,
                 layout,

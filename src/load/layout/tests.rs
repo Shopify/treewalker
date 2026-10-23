@@ -52,18 +52,20 @@ fn check_decisions(model: &Model, row: &[f64]) {
                 } else {
                     model.step::<false>(&model.nodes, start + local, local, row)
                 };
-            let index = (start + local) as u32;
+            let at = node_link(start + local);
             assert_eq!(
-                layout.next(index, &all) as usize,
+                node_index(layout.next(at, &all)),
                 parsed,
-                "node {index} {node:?} {:?}, row {row:?}",
-                layout.nodes[index as usize]
+                "node {} {node:?} {:?}, row {row:?}",
+                start + local,
+                layout.nodes[start + local]
             );
             if node.is_constant() {
                 assert_eq!(
-                    layout.next(index, &constant) as usize,
+                    node_index(layout.next(at, &constant)),
                     parsed,
-                    "node {index}"
+                    "node {}",
+                    start + local
                 );
             }
         }
@@ -131,9 +133,21 @@ fn check_structure(model: &Model) {
     let layout = &model.layout;
     assert_eq!(layout.nodes.len(), model.nodes.len() + 1);
     let dummy = layout.dummy();
-    let d = layout.nodes[dummy as usize];
+    assert_eq!(dummy, node_link(model.nodes.len()));
+    let d = layout.nodes[node_index(dummy)];
     assert_eq!((d.w0, d.child(), d.slot()), (0, dummy, DUMMY_SLOT));
     assert!(!d.is_leaf() && !d.is_varying());
+    // Its bound is 0. With byte offsets, as k + 1, no bin is below it, so it loops
+    // whatever its slot holds; with indices, as k, it loops on slot 0's `u32::MAX`
+    // (`check_bins`).
+    let bins: &[u32] = if BYTE_LINKS {
+        &[0, 1, u32::MAX - 1, u32::MAX]
+    } else {
+        &[u32::MAX]
+    };
+    for &bin in bins {
+        assert!(!d.goes_heavy(&[bin]), "{bin}");
+    }
 
     let n_leaves = layout.leaves.len();
     let mut seen = vec![false; n_leaves];
@@ -166,7 +180,8 @@ fn check_structure(model: &Model) {
                 continue;
             }
             internal += 1;
-            let child = new.child() as usize;
+            let child = node_index(new.child());
+            assert_eq!(new.child(), child as u32 * if BYTE_LINKS { 16 } else { 1 });
             assert!(i + 1 < end && child > i + 1 && child < end, "node {i}");
             assert_eq!(child, start + old.skip as usize);
             assert_eq!(new.is_varying(), !old.is_constant());
@@ -601,10 +616,12 @@ fn heavy_right_splits_read_inverted_bins_and_complemented_sets() {
         false,
     );
     let n = numeric.model.layout.nodes[0];
-    // Slot 0 is the dummy's; the feature's numeric slots follow.
+    // Slot 0 is the dummy's; the feature's numeric slots follow. k = 0, inverted: its
+    // bound `u32::MAX - 1`, or `u32::MAX` with byte offsets.
+    let inverted = if BYTE_LINKS { u32::MAX } else { u32::MAX - 1 };
     assert_eq!(
         (n.slot(), n.payload(), (n.w0 >> 32) & 3),
-        (1 + 2, u32::MAX - 1, 0)
+        (1 + 2, inverted, 0)
     );
     for (list, default_left, f32) in [
         (vec![0, 3], true, false),
@@ -622,10 +639,11 @@ fn heavy_right_splits_read_inverted_bins_and_complemented_sets() {
         );
         let layout = &forest.model.layout;
         let n = layout.nodes[0];
-        // One heavy set, the complement of the left one: one chain, after the dummy.
+        // One heavy set, the complement of the left one: one chain, after the dummy,
+        // at k = 0, whose bound is 1 with byte offsets.
         assert_eq!(
             (n.slot(), n.payload(), layout.bins.chain_slots()),
-            (1, 0, 1)
+            (1, u32::from(BYTE_LINKS), 1)
         );
         // Its ranks: no category and, sent right, missing are in the set, at the
         // default rank 0; the listed codes are not, their exceptions.
@@ -665,6 +683,68 @@ fn heavy_right_splits_read_inverted_bins_and_complemented_sets() {
             layout.bins.fill(&[x], &mut bins, false);
             let left = if x.is_nan() { default_left } else { listed(x) };
             assert_eq!(n.goes_heavy(&bins), !left, "{x}");
+        }
+    }
+}
+
+/// A numeric split at k = 0 stores its bound, k + 1 with byte offsets (x86-64), for
+/// the test `bin < k + 1`, and k with node indices, for `bin <= k`: 1 or 0 on its slot
+/// when its heavy child is on the left, and on the inverted slot when it is on the
+/// right `u32::MAX`, the most a split stores, or `u32::MAX - 1`. Bins k and k + 1 fall
+/// on either side, in filled bins and through `Layout::next`, whose heavy child is 16
+/// bytes or 1 index on.
+#[test]
+fn split_bounds_part_bins_k_and_k_plus_1() {
+    let test = r#""node_type": "numerical_test_node", "comparison_op": "<=", "threshold": 1.5"#;
+    for (counts, heavy_left) in [((5, 1), true), ((1, 5), false)] {
+        for default_left in [true, false] {
+            let json = json::regressor(false, 1, &[json::stump(test, default_left, counts)]);
+            let config = WalkerConfig::builder(1)
+                .max_group_width(8)
+                .varying([])
+                .build()
+                .unwrap();
+            let forest = Forest::from_bytes(
+                json.as_bytes(),
+                ModelFormat::TreeliteJson,
+                config,
+                &LoadOptions::default(),
+            )
+            .unwrap();
+            let layout = &forest.model.layout;
+            let n = layout.nodes[0];
+            // After the dummy's slot: missing sent left, sent right, both inverted.
+            let slot = 1 + usize::from(!default_left) + if heavy_left { 0 } else { 2 };
+            let bound = match (BYTE_LINKS, heavy_left) {
+                (true, true) => 1,
+                (true, false) => u32::MAX,
+                (false, true) => 0,
+                (false, false) => u32::MAX - 1,
+            };
+            assert_eq!((n.slot(), n.payload()), (slot, bound));
+            let goes = |bins: &[u32], left: bool, what: &str| {
+                assert_eq!(n.goes_heavy(bins), left == heavy_left, "{what}");
+                let next = if left != heavy_left {
+                    n.child()
+                } else if BYTE_LINKS {
+                    16
+                } else {
+                    1
+                };
+                assert_eq!(layout.next(0, bins), next, "{what}");
+            };
+            // Bin 0 (x <= 1.5) goes left, bin 1 right.
+            for (bin, left) in [(0, true), (1, false)] {
+                let mut bins = layout.bins.new_bins();
+                bins[slot] = if heavy_left { bin } else { u32::MAX - bin };
+                goes(&bins, left, &format!("bin {bin}"));
+            }
+            for x in [1.0, 1.5, 1.5f64.next_up(), 2.0, f64::NAN] {
+                let mut bins = layout.bins.new_bins();
+                layout.bins.fill(&[x], &mut bins, false);
+                let left = if x.is_nan() { default_left } else { x <= 1.5 };
+                goes(&bins, left, &format!("{x}"));
+            }
         }
     }
 }

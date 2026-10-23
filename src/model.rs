@@ -382,7 +382,7 @@ pub(crate) struct FeatureRange {
 /// where they lead.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PrefixGroup {
-    /// The first tree's root, whose splits the group evaluates.
+    /// The index of the first tree's root, whose splits the group evaluates.
     pub node_base: u32,
     pub depth: u32,
     /// The trees `first..end`.
@@ -429,8 +429,9 @@ pub(crate) struct Model {
     pub(crate) prefix_groups: Vec<PrefixGroup>,
     /// What the prefix groups save, as the rule counts it.
     pub(crate) prefix: crate::rules::PrefixStats,
-    /// Each tree's root, in tree order; the nodes are in input order.
-    pub(crate) tree_starts: Vec<u32>,
+    /// Each tree's root as a link ([`crate::load::layout::node_link`]), in tree order;
+    /// the nodes are in input order.
+    pub(crate) tree_roots: Vec<u32>,
     /// Expected walk steps per tree for rows like the training data.
     pub(crate) steps: crate::rules::Steps,
     /// How the leaf values are summed exactly.

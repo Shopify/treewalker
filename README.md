@@ -127,14 +127,19 @@ Miri checks the unsafe code on small production-shaped cases (`tests/miri.rs` an
 lib's `prefetching_walks`), each of which runs every kind of unsafe operation of its
 path once, with a nightly toolchain (`rustup +nightly component add miri`). The x86-64
 runs take the SSE2 and AVX2 masks, the RISC-V run the plain-word fallback; on AArch64,
-Miri lacks a NEON intrinsic the masks use. An empty `RUSTFLAGS` replaces the
-repository's `target-cpu=native`:
+Miri lacks a NEON intrinsic the masks use. The walks link nodes by byte offset on x86-64
+and by index elsewhere (`src/load/layout`), so the x86-64 run also takes the layout's
+tests of x86-64's encoding, which an AArch64 machine's native tests do not. An empty
+`RUSTFLAGS` replaces the repository's `target-cpu=native`:
 
 ```bash
 for cpu in x86-64 x86-64-v3; do
   RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- prefetching_walks
   RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --test miri
 done
+RUSTFLAGS="-C target-cpu=x86-64" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- \
+  load::layout::tests::split_bounds load::layout::tests::heavy_right_splits \
+  load::layout::tests::signed_zero load::layout::tests::nested_heavy
 RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --lib -- prefetching_walks
 RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --test miri
 ```
@@ -198,7 +203,8 @@ classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base
 scores. Binary Treelite v4 is recommended; native XGBoost JSON must first be
 converted through Treelite. Inputs have up to `i32::MAX` features, Treelite's own
 limit; trees, nodes, depth and category IDs are bounded only by the input caps of
-`LoadOptions`, memory and 32-bit node indices; groups can have any number of rows.
+`LoadOptions`, memory and a node pool below 4 GiB (2^28 − 2 nodes in all, on every
+target); groups can have any number of rows.
 See [Treelite loading](docs/treelite-loading.md) for export examples, the exact
 output and precision policy, errors, limits, prediction scratch, and the caller's
 grouping contract.

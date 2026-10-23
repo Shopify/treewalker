@@ -17,11 +17,12 @@
 //!
 //! ```text
 //! Word 0:
-//!   0-31   a split's k, pre-oriented; a leaf's leaf-value index
+//!   0-31   a split's bound, its k or k + 1 (Links), pre-oriented; a leaf's
+//!          leaf-value index
 //!   32-33  unused
 //!   34-63  bin slot
 //! Word 1:
-//!   0-31   absolute light child; for a leaf, its leaf-value index
+//!   0-31   the light child's link; for a leaf, its leaf-value index
 //!   32     leaf
 //!   33-62  mask field: 0 for the all-rows mask, which leaves read, and for
 //!          constant splits; a split on varying predicate i reads its heavy side's
@@ -29,12 +30,13 @@
 //!   63     unused
 //! ```
 //!
-//! What bounds each field: node indices and leaf indices are 32-bit, so a model has
-//! fewer than 2^32 - 1 nodes with the dummy; k is below the node count or a chain's
-//! length; slots below 2^30 allow 2^28 features with numeric splits; mask fields
-//! below 2^30 allow 2^29 - 1 varying predicates, each with a mask per side. Each
-//! field is extracted with one shift, mask or 32-bit compare, as narrower fields
-//! were: a 32-bit compare on word 0 ignores the slot.
+//! What bounds each field: links and leaf indices are 32-bit, and a model has at
+//! most [`MAX_NODES`], 2^28 - 1, nodes with the dummy, a pool below 4 GiB, on every
+//! target (Links); a bound is at most the node count or a chain's length; slots
+//! below 2^30 allow 2^28 features with numeric splits; mask fields below 2^30 allow
+//! 2^29 - 1 varying predicates, each with a mask per side. Each field is extracted
+//! with one shift, mask or 32-bit compare, as narrower fields were: a 32-bit compare
+//! on word 0 ignores the slot.
 //!
 //! The heavy child is the next node. A varying node carries the same constant
 //! encoding, for single rows and prefixes. The precompute writes both sides' masks
@@ -45,16 +47,42 @@
 //! like the leaf flag alone, is one AArch64 logical immediate; a mask of word 1's top
 //! bits would become a shift and a compare.
 //!
+//! # Links
+//!
+//! A link names a node: light children are links, and so are the walks' items and
+//! stops and the trees' roots, and a lane steps from node to node by link. Its unit
+//! and the form of a split's test follow the instruction set, chosen in one place,
+//! [`BYTE_LINKS`] ([`crate::rules::lanes`] gives the reasons and the measurements):
+//!
+//! - x86-64: a node's byte offset, its index times [`NODE_BYTES`], so that its
+//!   address is the pool's plus the link, with no shift: x86-64 scales an index
+//!   register by at most 8. A split's bound is k + 1 and its test `bin < k + 1`, so
+//!   that the walk selects its child on the carry flag alone (`cmovae`, one uop on
+//!   Intel, where `cmova` for `bin <= k` reads two flags and takes two).
+//! - Every other target: a node's index, which AArch64 scales by the node's 16 bytes
+//!   in the add of its address (`add x, nodes, w, uxtw #4`), and a split's bound is
+//!   k, its test `bin <= k`: `csinc` then selects the heavy child, the index plus 1,
+//!   in one instruction.
+//!
+//! The heavy child's link is the node's plus [`LINK_STRIDE`]. Byte offsets are
+//! 32-bit, and so is the dummy's heavy child's, one node past it, which the walk
+//! computes: a model has at most [`MAX_NODES`] nodes with the dummy. Indices would
+//! allow 2^32 - 1, but every target takes the same bound, so that a model loads, or
+//! fails to, alike everywhere.
+//!
 //! # Numeric slots
 //!
-//! Slot 0 holds `u32::MAX` for the dummy, which reads k = 0 and loops on itself;
-//! other slots belong to the features that splits use, in feature order. A feature
-//! with numeric splits takes four: its bin with missing values sent left, sent
-//! right, and both inverted (`u32::MAX - bin`). A value's bin is the number of the
-//! feature's sorted distinct thresholds below it (at or below it after rounding for
-//! float32 models), so `x <= t_k` (`x < t_k` for float32) holds exactly when
-//! `bin <= k`: the thresholds' sublevel sets are a chain. A split whose heavy child
-//! is on the right reads an inverted slot against `u32::MAX - 1 - k`.
+//! Slot 0 is the dummy's and holds `u32::MAX`. The dummy's word 0 is 0, a split on
+//! slot 0 whose bound is 0: with indices k = 0, which `u32::MAX` is above, and with
+//! byte offsets k + 1 = 0, which no bin is below. Either way it takes its light
+//! child, itself. The other slots belong to the features that splits use, in feature
+//! order. A feature with numeric splits takes four: its bin with missing values sent
+//! left, sent right, and both inverted (`u32::MAX - bin`). A value's bin is the
+//! number of the feature's sorted distinct thresholds below it (at or below it after
+//! rounding for float32 models), so `x <= t_k` (`x < t_k` for float32) holds exactly
+//! when `bin <= k`: the thresholds' sublevel sets are a chain. A split whose heavy
+//! child is on the right reads an inverted slot with `u32::MAX - 1 - k` for its k:
+//! `bin > k` holds exactly when `u32::MAX - bin <= u32::MAX - 1 - k`.
 //!
 //! # Categorical slots
 //!
@@ -114,6 +142,66 @@ pub(crate) struct LayoutNode {
 
 const _: () = assert!(size_of::<LayoutNode>() == 16 && align_of::<LayoutNode>() == 16);
 
+/// A node's bytes.
+pub(crate) const NODE_BYTES: u32 = 16;
+
+/// Whether links are byte offsets, with a split's bound k + 1 for the test `bin < k +
+/// 1`, as on x86-64; else node indices, with the bound k for `bin <= k`. The one
+/// choice of the links' unit and the test's form, which the encoder and the walks
+/// read through the items below (the module documentation, "Links").
+const BYTE_LINKS: bool = cfg!(target_arch = "x86_64");
+
+/// The heavy child's link less its node's: a node's bytes or 1.
+pub(crate) const LINK_STRIDE: u32 = if BYTE_LINKS { NODE_BYTES } else { 1 };
+/// A split's bound less its k: 1 with byte offsets, for the test `bin < k + 1`.
+pub(crate) const BOUND_BIAS: u32 = BYTE_LINKS as u32;
+/// Nodes a model may have, the dummy included, on every target: the dummy's byte
+/// offset and its heavy child's, one node past it, are 32-bit.
+pub(crate) const MAX_NODES: usize = (u32::MAX / NODE_BYTES) as usize;
+
+const _: () = assert!(size_of::<LayoutNode>() == NODE_BYTES as usize);
+const _: () = assert!(MAX_NODES == (1 << 28) - 1);
+
+/// The link of the node at `index`, below [`MAX_NODES`].
+#[inline]
+pub(crate) const fn node_link(index: usize) -> u32 {
+    index as u32 * LINK_STRIDE
+}
+
+/// The index of the node at `link`.
+#[inline]
+pub(crate) const fn node_index(link: u32) -> usize {
+    (link / LINK_STRIDE) as usize
+}
+
+/// The node at `link` in the pool `nodes`.
+///
+/// # Safety
+///
+/// `link` is a node's of the pool.
+#[inline]
+pub(crate) const unsafe fn node_at(nodes: *const LayoutNode, link: u32) -> *const LayoutNode {
+    // SAFETY: the caller's.
+    unsafe {
+        if BYTE_LINKS {
+            nodes.byte_add(link as usize)
+        } else {
+            nodes.add(link as usize)
+        }
+    }
+}
+
+/// Whether a row whose bin is `bin` takes the heavy child of a split whose bound is
+/// `bound`: `bin <= k`.
+#[inline]
+pub(crate) const fn takes_heavy(bin: u32, bound: u32) -> bool {
+    if BYTE_LINKS {
+        bin < bound
+    } else {
+        bin <= bound
+    }
+}
+
 /// Word 0: the payload and the slot.
 pub(crate) const PAYLOAD_MASK: u64 = 0xFFFF_FFFF;
 pub(crate) const SLOT_SHIFT: u32 = 34;
@@ -140,15 +228,16 @@ const _: () = assert!(MASK_SHIFT + MASK_BITS == 63);
 const _: () = assert!(2 * MAX_PREDICATES as u64 <= MASK_FIELD);
 
 impl LayoutNode {
-    /// The dummy at `index`: a numeric split that reads `u32::MAX` from slot 0 against
-    /// k = 0 and so always takes its light child, itself.
-    const fn dummy(index: u32) -> Self {
+    /// The dummy at `link`: a numeric split on slot 0 whose bound is 0, so that it
+    /// always takes its light child, itself (the module documentation).
+    const fn dummy(link: u32) -> Self {
         Self {
             w0: 0,
-            w1: index as u64,
+            w1: link as u64,
         }
     }
 
+    /// The light child's link; a leaf's leaf-value index.
     #[inline]
     pub(crate) const fn child(self) -> u32 {
         (self.w1 & CHILD_MASK) as u32
@@ -179,17 +268,17 @@ impl LayoutNode {
         !self.is_leaf() && self.mask_field() != 0
     }
 
-    /// Word 0's low 32 bits: a split's k or a leaf's leaf-value index.
+    /// Word 0's low 32 bits: a split's bound or a leaf's leaf-value index.
     #[inline]
     pub(crate) const fn payload(self) -> u32 {
         (self.w0 & PAYLOAD_MASK) as u32
     }
 
-    /// Whether a split goes to its heavy child, reading `bins`. Varying nodes answer
-    /// through their constant encoding.
+    /// Whether a split goes to its heavy child, reading `bins`: `bin <= k`. Varying
+    /// nodes answer through their constant encoding.
     #[inline]
     pub(crate) fn goes_heavy(self, bins: &[u32]) -> bool {
-        bins[self.slot()] <= self.payload()
+        takes_heavy(bins[self.slot()], self.payload())
     }
 }
 
@@ -574,18 +663,18 @@ pub(crate) struct Need {
 }
 
 impl Layout {
-    /// The dummy node's index.
+    /// The dummy node's link.
     #[inline]
     pub(crate) const fn dummy(&self) -> u32 {
-        (self.nodes.len() - 1) as u32
+        node_link(self.nodes.len() - 1)
     }
 
-    /// The node after node `index` for a row with `bins`.
+    /// The link of the node after the node at `link` for a row with `bins`.
     #[cfg(test)]
-    pub(crate) fn next(&self, index: u32, bins: &[u32]) -> u32 {
-        let node = self.nodes[index as usize];
+    pub(crate) fn next(&self, link: u32, bins: &[u32]) -> u32 {
+        let node = self.nodes[node_index(link)];
         if node.goes_heavy(bins) {
-            index + 1
+            link + LINK_STRIDE
         } else {
             node.child()
         }

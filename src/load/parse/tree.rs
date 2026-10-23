@@ -11,6 +11,7 @@ use rustc_hash::FxHashMap as HashMap;
 use super::decoded::{Decoded, Packed};
 use crate::LoadError;
 use crate::config::WalkerConfig;
+use crate::load::layout::MAX_NODES;
 use crate::model::{
     FLAG_CATEGORICAL, FLAG_DEFAULT_LEFT, FLAG_INLINE_CAT, FLAG_VARYING, NONE, ThresholdType,
 };
@@ -345,17 +346,15 @@ fn heavy_share(heavy: f64, light: f64) -> u16 {
     (share.clamp(0.0, 1.0) * f64::from(u16::MAX)).round() as u16
 }
 
-/// Node indices are 32-bit, and the layout appends a dummy node whose heavy child
-/// index, one past it, must fit too: `existing` nodes and `new` ones stay below
-/// `u32::MAX`.
+/// The layout appends a dummy node, and with byte-offset links the dummy's heavy
+/// child's offset, one node past it, is 32-bit too ([`MAX_NODES`]): `existing` nodes
+/// and `new` ones stay below [`MAX_NODES`], 2^28 - 1, a node pool below 4 GiB, on
+/// every target.
 pub(crate) fn check_node_total(existing: usize, new: usize) -> Result<(), LoadError> {
-    if existing
-        .checked_add(new)
-        .is_none_or(|n| n >= u32::MAX as usize)
-    {
+    if existing.checked_add(new).is_none_or(|n| n >= MAX_NODES) {
         return Err(LoadError::Limit(format!(
-            "more than {} nodes: node indices are 32-bit",
-            u32::MAX - 1
+            "more than {} nodes: the node pool stays below 4 GiB",
+            MAX_NODES - 1
         )));
     }
     Ok(())
@@ -429,13 +428,18 @@ mod tests {
         assert_eq!(heavy_share(0.0, 0.0), 32_768);
     }
 
-    /// The node total's bound, without building 4 billion nodes.
+    /// The node total's bound, without building 268 million nodes: 2^28 - 2, and the
+    /// dummy.
     #[test]
-    fn node_totals_stop_below_u32_max() {
-        let max = u32::MAX as usize - 1;
+    fn node_totals_stop_below_2_pow_28() {
+        let max = (1 << 28) - 2;
         assert!(check_node_total(max - 10, 10).is_ok());
         assert!(check_node_total(32_000_001, 1).is_ok());
         assert!(matches!(check_node_total(max, 1), Err(LoadError::Limit(_))));
+        assert!(matches!(
+            check_node_total(u32::MAX as usize - 1, 0),
+            Err(LoadError::Limit(_))
+        ));
         assert!(matches!(
             check_node_total(usize::MAX, 1),
             Err(LoadError::Limit(_))

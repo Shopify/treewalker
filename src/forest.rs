@@ -23,7 +23,7 @@ impl std::fmt::Debug for Forest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let m = &*self.model;
         f.debug_struct("Forest")
-            .field("trees", &m.tree_starts.len())
+            .field("trees", &m.tree_roots.len())
             .field("nodes", &(m.layout.nodes.len() - 1))
             .field("category_list_bytes", &(4 * m.categories.len()))
             .field("varying_predicates", &m.varying_predicates.len())

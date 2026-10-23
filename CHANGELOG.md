@@ -22,6 +22,14 @@ than calling the platform's libm.
   platform; 3.0's last bits came from the platform's libm. Against 3.0 with Apple's
   libm, 99.92% of outputs are unchanged and the rest move by at most 4 ulp; both are
   within 2 ulp of the correctly rounded sigmoid for `|m| <= 40`.
+- A model of more than 2^28 − 2 nodes in all (268,435,454) fails to load with
+  `LoadError::Limit` on every target, where 3.0 loaded up to 2^32 − 2. On x86-64 the
+  walks now step from node to node by byte offset into the node pool, so that a
+  node's address takes no shift, and the offsets are 32-bit: a pool below 4 GiB.
+  AArch64 and the other targets keep node indices and take the same limit, so that a
+  model loads, or fails to, alike everywhere. Only a model loaded with `LoadOptions`
+  caps raised past their defaults can have that many nodes: a binary model takes at
+  least 40 bytes per node.
 - Debug builds check the predictor's contract that a group's constant features are
   equal in every row, on the features that constant splits read, and panic naming
   the feature and the row; a missing value equals a missing one. Release builds do
