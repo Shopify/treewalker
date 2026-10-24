@@ -71,6 +71,41 @@ The `external-bench` feature enables the C baselines and QuickScorer;
 counters. `cargo bench` runs small divan benchmarks of the library on the
 committed fixtures.
 
+### Instruction-set levels and CPU flags
+
+A build without CPU flags runs the kernel at the CPU's level on x86-64. It compiles the
+kernel for the SSE2 baseline, for x86-64-v3 and for x86-64-v4 with VPOPCNTDQ, BITALG
+and BF16, and each predictor runs the highest level the CPU has, detected when the
+predictor is made. `TREEWALKER_ISA=base`, `v3` or `v4` asks for a lower level, never a
+higher one. Outputs are the same at every level. A build whose features include AVX2
+and FMA, such as `-C target-cpu=x86-64-v3` or `-C target-cpu=native` on a CPU that has
+them, compiles only its own level and does not read `TREEWALKER_ISA`, and so do builds
+for other architectures. With the `research` feature, `ResearchPredictor::isa()` names
+the level a predictor runs. A project that depends on `treewalker-gbdt` builds it with
+its own flags; this repository's `.cargo/config.toml`, which the package excludes,
+builds natively.
+
+On the seven Google Cloud families of 3.1.0's measurements ([changelog](CHANGELOG.md)),
+a default build took, against a `-C target-cpu=native` build, over the 90 cells at
+both function alignments:
+
+| | Emerald Rapids | Ice Lake | Milan | Genoa | Turin | Axion | Altra |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Level the default build runs | v4 | v3 | v3 | v4 | v4 | native | native |
+| Time against native | 1.006 | 0.976 | 1.022 | 1.021 | 1.027 | 1.008 | 0.991 |
+
+- On AMD, build with `-C target-cpu=native` for the best speed. The default build
+  took 2.1 to 2.7% longer on Milan, Genoa and Turin, and 3.4 to 4.3% on Genoa's and
+  Turin's single rows. Its dispatched code has LLVM's generic tuning, under which the
+  walk loops differ from the native ones in instruction order and registers; why
+  that costs on these cores is not established (the changelog's known gaps).
+- On Intel, the default build is as fast as a native one: within 1% on Emerald
+  Rapids, and 2.4% faster on Ice Lake, whose AVX-512 lacks BF16, so that it runs v3.
+- On AArch64 every build compiles only its own level; the default one was within 1%
+  of native on Neoverse V2 and N1.
+- A native build runs only on CPUs with the build machine's features; a default one
+  runs on any CPU of its architecture.
+
 ### Development checks
 
 `experiments/scripts/checks.sh` runs the checks as concurrent lanes, each building in
