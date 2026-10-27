@@ -90,7 +90,7 @@ impl Tuning {
                 &model.rules.pool_latency,
                 leaf,
                 Some(&model.rules.items.leaf_short),
-                lanes(false),
+                lanes(false, layout.bins.has_bits()),
                 caches,
             ),
             varying: distance(
@@ -99,7 +99,7 @@ impl Tuning {
                 &model.rules.pool_latency,
                 stop,
                 None,
-                lanes(true),
+                lanes(true, layout.bins.has_bits()),
                 caches,
             ),
         }

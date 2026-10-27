@@ -193,7 +193,8 @@ fn runtime_ablations(c: &Cell, f: &Forest) -> Result<(), String> {
     Ok(())
 }
 
-/// Exact sums: tree order and node layout cannot change a prediction.
+/// Exact sums: tree order, node layout and the categorical slots cannot change a
+/// prediction.
 fn load_options(c: &Cell, f: &Forest) -> Result<(), String> {
     let reference = predict(f, c);
     for o in [
@@ -214,10 +215,15 @@ fn load_options(c: &Cell, f: &Forest) -> Result<(), String> {
             ..Default::default()
         },
         LoadAblation {
+            category_bits_above: Some(0),
+            ..Default::default()
+        },
+        LoadAblation {
             disable_tree_ordering: true,
             disable_bitset_intern: true,
             prefix_depth: Some(0),
             disable_predicate_dedup: true,
+            category_bits_above: Some(0),
         },
     ] {
         let g = c.forest(&o).map_err(|e| format!("{o:?}: {e}"))?;

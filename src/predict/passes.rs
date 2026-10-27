@@ -47,17 +47,24 @@ impl Walks {
 
     /// The walks of a pass of `n` items, with the distance of
     /// [`crate::rules::pass_distance`], and the padding such a walk reads past the
-    /// items.
-    pub(super) fn for_pass<const ABLATE: bool>(self, n: usize, varying: bool) -> (Self, usize) {
+    /// items; `varying` and `bits` as for [`walk::walk`].
+    pub(super) fn for_pass<const ABLATE: bool>(
+        self,
+        n: usize,
+        varying: bool,
+        bits: bool,
+    ) -> (Self, usize) {
         let forced = if ABLATE { self.lanes } else { None };
         // The rule's lanes, evaluated at compile time. Called at run time, the const fn
         // is left to LLVM, which did not fold it at x86-64's dispatched base level:
         // there the rule's loop ran every pass, and `pass_distance` divided by a lane
         // count it could not see.
-        let lanes = match forced.unwrap_or(0) {
-            0 if varying => const { lanes_of(0, true) },
-            0 => const { lanes_of(0, false) },
-            k => k,
+        let lanes = match (forced.unwrap_or(0), varying, bits) {
+            (0, true, false) => const { lanes_of(0, true, false) },
+            (0, true, true) => const { lanes_of(0, true, true) },
+            (0, false, false) => const { lanes_of(0, false, false) },
+            (0, false, true) => const { lanes_of(0, false, true) },
+            (k, _, _) => k,
         };
         let wanted = match forced {
             Some(_) => self.distance.min(1),
@@ -75,9 +82,10 @@ impl Walks {
     }
 }
 
-/// Run `$call` with `K`, `D` and `R` as consts: the walk's lanes (0 for the rule's),
-/// its prefetch distance, rounded up to a compiled one, and its rate (1 without
-/// prefetch). Production, without `$ablate`, never instantiates forced lanes.
+/// Run `$call` with `K`, `D`, `R` and `B` as consts: the walk's lanes (0 for the
+/// rule's), its prefetch distance, rounded up to a compiled one, its rate (1 without
+/// prefetch), and whether it shifts for bit splits, `$bits`. Production, without
+/// `$ablate`, never instantiates forced lanes.
 macro_rules! walk_with {
     (@forced $lanes:ident, $d:ident, $($l:literal)+) => {
         match $lanes {
@@ -92,13 +100,19 @@ macro_rules! walk_with {
             _ => go!(0, $dd, 4),
         }
     };
-    ($ablate:expr, $walks:expr, |$k:ident, $d:ident, $rr:ident| $call:expr) => {{
+    ($ablate:expr, $walks:expr, $bits:expr, |$k:ident, $d:ident, $rr:ident, $b:ident| $call:expr) => {{
         macro_rules! go {
             ($kk:literal, $dd:literal, $r:literal) => {{
                 const $k: usize = $kk;
                 const $d: usize = $dd;
                 const $rr: usize = $r;
-                $call
+                if $bits {
+                    const $b: bool = true;
+                    $call
+                } else {
+                    const $b: bool = false;
+                    $call
+                }
             }};
         }
         let w: Walks = $walks;
@@ -257,7 +271,7 @@ impl<M: Mask> Pass<'_, M> {
         let (mut steps, mut seen) = (Steps::default(), Splits::default());
         let mut clock = Clock::<STATS>::start();
         while n > 0 {
-            let (walks, pad) = walks.for_pass::<ABLATE>(n, true);
+            let (walks, pad) = walks.for_pass::<ABLATE>(n, true, p.bits);
             // SAFETY: the caller sizes both queues for a pass's items plus the most
             // padding, the stops likewise, and the arena for the chunk's splits.
             unsafe {
@@ -267,7 +281,7 @@ impl<M: Mask> Pass<'_, M> {
                 // The walk with varying stops prefetches every round
                 // (`rules::RATES`): a rate of 1 here leaves one walk per distance.
                 let walks = Walks { rate: 1, ..walks };
-                walk_with!(ABLATE, walks, |K, D, R| walk::walk_at::<
+                walk_with!(ABLATE, walks, p.bits, |K, D, R, B| walk::walk_at::<
                     X,
                     Item<C>,
                     K,
@@ -275,6 +289,7 @@ impl<M: Mask> Pass<'_, M> {
                     D,
                     R,
                     STATS,
+                    B,
                 >(
                     p, items, stops, words, &mut steps
                 ));

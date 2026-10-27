@@ -60,7 +60,13 @@ pub struct LoadOptions {
     /// categorical feature with C categories whose splits' sets need W chains takes
     /// 4 × (W + C + 3) bytes, and 8 more per exception, a code's rank in a chain
     /// where it differs from an unlisted category's: at most one per listed category
-    /// (or missing sent left) of each distinct heavy set. A categorical feature the
+    /// (or missing sent left) of each distinct heavy set. A constant one of more than
+    /// 100,000 distinct heavy sets S takes 4 × (C + 2) × ⌈S / 32⌉ bytes of bits
+    /// instead when they fit with the tables before it, and beside it so does every
+    /// constant categorical feature whose bits take no more than its chains' bound
+    /// above with W = S. If bits leave the features after them or the masks' flips
+    /// too little, the layout is built again with bits only past 100,000 sets, then
+    /// with chains everywhere, and the smallest tables are kept. A categorical feature the
     /// walker configuration declares varying also takes, for the masks its rows
     /// flip, 4 × (C + 3) bytes and at most 8 per exception in a chain that its splits
     /// test. The cap also bounds, per feature, what is
@@ -98,6 +104,8 @@ pub(crate) struct Choices {
     pub(crate) prefix: crate::rules::Prefix,
     /// Share one predicate between identical varying splits.
     pub(crate) predicate_dedup: bool,
+    /// Give constant categorical features of more distinct heavy sets bits.
+    pub(crate) category_bits_above: usize,
 }
 
 impl Default for Choices {
@@ -107,6 +115,7 @@ impl Default for Choices {
             bitset_intern: true,
             prefix: crate::rules::Prefix::Rule,
             predicate_dedup: true,
+            category_bits_above: crate::load::layout::CATEGORY_BITS_ABOVE,
         }
     }
 }

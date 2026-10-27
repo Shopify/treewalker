@@ -26,6 +26,7 @@ use rng::Rng;
 use super::sigmoid::sigmoid;
 use super::{Groups, Level, Options, Predictor, Stats, Workspace};
 use crate::config::Choices;
+use crate::load::layout::CATEGORY_BITS_ABOVE;
 use crate::rules::{Prefix, Tuning};
 use crate::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
@@ -84,6 +85,7 @@ fn case(seed: u64) -> Case {
             Prefix::Depth(3),
         ]),
         predicate_dedup: !rng.chance(0.1),
+        category_bits_above: *rng.pick(&[0, CATEGORY_BITS_ABOVE]),
     };
     let forest = Forest::from_reader_with(
         std::io::Cursor::new(&bytes),
@@ -619,28 +621,48 @@ const STUMPS: usize = 2 * super::walk::MAX_DISTANCE * super::walk::MAX_LANES;
 /// `STUMPS` stumps, every 7th on the varying feature 0 and the others on feature 1,
 /// which is constant in each group, so that a group's first pass and a single row's
 /// walk hold one item per tree; groups of 1, 2, 33, 65 and 1 rows, whose walks take
-/// `u32` items, items carrying masks by value and items carrying arena handles.
-fn stumps() -> (Case, model::Model) {
+/// `u32` items, items carrying masks by value and items carrying arena handles. With
+/// `bits`, feature 1's stumps are categorical and take bits, so the walks shift.
+fn stumps(bits: bool) -> (Case, model::Model) {
     use model::{Node, Op, Task, Tree};
     let leaf = |value| Node::Leaf {
         value,
         count: Some(1),
     };
     let trees = (0..STUMPS)
-        .map(|t| Tree {
-            nodes: vec![
+        .map(|t| {
+            let feature = usize::from(t % 7 != 0);
+            let split = if bits && feature == 1 {
+                let mut categories = vec![(t % 4) as u32, (t % 3) as u32 + 1];
+                categories.sort_unstable();
+                categories.dedup();
+                Node::Categorical {
+                    feature,
+                    categories,
+                    right_child: t % 2 == 0,
+                    default_left: t % 3 == 0,
+                    left: 1,
+                    right: 2,
+                    count: Some(3),
+                }
+            } else {
                 Node::Numeric {
-                    feature: usize::from(t % 7 != 0),
+                    feature,
                     op: Op::Le,
                     threshold: (t % 5) as f64 - 1.5,
                     default_left: t % 3 == 0,
                     left: 1,
                     right: 2,
                     count: Some(3),
-                },
-                leaf((t % 11) as f64 / 8.0),
-                leaf(-((t % 13) as f64) / 16.0),
-            ],
+                }
+            };
+            Tree {
+                nodes: vec![
+                    split,
+                    leaf((t % 11) as f64 / 8.0),
+                    leaf(-((t % 13) as f64) / 16.0),
+                ],
+            }
         })
         .collect();
     let m = model::Model {
@@ -664,7 +686,8 @@ fn stumps() -> (Case, model::Model) {
         tree_ordering: true,
         bitset_intern: true,
         prefix: Prefix::Depth(0),
-        predicate_dedup: true,
+        category_bits_above: if bits { 0 } else { usize::MAX },
+        ..Choices::default()
     };
     let forest = Forest::from_reader_with(
         std::io::Cursor::new(&bytes),
@@ -674,6 +697,7 @@ fn stumps() -> (Case, model::Model) {
         &choices,
     )
     .expect("load");
+    assert_eq!(forest.model.layout.bins.has_bits(), bits);
     let data: Vec<f64> = sizes
         .iter()
         .enumerate()
@@ -694,19 +718,22 @@ fn stumps() -> (Case, model::Model) {
 fn prefetching_walks() {
     // Under Miri, the walks' prefetch addresses and their padding: the rule's choices,
     // then the shortest and the longest distance and, for the walk without varying
-    // stops, a prefetch every 4 rounds.
-    let (c, m) = stumps();
-    let reference = kernel(&c, None, Options::default());
-    let expected: Vec<f64> = c.data.chunks_exact(2).map(|row| m.predict(row)).collect();
-    same(&reference, &expected, "the oracle");
-    let longest = super::walk::MAX_DISTANCE;
-    for (distance, rate) in [(1, 1), (longest, 1), (longest, 4)] {
-        let o = Options {
-            distance: Some(distance),
-            rate: Some(rate),
-            ..Options::default()
-        };
-        let what = format!("distance {distance}, rate {rate}");
-        same(&kernel(&c, Some(1 << 20), o), &reference, &what);
+    // stops, a prefetch every 4 rounds; on numeric stumps and on stumps whose walks
+    // shift, which take their own lanes.
+    for bits in [false, true] {
+        let (c, m) = stumps(bits);
+        let reference = kernel(&c, None, Options::default());
+        let expected: Vec<f64> = c.data.chunks_exact(2).map(|row| m.predict(row)).collect();
+        same(&reference, &expected, &format!("the oracle, bits {bits}"));
+        let longest = super::walk::MAX_DISTANCE;
+        for (distance, rate) in [(1, 1), (longest, 1), (longest, 4)] {
+            let o = Options {
+                distance: Some(distance),
+                rate: Some(rate),
+                ..Options::default()
+            };
+            let what = format!("distance {distance}, rate {rate}, bits {bits}");
+            same(&kernel(&c, Some(1 << 20), o), &reference, &what);
+        }
     }
 }

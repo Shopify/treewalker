@@ -244,12 +244,17 @@ impl Model {
         counters: &mut WorkCounters,
     ) {
         let layout = &self.layout;
+        // The bins shift only for a model with bit splits, as in the walks.
+        let bits = layout.bins.has_bits();
         for group in &self.prefix_groups {
             let (base, k) = (group.node_base as usize, group.depth as usize);
-            let bail = layout.nodes[base..base + k]
-                .iter()
-                .position(|n| !n.goes_heavy(&c.bins))
-                .unwrap_or(k);
+            let mut prefix = layout.nodes[base..base + k].iter();
+            let bail = if bits {
+                prefix.position(|n| !n.goes_heavy::<true>(&c.bins))
+            } else {
+                prefix.position(|n| !n.goes_heavy::<false>(&c.bins))
+            }
+            .unwrap_or(k);
             if STATS {
                 counters.prefix_steps += (bail + 1).min(k) as u64;
             }
@@ -276,6 +281,7 @@ impl Model {
             nodes: self.layout.nodes.as_ptr(),
             bins: bins.as_ptr(),
             dummy: self.layout.dummy(),
+            bits: self.layout.bins.has_bits(),
         }
     }
 
@@ -645,7 +651,7 @@ impl Model {
         let mut fixed = 0i128;
         for chunk in &c.constant {
             let n = chunk.trees.1 - chunk.trees.0;
-            let (walks, pad) = walks.for_pass::<ABLATE>(n, false);
+            let (walks, pad) = walks.for_pass::<ABLATE>(n, false, p.bits);
             // The last chunk's roots are followed by the dummies; others are copied.
             let roots: &[u32] = if chunk.trees.1 == n_trees {
                 &c.roots[chunk.trees.0..]
@@ -669,7 +675,7 @@ impl Model {
             // the layout's children and slots are in range by construction.
             unsafe {
                 let roots = roots.as_ptr();
-                walk_with!(ABLATE, walks, |K, D, R| walk::walk_at::<
+                walk_with!(ABLATE, walks, p.bits, |K, D, R, B| walk::walk_at::<
                     X,
                     u32,
                     K,
@@ -677,6 +683,7 @@ impl Model {
                     D,
                     R,
                     STATS,
+                    B,
                 >(
                     &p, roots, stops, words, &mut steps
                 ));

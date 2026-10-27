@@ -499,6 +499,7 @@ fn generated(k: usize) -> Generated {
         disable_bitset_intern: rng.chance(0.3),
         prefix_depth: *rng.pick(&[Some(0), Some(1), None, Some(2), Some(3), Some(5)]),
         disable_predicate_dedup: rng.chance(0.1),
+        category_bits_above: None,
     };
     // Monotonic columns sorted by `partial_cmp`, which keeps -0.0 and 0.0 in their
     // order: `f64::total_cmp` would change the rows the fingerprints hash.
