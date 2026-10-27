@@ -429,7 +429,17 @@ impl Model {
         let arena = view::<M>(&mut c.arena);
         let scratch = view::<M>(&mut c.scan).as_mut_ptr();
         let p = self.pools(&c.bins);
-        let chunks = &c.chunks[width.index()];
+        // Walks that keep sides without rows, which only research's ablations run, take
+        // chunks sized for every leaf.
+        #[cfg(any(test, feature = "research"))]
+        let plan = if ABLATE && !options.unsplit {
+            &c.kept
+        } else {
+            &c.chunks
+        };
+        #[cfg(not(any(test, feature = "research")))]
+        let plan = &c.chunks;
+        let chunks = &plan[width.index()];
         let mut scanner = Scanner {
             model: self,
             rows,
@@ -499,6 +509,10 @@ impl Model {
                     )
                 }
             };
+            debug_assert!(
+                n_leaves <= chunk.leaves,
+                "a chunk's leaf entries pass its bound"
+            );
             clock = Clock::<STATS>::start();
             let (full, entries) = queues.leaves[..n_leaves].split_at(n_full);
             let runs = match (&self.layout.leaves, &mut c.sums) {

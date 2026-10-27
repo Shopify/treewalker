@@ -650,7 +650,9 @@ pub(crate) struct Layout {
 }
 
 /// What a tree's passes need: an item per leaf and its arena slots, at most one
-/// split per varying node and one fewer than its leaves.
+/// split per varying node and one fewer than its leaves. A walk that drops sides
+/// without rows holds at most an item per row of the group, which chunks count
+/// instead when fewer.
 ///
 /// A chunk's nodes and leaf values are not part of its working set: each node is
 /// reached by at most one item of a group, since a tree has one path to it, and each

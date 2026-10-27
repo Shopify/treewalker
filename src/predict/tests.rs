@@ -266,7 +266,7 @@ fn chunks_follow_the_byte_budget_at_each_width() {
     };
     let needs = vec![need; 100];
     let trees = |w, budget| {
-        let chunks = chunk_trees(&needs, w, budget);
+        let chunks = chunk_trees(&needs, w, budget, usize::MAX);
         assert_eq!(chunks.first().map(|c| c.trees.0), Some(0));
         assert_eq!(chunks.last().map(|c| c.trees.1), Some(100));
         assert!(chunks.windows(2).all(|p| p[0].trees.1 == p[1].trees.0));
@@ -279,6 +279,166 @@ fn chunks_follow_the_byte_budget_at_each_width() {
     assert_eq!(trees(Width::W1024, 20_000), 4);
     assert_eq!(trees(Width::W32, 1), 1);
     assert_eq!(trees(Width::W1024, usize::MAX), 100);
+}
+
+#[test]
+fn chunks_count_at_most_the_class_rows_of_a_trees_leaves() {
+    use super::scratch::{Width, chunk_trees};
+    use crate::load::layout::Need;
+    // 100 trees of 4,096 leaves: a tree's leaves alone pass a 100,000-byte budget at
+    // 36 bytes each, the 32 rows of the narrowest class take 1,152 bytes.
+    let need = Need {
+        leaves: 4096,
+        slots: 0,
+    };
+    let needs = vec![need; 100];
+    let every_leaf = chunk_trees(&needs, Width::W32, 100_000, usize::MAX);
+    assert_eq!(every_leaf.len(), 100);
+    assert!(every_leaf.iter().all(|c| c.leaves == 4096));
+    let rows = chunk_trees(&needs, Width::W32, 100_000, Width::W32.rows());
+    assert_eq!(
+        rows.iter().map(|c| c.trees).collect::<Vec<_>>(),
+        [(0, 86), (86, 100)]
+    );
+    assert_eq!(rows[0].leaves, 86 * 32);
+    // Trees with fewer leaves than the class's rows keep their count.
+    let small = vec![Need { leaves: 20, ..need }; 100];
+    let capped = chunk_trees(&small, Width::W32, 100_000, Width::W32.rows());
+    assert_eq!(capped[0].leaves, 20 * capped[0].trees.1);
+    for (leaves, counted) in [(31, 31), (32, 32), (33, 32)] {
+        let one = chunk_trees(&[Need { leaves, ..need }], Width::W32, 100_000, 32);
+        assert_eq!(one[0].leaves, counted, "{leaves}");
+    }
+    // Arena slots keep their count at fixed and runtime widths: a runtime slot can be
+    // taken at every light-only continuation, more than the rows.
+    for w in [Width::W128, Width::of(1025)] {
+        let deep = vec![
+            Need {
+                leaves: 4096,
+                slots: 3000
+            };
+            4
+        ];
+        let chunks = chunk_trees(&deep, w, usize::MAX, w.rows());
+        assert_eq!(
+            (chunks[0].leaves, chunks[0].slots),
+            (4 * w.rows(), 12_000),
+            "{w:?}"
+        );
+    }
+}
+
+/// A tree of a leaf per value `0..values` of varying feature 0, each range split
+/// unevenly (a third or two thirds of it left, by `t`), so that leaves end at
+/// different depths.
+fn leaf_per_value(values: usize, t: usize) -> model::Tree {
+    use model::{Node, Op, Tree};
+    fn grow(nodes: &mut Vec<Node>, lo: usize, hi: usize, t: usize) {
+        if hi - lo == 1 {
+            nodes.push(Node::Leaf {
+                value: ((lo * 7 + t * 3) % 17) as f64 / 8.0,
+                count: Some(1),
+            });
+            return;
+        }
+        let mid = lo + ((hi - lo) * (1 + t % 2) / 3).max(1);
+        let at = nodes.len();
+        nodes.push(Node::Numeric {
+            feature: 0,
+            op: Op::Le,
+            threshold: mid as f64 - 0.5,
+            default_left: false,
+            left: at + 1,
+            right: 0,
+            count: Some((hi - lo) as u64),
+        });
+        grow(nodes, lo, mid, t);
+        let next = nodes.len();
+        if let Node::Numeric { right, .. } = &mut nodes[at] {
+            *right = next;
+        }
+        grow(nodes, mid, hi, t);
+    }
+    let mut nodes = Vec::new();
+    grow(&mut nodes, 0, values, t);
+    Tree { nodes }
+}
+
+/// Groups whose every row reaches its own leaf, in trees of more leaves than any
+/// group's class has rows, so that a tree's items and its leaves already reached
+/// fill its chunk's capped count, with production's kernel in buffers sized as
+/// production sizes them: masks by value (32 and 64 rows), fixed-width handles (128)
+/// and runtime slots (1,025). The research walk that keeps sides without rows checks
+/// the chunks sized for every leaf on the same groups.
+#[test]
+fn production_scratch_holds_a_leaf_per_row() {
+    let sizes: &[usize] = if MIRI {
+        &[32, 128, 1025]
+    } else {
+        &[32, 64, 128, 1025]
+    };
+    let trees = (0..if MIRI { 2 } else { 6 })
+        .map(|t| leaf_per_value(1100, t))
+        .collect();
+    let m = model::Model {
+        precision: Precision::F64,
+        n_features: 1,
+        trees,
+        average: false,
+        base_score: 0.0,
+        sigmoid: None,
+        task: model::Task::Regressor,
+    };
+    let bytes = m.to_binary(&mut Rng::new(13));
+    let config = WalkerConfig::builder(1)
+        .max_group_width(1025)
+        .varying([0])
+        .build()
+        .expect("a valid configuration");
+    // No prefix groups: every tree's root is an item of the first pass.
+    let choices = Choices {
+        prefix: Prefix::Depth(0),
+        ..Choices::default()
+    };
+    let forest = Forest::from_reader_with(
+        std::io::Cursor::new(&bytes),
+        ModelFormat::TreeliteBinaryV4,
+        config,
+        &LoadOptions::default(),
+        &choices,
+    )
+    .expect("load");
+    // Each group's values 0..n, a leaf each, in an order of its own (7 is prime to
+    // every n).
+    let data: Vec<f64> = sizes
+        .iter()
+        .enumerate()
+        .flat_map(|(g, &n)| (0..n).map(move |r| ((r * 7 + g * 13) % n) as f64))
+        .collect();
+    let c = Case {
+        forest,
+        data,
+        offsets: offsets(sizes),
+    };
+    let n = c.data.len();
+    let mut full = vec![f64::NAN; n];
+    c.forest.predict_full_walk(&c.data, &mut full);
+    let model = &c.forest.model;
+    let mut p = Predictor {
+        workspace: Workspace::production(model, Tuning::new(model)),
+        model: std::sync::Arc::clone(model),
+        level: super::level(),
+    };
+    let groups = Groups::Offsets(&c.offsets);
+    let mut out = vec![f64::NAN; n];
+    p.check(&c.data, n, groups);
+    p.kernel::<false, false>(&c.data, &mut out, groups, Options::default(), None, true);
+    same(&out, &full, "production's kernel and scratch");
+    let kept = Options {
+        unsplit: false,
+        ..Options::default()
+    };
+    same(&kernel(&c, None, kept), &full, "sides without rows kept");
 }
 
 /// Each varying predicate's left mask over `rows`, as runtime-width words, from its

@@ -55,6 +55,11 @@ impl Width {
         1 << (self.0 - 3)
     }
 
+    /// The most rows a group of the class holds.
+    pub(super) const fn rows(self) -> usize {
+        1 << self.0
+    }
+
     /// Arena bytes per slot: the mask, and for runtime-width masks a header unit,
     /// which holds the mask's row span. Chunks budget the class's mask bytes alone,
     /// which a header and mask pass by at most a sixteenth, at 2,048 rows.
@@ -139,7 +144,8 @@ pub(super) const fn view<T: Words>(units: &mut [Unit]) -> &mut [T] {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Chunk {
     pub(super) trees: (usize, usize),
-    /// Leaves in the chunk: a bound on the items of a pass and on its leaf entries.
+    /// Leaves in the chunk, each tree's at most the class's rows when the walk drops
+    /// sides without rows: a bound on the items of a pass and on its leaf entries.
     pub(super) leaves: usize,
     /// Arena slots the chunk's splits may take.
     pub(super) slots: usize,
@@ -193,8 +199,13 @@ pub(super) struct Common {
     pub(super) bins: Vec<u32>,
     /// Each tree's start node, then [`MAX_PAD`] dummies.
     pub(super) roots: Vec<u32>,
-    /// Chunks per mask width class the configuration allows, narrowest first.
+    /// Chunks per mask width class the configuration allows, narrowest first, for
+    /// walks that drop sides without rows, as production's do.
     pub(super) chunks: Vec<Vec<Chunk>>,
+    /// The same for walks that keep them (`disable_unsplit`), whose items in a tree
+    /// only its leaves bound.
+    #[cfg(any(test, feature = "research"))]
+    pub(super) kept: Vec<Vec<Chunk>>,
     /// Chunks of single rows, whose walks stop only at leaves: a tree is one stop,
     /// budgeted as one 32-bit leaf, so few chunks hold every tree.
     pub(super) constant: Vec<Chunk>,
@@ -237,6 +248,20 @@ pub(super) struct Scratch {
 
 impl Scratch {
     pub(super) fn new(model: &Model, tuning: Tuning) -> Self {
+        Self::with_plans(model, tuning, cfg!(any(test, feature = "research")))
+    }
+
+    /// Scratch sized as production builds size it, for production's chunks alone,
+    /// so that a test runs the production kernel in the buffers it would have. Not
+    /// for walks that keep sides without rows.
+    #[cfg(test)]
+    pub(super) fn production(model: &Model, tuning: Tuning) -> Self {
+        Self::with_plans(model, tuning, false)
+    }
+
+    /// The scratch, its buffers also sized for research's chunks for walks that keep
+    /// sides without rows with `kept`, which test and research builds pass.
+    fn with_plans(model: &Model, tuning: Tuning, kept: bool) -> Self {
         let layout = &model.layout;
         let rows = model.config.max_group_width();
         let n_masks = 2 * model.varying_predicates.len() + 1;
@@ -251,20 +276,47 @@ impl Scratch {
         let needs = &model.needs;
         // Chunks of consecutive trees within the budget at each width class, less the
         // predicates' masks and the bins, which every chunk reads; and the most any
-        // chunk needs, per carrier.
+        // chunk needs, per carrier. A walk that drops sides without rows holds, in a
+        // tree, items and leaf entries so far whose row sets are disjoint and not
+        // empty, so at most the class's rows of them together: a tree of thousands of leaves would otherwise take a
+        // chunk alone, and its passes would walk one or two items in eight lanes.
+        // Research walks that keep those sides get chunks of their own, sized for
+        // every leaf, and the buffers fit both.
         let widths: Vec<Width> = widest.up_to().collect();
-        let chunks: Vec<Vec<Chunk>> = widths
-            .iter()
-            .map(|&w| {
-                let shared = n_masks * w.bytes() + 4 * layout.bins.n_slots();
-                chunk_trees(needs, w, tree_budget(chunk_bytes, shared))
-            })
-            .collect();
-        let most = |of: &dyn Fn(Width) -> bool| {
+        let plan = |cap: fn(Width) -> usize| -> Vec<Vec<Chunk>> {
             widths
                 .iter()
-                .zip(&chunks)
-                .filter(|(w, _)| of(**w))
+                .map(|&w| {
+                    let shared = n_masks * w.bytes() + 4 * layout.bins.n_slots();
+                    chunk_trees(needs, w, tree_budget(chunk_bytes, shared), cap(w))
+                })
+                .collect()
+        };
+        let chunks = plan(Width::rows);
+        #[cfg(any(test, feature = "research"))]
+        let kept_chunks = plan(|_| usize::MAX);
+        #[cfg(any(test, feature = "research"))]
+        let plans: &[&Vec<Vec<Chunk>>] = if kept {
+            &[&chunks, &kept_chunks]
+        } else {
+            &[&chunks]
+        };
+        #[cfg(not(any(test, feature = "research")))]
+        let plans: &[&Vec<Vec<Chunk>>] = {
+            debug_assert!(
+                !kept,
+                "production builds have no walks that keep empty sides"
+            );
+            &[&chunks]
+        };
+        let all = || {
+            plans
+                .iter()
+                .flat_map(|plan| widths.iter().copied().zip(plan.iter()))
+        };
+        let most = |of: &dyn Fn(Width) -> bool| {
+            all()
+                .filter(|&(w, _)| of(w))
                 .flat_map(|(_, c)| c.iter().map(|c| c.leaves))
                 .max()
                 .unwrap_or(0)
@@ -280,9 +332,7 @@ impl Scratch {
         let max_leaves = most(&|_| true).max(constant_leaves);
         let handle_leaves = most(&|w| w.handles() && !w.runtime());
         let slot_leaves = most(&Width::runtime);
-        let arena_bytes = widths
-            .iter()
-            .zip(&chunks)
+        let arena_bytes = all()
             .filter(|(w, _)| w.handles())
             .flat_map(|(w, c)| c.iter().map(move |c| (c.slots + 3) * w.slot_bytes()))
             .max()
@@ -315,6 +365,8 @@ impl Scratch {
                 bins: layout.bins.new_bins(),
                 roots,
                 chunks,
+                #[cfg(any(test, feature = "research"))]
+                kept: kept_chunks,
                 constant,
                 constant_roots,
                 max_rows: rows,
@@ -453,10 +505,11 @@ pub(super) fn constant_chunks(trees: usize, budget: usize) -> Vec<Chunk> {
 }
 
 /// Consecutive trees in chunks whose working set at width `w` stays within `budget`
-/// bytes, or one tree if it alone passes it.
-pub(super) fn chunk_trees(needs: &[Need], w: Width, budget: usize) -> Vec<Chunk> {
+/// bytes, or one tree if it alone passes it, each tree with at most `cap` leaves.
+pub(super) fn chunk_trees(needs: &[Need], w: Width, budget: usize, cap: usize) -> Vec<Chunk> {
+    let leaves = |n: Need| n.leaves.min(cap);
     let cost =
-        |n: Need| n.leaves * w.leaf_bytes() + if w.handles() { n.slots * w.bytes() } else { 0 };
+        |n: Need| leaves(n) * w.leaf_bytes() + if w.handles() { n.slots * w.bytes() } else { 0 };
     let mut chunks = Vec::new();
     let mut chunk = Chunk {
         trees: (0, 0),
@@ -476,7 +529,7 @@ pub(super) fn chunk_trees(needs: &[Need], w: Width, budget: usize) -> Vec<Chunk>
         }
         bytes += cost(need);
         chunk.trees.1 = t + 1;
-        chunk.leaves += need.leaves;
+        chunk.leaves += leaves(need);
         chunk.slots += need.slots;
     }
     if chunk.trees.1 > chunk.trees.0 {
