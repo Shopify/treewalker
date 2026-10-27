@@ -103,6 +103,15 @@ impl Workspace {
             idle: Stats::default(),
         }
     }
+
+    /// [`Self::with_tuning`], sized as production builds size it.
+    #[cfg(test)]
+    fn production(model: &Model, tuning: Tuning) -> Self {
+        Self {
+            kernel: scratch::Scratch::production(model, tuning),
+            idle: Stats::default(),
+        }
+    }
 }
 
 impl Predictor {

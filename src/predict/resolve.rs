@@ -496,8 +496,12 @@ pub(super) const LISTED_SLACK: usize = if compress::<Native>() || DISPATCH {
 ///
 /// `pass.stops` and `pass.words` hold what [`walk`](super::walk::walk) wrote, with `VARYING`, for the
 /// `n_items` items `pass.items`. `pass.masks` holds the all-rows mask, then every
-/// predicate's left and right masks, `pass.out` has room for two items per item plus one and
-/// `pass.leaves` for one entry per leaf plus one, `pass.scratch` for one mask, the
+/// predicate's left and right masks, `pass.out` has room for the items the pass leaves
+/// for the next plus one and `pass.leaves` for its leaf entries plus one: in each tree
+/// the items not yet at a leaf and the leaf entries so far carry disjoint row sets, so
+/// the chunk's count bounds both ([`Chunk::leaves`](super::scratch::Chunk::leaves): each
+/// tree's leaves, at most the class's rows of them unless `EMPTY` keeps sides without
+/// rows), and the walk's padding gives the one more. `pass.scratch` has room for one mask, the
 /// arena as [`Carrier::split`] requires, and for fixed-width handles `pass.leaves` has
 /// [`LISTED_SLACK`] more entries and `pass.listed` room for `n_items` positions plus
 /// [`LISTED_SLACK`].

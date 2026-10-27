@@ -1,8 +1,10 @@
 //! Small production-shaped cases for Miri, which checks the unsafe code: each runs every
 //! kind of unsafe operation of its path once. The README's development checks list the
 //! commands: x86-64 with SSE2 and with AVX2, and RISC-V for the plain-word fallback; the
-//! lib's `predict::tests::prefetching_walks` adds the walks that prefetch. On AArch64,
-//! Miri lacks a NEON intrinsic the masks use. Whether the kernel is right on every path is the property tests'
+//! lib's `predict::tests::prefetching_walks` adds the walks that prefetch, and its
+//! `production_scratch_holds_a_leaf_per_row` fills chunks in buffers sized as production
+//! builds size them (these cases, built with `research`, size them for its plans too).
+//! On AArch64, Miri lacks a NEON intrinsic the masks use. Whether the kernel is right on every path is the property tests'
 //! question (`tests/property.rs`); natively these cases run once, as under Miri.
 //!
 //! Each case is a list of group sizes on one generated model:
@@ -13,17 +15,19 @@
 //!   SIMD loads and stores, resolve's lists, and wide leaf runs;
 //! - `widest_masks`: masks of 512 and 1,024 bits;
 //! - `runtime_width_*`: a group past 1,024 rows on runtime-width masks, with most
-//!   features constant and with every feature varying.
+//!   features constant and with every feature varying;
+//! - `a_leaf_per_row`: trees of more leaves than a group's class has rows, which bound
+//!   a tree's items in a chunk, with every row at its own leaf.
 #![expect(clippy::float_cmp, reason = "the generator's exact category test")]
 
 mod common;
 
 use common::bits::same;
 use common::groups::{Role, config, group, offsets};
-use common::model::{self, Settings};
+use common::model::{self, Model, Node, Op, Precision, Settings, Task, Tree};
 use common::rng::{Rng, mix};
 use treewalker_gbdt::research::LoadAblation;
-use treewalker_gbdt::{Forest, LoadOptions, ModelFormat};
+use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
 /// Generate the case `name` for `sizes`, with ordinary leaves or leaves past the
 /// 126-bit rule (`wide`), and most features constant or all varying; check every row
@@ -123,4 +127,81 @@ fn runtime_width_mostly_constant() {
 #[test]
 fn runtime_width_all_varying() {
     check("pieces", &[1025], false, true);
+}
+
+/// Eight complete trees of 64 leaves on one varying feature, and two groups of 32
+/// rows whose values 0 to 63 each reach their own leaf: a tree holds 32 items, the
+/// most its chunk counts at the narrowest class.
+#[test]
+fn a_leaf_per_row() {
+    // Leaves `lo..hi` in preorder, leaf `k` taking the rows of value `k`.
+    fn grow(nodes: &mut Vec<Node>, lo: usize, hi: usize, t: usize) {
+        if hi - lo == 1 {
+            let value = ((lo * 7 + t * 3) % 17) as f64 / 8.0;
+            nodes.push(Node::Leaf {
+                value,
+                count: Some(1),
+            });
+            return;
+        }
+        let (at, mid) = (nodes.len(), lo.midpoint(hi));
+        nodes.push(Node::Numeric {
+            feature: 0,
+            op: Op::Le,
+            threshold: mid as f64 - 0.5,
+            default_left: false,
+            left: at + 1,
+            right: 0,
+            count: Some((hi - lo) as u64),
+        });
+        grow(nodes, lo, mid, t);
+        let next = nodes.len();
+        if let Node::Numeric { right, .. } = &mut nodes[at] {
+            *right = next;
+        }
+        grow(nodes, mid, hi, t);
+    }
+    let trees = (0..8)
+        .map(|t| {
+            let mut nodes = Vec::new();
+            grow(&mut nodes, 0, 64, t);
+            Tree { nodes }
+        })
+        .collect();
+    let m = Model {
+        precision: Precision::F64,
+        n_features: 1,
+        trees,
+        average: false,
+        base_score: 0.0,
+        sigmoid: None,
+        task: Task::Regressor,
+    };
+    let bytes = m.to_binary(&mut Rng::new(11));
+    let config = WalkerConfig::builder(1)
+        .max_group_width(32)
+        .varying([0])
+        .build()
+        .expect("a valid configuration");
+    // No prefix groups: every tree's root is an item of the first pass.
+    let ablation = LoadAblation {
+        prefix_depth: Some(0),
+        ..Default::default()
+    };
+    let forest = Forest::from_bytes_ablated(
+        &bytes,
+        ModelFormat::TreeliteBinaryV4,
+        config,
+        &LoadOptions::default(),
+        &ablation,
+    )
+    .expect("load");
+    let data: Vec<f64> = (0..64).map(f64::from).collect();
+    let mut full = vec![f64::NAN; 64];
+    forest.predict_full_walk(&data, &mut full);
+    let mut out = vec![f64::NAN; 64];
+    forest
+        .predictor()
+        .predict_groups(&data, &offsets(&[32, 32]), &mut out);
+    same(&out, &full, "a leaf per row");
 }

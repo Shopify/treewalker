@@ -130,6 +130,11 @@ pub(super) struct Pass<'a, M> {
     /// A mask's room for scanned sides.
     pub(super) scratch: *mut M,
     pub(super) stats: &'a mut Stats,
+    /// The chunk's bound on a pass's items and its leaf entries
+    /// ([`Chunk::leaves`](super::scratch::Chunk::leaves)), which debug builds check
+    /// after each resolve.
+    #[cfg(debug_assertions)]
+    pub(super) leaves: usize,
 }
 
 impl<M: Mask> Pass<'_, M> {
@@ -290,6 +295,17 @@ impl<M: Mask> Pass<'_, M> {
                     &mut seen,
                 );
                 clock = clock.lap(&mut self.stats.phases.resolve);
+                // `resolve`'s contract: the items left for the next pass and the leaf
+                // entries so far fit the chunk's count, so a pass that breaks it fails
+                // here, before the next one walks and writes.
+                #[cfg(debug_assertions)]
+                assert!(
+                    n + res.n_leaves <= self.leaves,
+                    "a pass's items and leaf entries pass the chunk's bound: {n} items, {} \
+                     leaf entries, bound {}",
+                    res.n_leaves,
+                    self.leaves
+                );
                 first_pass.get_or_insert(res.n_leaves);
                 if STATS {
                     let c = &mut self.stats.counters;

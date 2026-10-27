@@ -159,7 +159,8 @@ done
 ```
 
 Miri checks the unsafe code on small production-shaped cases (`tests/miri.rs` and the
-lib's `prefetching_walks`), each of which runs every kind of unsafe operation of its
+lib's `prefetching_walks` and `production_scratch_holds_a_leaf_per_row`, the latter in
+buffers sized as production builds size them), each of which runs every kind of unsafe operation of its
 path once, with a nightly toolchain (`rustup +nightly component add miri`). The x86-64
 runs take the SSE2 and AVX2 masks, the RISC-V run the plain-word fallback; on AArch64,
 Miri lacks a NEON intrinsic the masks use. The walks link nodes by byte offset on x86-64
@@ -169,13 +170,15 @@ tests of x86-64's encoding, which an AArch64 machine's native tests do not. An e
 
 ```bash
 for cpu in x86-64 x86-64-v3; do
-  RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- prefetching_walks
+  RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- \
+    prefetching_walks production_scratch
   RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --test miri
 done
 RUSTFLAGS="-C target-cpu=x86-64" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- \
   load::layout::tests::split_bounds load::layout::tests::heavy_right_splits \
   load::layout::tests::signed_zero load::layout::tests::nested_heavy
-RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --lib -- prefetching_walks
+RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --lib -- prefetching_walks \
+  production_scratch
 RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --test miri
 ```
 
