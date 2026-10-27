@@ -17,7 +17,9 @@
 //! - `runtime_width_*`: a group past 1,024 rows on runtime-width masks, with most
 //!   features constant and with every feature varying;
 //! - `a_leaf_per_row`: trees of more leaves than a group's class has rows, which bound
-//!   a tree's items in a chunk, with every row at its own leaf.
+//!   a tree's items in a chunk, with every row at its own leaf;
+//! - `category_bits`: the walks that shift, with every constant categorical feature in
+//!   bits, on a single row and on groups.
 #![expect(clippy::float_cmp, reason = "the generator's exact category test")]
 
 mod common;
@@ -33,6 +35,11 @@ use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 /// 126-bit rule (`wide`), and most features constant or all varying; check every row
 /// against the exact full walk, bit for bit. The seed comes from `name`.
 fn check(name: &str, sizes: &[usize], wide: bool, all_varying: bool) {
+    check_with(name, sizes, wide, all_varying, false);
+}
+
+/// [`check`], with every constant categorical feature in bits when `bits`.
+fn check_with(name: &str, sizes: &[usize], wide: bool, all_varying: bool, bits: bool) {
     let base = name.bytes().fold(0u64, |h, b| mix(h ^ u64::from(b)));
     let seed = mix(base ^ (u64::from(wide) << 1 | u64::from(all_varying)));
     let mut rng = Rng::new(seed);
@@ -74,6 +81,7 @@ fn check(name: &str, sizes: &[usize], wide: bool, all_varying: bool) {
     // No prefix groups, or the rule's.
     let ablation = LoadAblation {
         prefix_depth: *rng.pick(&[Some(0), None]),
+        category_bits_above: bits.then_some(0),
         ..Default::default()
     };
     let forest = Forest::from_bytes_ablated(
@@ -84,6 +92,7 @@ fn check(name: &str, sizes: &[usize], wide: bool, all_varying: bool) {
         &ablation,
     )
     .unwrap_or_else(|e| panic!("{name}: load: {e}"));
+    assert_eq!(forest.layout_stats().bit_slots > 0, bits, "{name}");
     let data: Vec<f64> = sizes
         .iter()
         .flat_map(|&n| group(&mut rng, &features, &roles, m.precision, n, f64::total_cmp))
@@ -127,6 +136,11 @@ fn runtime_width_mostly_constant() {
 #[test]
 fn runtime_width_all_varying() {
     check("pieces", &[1025], false, true);
+}
+
+#[test]
+fn category_bits() {
+    check_with("category_bits_walks", &[1, 33], false, false, true);
 }
 
 /// Eight complete trees of 64 leaves on one varying feature, and two groups of 32

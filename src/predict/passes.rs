@@ -47,16 +47,20 @@ impl Walks {
 
     /// The walks of a pass of `n` items, with the distance of
     /// [`crate::rules::pass_distance`], and the padding such a walk reads past the
-    /// items.
-    pub(super) fn for_pass<const ABLATE: bool>(self, n: usize, varying: bool) -> (Self, usize) {
+    /// items; `varying` and `BITS` as for [`walk::walk`].
+    pub(super) fn for_pass<const ABLATE: bool, const BITS: bool>(
+        self,
+        n: usize,
+        varying: bool,
+    ) -> (Self, usize) {
         let forced = if ABLATE { self.lanes } else { None };
         // The rule's lanes, evaluated at compile time. Called at run time, the const fn
         // is left to LLVM, which did not fold it at x86-64's dispatched base level:
         // there the rule's loop ran every pass, and `pass_distance` divided by a lane
         // count it could not see.
         let lanes = match forced.unwrap_or(0) {
-            0 if varying => const { lanes_of(0, true) },
-            0 => const { lanes_of(0, false) },
+            0 if varying => const { lanes_of(0, true, BITS) },
+            0 => const { lanes_of(0, false, BITS) },
             k => k,
         };
         let wanted = match forced {
@@ -153,6 +157,7 @@ impl<M: Mask> Pass<'_, M> {
         const ABLATE: bool,
         const SCAN: bool,
         const EMPTY: bool,
+        const BITS: bool,
     >(
         &mut self,
         walks: Walks,
@@ -165,7 +170,7 @@ impl<M: Mask> Pass<'_, M> {
         if X::NATIVE {
             // SAFETY: the caller's, which `run` shares.
             return unsafe {
-                self.run::<X, C, STATS, ABLATE, SCAN, EMPTY>(
+                self.run::<X, C, STATS, ABLATE, SCAN, EMPTY, BITS>(
                     walks, arena, queues, stops, words, scan,
                 )
             };
@@ -175,7 +180,7 @@ impl<M: Mask> Pass<'_, M> {
             |pass: &mut Self, walks, arena, queues, stops, words, scan| {
                 // SAFETY: as above.
                 unsafe {
-                    pass.run::<X, C, STATS, ABLATE, SCAN, EMPTY>(
+                    pass.run::<X, C, STATS, ABLATE, SCAN, EMPTY, BITS>(
                         walks, arena, queues, stops, words, scan,
                     )
                 }
@@ -193,7 +198,8 @@ impl<M: Mask> Pass<'_, M> {
     /// Every walk and resolve pass of the chunk; returns the number of leaf entries in
     /// `q.leaves` and how many of them, first, the first pass wrote. With `SCAN`,
     /// varying events scan their rows with `scan` instead of reading the precomputed
-    /// masks; with `EMPTY`, they pass on sides without rows.
+    /// masks; with `EMPTY`, they pass on sides without rows; with `BITS`, which a model with
+    /// bit splits needs, the walks shift ([`walk::walk`]).
     ///
     /// # Safety
     ///
@@ -209,6 +215,7 @@ impl<M: Mask> Pass<'_, M> {
         const ABLATE: bool,
         const SCAN: bool,
         const EMPTY: bool,
+        const BITS: bool,
     >(
         &mut self,
         walks: Walks,
@@ -262,7 +269,7 @@ impl<M: Mask> Pass<'_, M> {
         let (mut steps, mut seen) = (Steps::default(), Splits::default());
         let mut clock = Clock::<STATS>::start();
         while n > 0 {
-            let (walks, pad) = walks.for_pass::<ABLATE>(n, true);
+            let (walks, pad) = walks.for_pass::<ABLATE, BITS>(n, true);
             // SAFETY: the caller sizes both queues for a pass's items plus the most
             // padding, the stops likewise, and the arena for the chunk's splits.
             unsafe {
@@ -280,6 +287,7 @@ impl<M: Mask> Pass<'_, M> {
                     D,
                     R,
                     STATS,
+                    BITS,
                 >(
                     p, items, stops, words, &mut steps
                 ));

@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Changes
+
+- A constant categorical feature whose splits have more than 100,000 distinct heavy
+  sets takes a bit per set rather than chains, when its table fits
+  `LoadOptions::max_rank_table_bytes` with the tables before it, and beside it so
+  does every other constant categorical feature whose bits take no more bytes than
+  its chains can. The chain cover matches over the heavy sets' inclusion graph,
+  which grows faster than the sets: a model with such a feature failed to load at
+  the default limits, and with them raised loaded slowly (the known gap of 3.0 and
+  3.1). A split on a bit feature shifts its bin to bring its set's bit to the top;
+  the walks shift only for a model with bit splits, and the shifting walk with
+  varying stops takes 8 lanes on Apple's AArch64 rather than 9, at which it spilled.
+  If bits leave too little of the cap to the features after them or to the varying
+  features' masks, the layout is built again with bits only past the threshold, then
+  with chains everywhere, and the smallest tables are kept, so a model that loaded
+  before, within the slot limit below, still loads. Varying categorical features
+  keep chains. The threshold bounds which models pay bits' bytes: on the
+  `categorical-scale` cell's model cut to fewer trees, bits were faster at every
+  count measured, 4,886 to 265,406 sets, but took 3 to 8 times the bytes of chains,
+  which stop fitting the default cap between 111,614 and 122,671 sets. A feature of
+  fewer sets whose inclusion graph passes the cap still fails to load at the default
+  limits.
+- A layout holds at most 2^27 slots, rather than 2^30: word 0 gives a bit split's
+  shift 5 bits. A model that needs more (4 per feature with numeric splits, one per
+  chain) is a `LoadError::Limit`.
+- Research: `LoadAblation` gains `category_bits_above`, the threshold (0 for every
+  constant categorical feature, `usize::MAX` for none), which code that names every
+  field of `LoadAblation` must add (`..LoadAblation::default()` takes the default);
+  `LayoutStats` gains `bit_slots` and `bit_sets`, `rank_table_bytes` counts the bit
+  tables, and `chain_slots` and `chain_sets` count only chains.
+
 ### Performance
 
 - A tree counts at most its group's width class's rows of leaves when trees are
@@ -22,6 +53,19 @@
   LightGBM cohorts of 4 rows 0.45 to 0.50), 0.970 at depth 8, and 0.998 at depths 2
   and 4, whose trees the cap cannot bind; 0.955 on the 86 batch cells. Trees of up
   to 32 leaves chunk as before. Outputs are unchanged.
+- Models with a constant categorical feature of more than 100,000 distinct heavy
+  sets load at the default limits when their bit tables fit, and their bits fill
+  faster than chains. On Genoa (c3d-standard-90), against the code before with the
+  cap raised to 4 GiB, the `categorical-scale` cell's model, 600 LightGBM trees of
+  4,096 leaves on Expedia searches in groups of 16 whose `srch_destination_id`
+  splits take 265,406 sets, loads in 1.0 s rather than 4.6, at a peak of 0.47 GB
+  rather than 1.46 and with 242 MB of bits against 31 MB of chains, and takes 0.83
+  of the time per group at one group per call, 0.83 in batch on one core and 0.73 on
+  45 threads. Models without such a feature run the kernel compiled without bits,
+  whose functions are the code before's but for the slot shift's immediate and field
+  offsets: on the 516 depth-2 and depth-4 serving cells of the factorial, validation
+  and kernel manifests, the smallest models, timed against the code before in
+  alternation, the geometric mean is 0.997 in two replicates. Outputs are unchanged.
 
 ## 3.1.0
 

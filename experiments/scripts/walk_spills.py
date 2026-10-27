@@ -85,7 +85,7 @@ CONSTS = re.compile(r"4walk4walk(.*?)((?:K(?:j[0-9a-f]*_|b[01]_|B[0-9a-zA-Z]*_))
 
 
 def consts(name: str) -> tuple[str, list[int | bool]] | None:
-    """The walk's items and its consts (K, VARYING, D, R) from a v0 symbol, its
+    """The walk's items and its consts (K, VARYING, D, R, BITS) from a v0 symbol, its
     back-references resolved: K is 0 for the rule's lanes."""
     m = CONSTS.search(name)
     if not m:
@@ -103,21 +103,24 @@ def consts(name: str) -> tuple[str, list[int | bool]] | None:
                 return None
             tok = ref.group(0)
         out.append(int(tok[1:-1] or "0", 16) if tok[0] == "j" else tok[1] == "1")
-    return item, out[:4]
+    # STATS, the fifth, is false in production walks.
+    return item, out[:4] + out[5:6]
 
 
 def describe(name: str) -> str:
-    """The walk's stops, items, prefetch distance and rate, from a v0 symbol."""
+    """The walk's stops, items, prefetch distance, rate and shift, from a v0 symbol."""
     c = consts(name)
     if not c:
         return name[-40:]
-    item, (_, varying, d, r) = c
-    return f"{'varying' if varying else 'constant':8} {item:5} distance {d:2} rate {r}"
+    item, (_, varying, d, r, *bits) = c
+    shift = "  shifting" if bits and bits[0] else ""
+    return f"{'varying' if varying else 'constant':8} {item:5} distance {d:2} rate {r}{shift}"
 
 
 # As in src/rules/lanes.rs: registers, a step's temporaries, invariants, and whether a
 # walk with varying stops holds its lane count in a register (AArch64's `csel`) and
-# keeps one temporary fewer (its `tst` sets only the flags).
+# keeps one temporary fewer (its `tst` sets only the flags). A walk that shifts for bit
+# splits holds one temporary more.
 MODEL = {
     "aarch64-apple": (29, 5, 5, True),
     "aarch64": (30, 5, 5, True),
@@ -135,12 +138,12 @@ def model(target: str | None) -> tuple[int, int, int, bool]:
     return MODEL[f"{arch}-apple" if apple else arch]
 
 
-def spilled(varying: bool, lanes: int, target: str | None) -> int:
+def spilled(varying: bool, lanes: int, target: str | None, bits: bool = False) -> int:
     """The lane values that do not fit the registers beside the invariants and a step's
     temporaries, as `spilled` in src/rules/lanes.rs."""
     regs, temps, base, select = model(target)
     invariants = base + varying + (varying and select)
-    temporaries = temps - (varying and select)
+    temporaries = temps - (varying and select) + bits
     return max(0, 2 * lanes + invariants + temporaries - regs)
 
 
@@ -206,8 +209,9 @@ def main(argv: list[str] | None = None) -> int:
         words = sum(1 for s in loop if WORD_STORE.match(s))
         c = consts(name)
         varying, rate = (bool(c[1][1]), int(c[1][3])) if c else (False, 1)
+        bits = bool(c[1][4]) if c and len(c[1]) > 4 else False
         lanes = (int(c[1][0]) or words // rate) if c else words
-        expect = spilled(varying, lanes, a.target)
+        expect = spilled(varying, lanes, a.target, bits)
         wrong = (stores > 0) != (expect > 0)
         failed += wrong
         flag = "WRONG" if wrong else "spills" if stores else "ok"
