@@ -130,6 +130,20 @@ max_depth = [2, 4, 8, 16]
 min_candidates = 32
 sizes = [4, 8, 16, 32]
 
+# Categorical scale: all eligible searches, raw categorical IDs and
+# price_usd alone varying. Unlike the paper's cohorts, candidates stay in file
+# order; the first 40,000 eligible test searches supply their first 16 rows.
+[workloads.ranking-categorical-scale]
+generator = "ranking-cohort-v2"
+datasets = ["expedia-cat"]
+frameworks = ["lightgbm"]
+n_trees = [600]
+max_depth = [32]
+num_leaves = [4096]
+min_candidates = 16
+sizes = [16]
+max_groups = 40_000
+
 # What-if: G scenarios for one entity, k perturbed features.
 [workloads.whatif-credit-core]
 generator = "whatif-v2"
@@ -349,6 +363,15 @@ k = [1, 8]
 G = [128]
 
 # --- suites --------------------------------------------------------------------
+
+# A public-data model whose categorical features outgrow the default load
+# limits. Kept out of the paper's grids: this trains on all eligible searches
+# and has its own recipe.
+[suites.categorical-scale]
+description = "Expedia's large categorical model, with 16 candidates per search."
+workloads = ["ranking-categorical-scale"]
+methods = "treewalker"
+modes = ["serving"]
 
 # Each suite declares the modes it times: serving (one call per group, the
 # paper's per-group protocol) and batch (calls of up to batch_rows rows, for

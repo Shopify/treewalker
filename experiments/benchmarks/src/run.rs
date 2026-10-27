@@ -779,6 +779,13 @@ pub fn preflight(manifest_path: &Path, artifacts: Option<&Path>, opts: &Options)
                 unsupported.push(format!("load {}: {e:#}", load.join("+")));
             }
         }
+        // A cell that records load options loads its model with them, so that a cap
+        // too small for it fails here rather than in the run.
+        if cell.doc.get("load_options").is_some()
+            && let Err(e) = cell.forest(&treewalker_gbdt::research::LoadAblation::default())
+        {
+            missing.push(format!("treewalker (load at the recorded options: {e:#})"));
+        }
         if !missing.is_empty() {
             ok = false;
         }

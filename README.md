@@ -302,6 +302,12 @@ run `treewalker-exp fetch-expedia --train-csv data.zip`; extracting the zip need
 `experiments/data/expedia.parquet` and checks its content fingerprint
 against the file the paper used.
 
+The separate `categorical-scale` suite prepares a public-data model whose
+categorical features fail to load at the default limits,
+`expedia-cat/nt600_md32_nl4096/lightgbm/cohort16-n16-g40000`.
+It does not change the paper's numeric Expedia cells or enter their factorial.
+See [the recipe, load-cap expectation and reproduction commands](docs/categorical-scale.md).
+
 The factorial suite also prepares two kinds of derived models
 (`experiments/grids.toml`), neither of which changes an existing model or cell:
 

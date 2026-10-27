@@ -1,7 +1,8 @@
 """Training, the Treelite export, reference predictions and parser preflight.
 
-Training is seeded with 42 and its parameters are the released ones; changing
-any of them changes every model.
+The default parameters and seed 42 are the released ones. The opt-in
+expedia-cat scale recipe adds a leaf limit, looser categorical regularization
+and deterministic training; neither changes an existing model's parameters.
 """
 
 import importlib.metadata
@@ -39,7 +40,14 @@ def _version(dist: str) -> str:
     return "missing"
 
 
-def params(framework: str, n_trees: int, max_depth: int) -> dict[str, Any]:
+def params(
+    framework: str,
+    n_trees: int,
+    max_depth: int,
+    *,
+    dataset: str = "",
+    num_leaves: int | None = None,
+) -> dict[str, Any]:
     """Training parameters, as passed to the library, plus the round count."""
     if framework == "lightgbm":
         p: dict[str, Any] = {
@@ -60,6 +68,26 @@ def params(framework: str, n_trees: int, max_depth: int) -> dict[str, Any]:
             "tree_method": "hist",
             "seed": TRAIN_SEED,
         }
+    if dataset == "expedia-cat":
+        if framework != "lightgbm":
+            raise ValueError("expedia-cat's scale recipe is LightGBM only")
+        p = {
+            "objective": "binary",
+            "metric": "binary_logloss",
+            "num_leaves": num_leaves or 4096,
+            "max_depth": max_depth,
+            "learning_rate": LEARNING_RATE,
+            "cat_l2": 1.0,
+            "min_data_per_group": 50,
+            "deterministic": True,
+            "force_row_wise": True,
+            "verbose": -1,
+            "seed": TRAIN_SEED,
+        }
+    elif num_leaves is not None:
+        if framework != "lightgbm":
+            raise ValueError("num_leaves is LightGBM only")
+        p["num_leaves"] = num_leaves
     return {"params": p, "num_boost_round": n_trees}
 
 
@@ -78,9 +106,12 @@ def train(
     n_trees: int,
     max_depth: int,
     out: Path,
+    *,
+    dataset: str = "",
+    num_leaves: int | None = None,
 ) -> None:
     """Train and save the native model to ``out``."""
-    p = params(framework, n_trees, max_depth)
+    p = params(framework, n_trees, max_depth, dataset=dataset, num_leaves=num_leaves)
     if framework == "lightgbm":
         import lightgbm as lgb
 

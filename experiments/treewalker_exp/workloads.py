@@ -11,11 +11,16 @@ one is a new version, never a silent edit:
   sorted by ``prop_id``, a feature the models split on: rows that a ``prop_id``
   split sends the same way were contiguous, so the rows reaching a leaf formed
   fewer, longer runs, and exact sums update once per run. Requests do not
-  arrive sorted by property.
+  arrive sorted by property. The opt-in categorical scale recipe instead keeps
+  source-file candidate order; only price varies in those groups.
 - ``ranking-cohort-v2``: the controlled size curve. Sessions with at least 32
   candidates; the size-n subset is the first n candidates of the session's
   seeded order, so the subsets nest, 4 ⊂ 8 ⊂ 16 ⊂ 32, and keep one order
   across sizes, because row order decides how exact sums group rows into runs.
+  The minimum is configurable. The categorical scale cell uses 16, keeps each
+  search's first 16 source-file candidates, and caps the pool at the first
+  40,000 eligible test searches in ascending search-ID order. Other cohorts
+  are uncapped unless ``max_groups`` is set; capped IDs append ``-g<N>``.
 - ``whatif-v1``: the released credit scenario generator, kept for the
   byte-identical check: gain-ranked features with multiplicative shocks.
 - ``whatif-v2``: a targeted stress test, not a representative distribution of
@@ -128,38 +133,47 @@ def session_order(offsets: np.ndarray, seed: int) -> np.ndarray:
     )
 
 
-def ranking_sessions(split: ds.RankingSplit) -> Workload:
+def ranking_sessions(split: ds.RankingSplit, *, categorical: bool = False) -> Workload:
+    """Every test search, with candidates in a seeded order by default. The
+    categorical scale recipe keeps the split's source-file order instead,
+    its restricted features and price alone varying."""
     test = split.test_df
     sids = test["srch_id"].to_numpy()
     offsets = ds.session_offsets(sids)
-    order = session_order(offsets, split.seed)
-    X = test.select(ds.EXPEDIA_FEATURES).to_numpy().astype(np.float64)[order]
+    order = np.arange(len(test)) if categorical else session_order(offsets, split.seed)
+    names = ds.EXPEDIA_CAT_FEATURES if categorical else ds.EXPEDIA_FEATURES
+    varying = ["price_usd"] if categorical else ds.EXPEDIA_VARYING
+    X = test.select(names).to_numpy().astype(np.float64)[order]
     config = walker_config(
-        ds.EXPEDIA_FEATURES,
+        names,
         int(np.diff(offsets).max()),
-        varying=[ds.EXPEDIA_FEATURES.index(f) for f in ds.EXPEDIA_VARYING],
+        varying=[names.index(f) for f in varying],
         inc=[],
         dec=[],
     )
     meta = {
         "generator": "ranking-sessions-v2",
         "grouping": {"kind": "sessions"},
-        "seeds": {"order": [split.seed, SESSION_ORDER_STREAM]},
+        "seeds": {} if categorical else {"order": [split.seed, SESSION_ORDER_STREAM]},
     }
     return Workload(X, offsets, config, sids[offsets[:-1].astype(np.int64)].astype(np.int64), meta)
 
 
 def ranking_cohort(
-    sessions: Workload, min_candidates: int, sizes_: list[int]
+    sessions: Workload, min_candidates: int, sizes_: list[int], *, max_groups: int | None = None
 ) -> dict[int, Workload]:
-    """Nested subsets of every session with ``min_candidates`` or more: the
+    """Nested subsets of sessions with ``min_candidates`` or more: the
     size-n subset is each session's first n candidates, in the sessions' own
-    (seeded) order."""
+    order (seeded by default, source-file for the categorical scale recipe).
+    ``max_groups`` keeps only the first that many eligible sessions in input
+    session order; None keeps every eligible session."""
     if max(sizes_) > min_candidates:
         raise ValueError("subset sizes cannot exceed the cohort's minimum session size")
     off = sessions.group_offsets.astype(np.int64)
     widths = np.diff(off)
     cohort = np.nonzero(widths >= min_candidates)[0]
+    if max_groups is not None:
+        cohort = cohort[:max_groups]
     out = {}
     for n in sizes_:
         rows = np.concatenate([off[g] + np.arange(n) for g in cohort])

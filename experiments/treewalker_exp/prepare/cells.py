@@ -99,7 +99,9 @@ def _make_workload(ctx: Context, cell: Cell, td: TrainData) -> tuple[wl.Workload
             return ctx.sessions(cell.model.dataset), model_dir
         case "ranking-cohort-v2":
             sessions = ctx.sessions(cell.model.dataset)
-            subsets = wl.ranking_cohort(sessions, p["min_candidates"], [p["size"]])
+            subsets = wl.ranking_cohort(
+                sessions, p["min_candidates"], [p["size"]], max_groups=p.get("max_groups")
+            )
             return subsets[p["size"]], art / cell.model.dataset / "workloads" / cell.workload_id
         case "whatif-v2":
             draws = ctx.whatif_draws(cell.model, td)
@@ -214,9 +216,15 @@ def cell_identity(cell: Cell, mdoc: dict[str, Any], built: Built) -> dict[str, A
         "framework": cell.framework,
         "n_trees": cell.model.n_trees,
         "max_depth": cell.model.max_depth,
+        **({"num_leaves": cell.model.num_leaves} if cell.model.num_leaves is not None else {}),
         "params": cell.param,
         "model_key": mdoc["key"],
         "data_sha256": dict(sorted(built.hashes.items())),
+        **(
+            {"load_options": {"max_rank_table_bytes": 4 * 1024**3}}
+            if cell.model.dataset == "expedia-cat"
+            else {}
+        ),
     }
 
 

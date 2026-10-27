@@ -312,6 +312,24 @@ fn str_field<'a>(doc: &'a Value, key: &str) -> &'a str {
     doc.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
+/// Only explicitly recorded cell limits differ from the library defaults. A
+/// malformed override is an error, not a silent return to the default cap.
+fn cell_load_options(doc: &Value) -> Result<LoadOptions> {
+    let mut options = LoadOptions::default();
+    if let Some(overrides) = doc.get("load_options") {
+        let fields = overrides
+            .as_object()
+            .context("load_options must be an object")?;
+        for (name, value) in fields {
+            ensure!(name == "max_rank_table_bytes", "unknown load option {name}");
+            options.max_rank_table_bytes = value
+                .as_u64()
+                .context("max_rank_table_bytes must be an unsigned integer")?;
+        }
+    }
+    Ok(options)
+}
+
 impl Cell {
     /// The path of a file role, relative paths resolved against the cell directory.
     fn file(dir: &Path, doc: &Value, role: &str) -> Option<PathBuf> {
@@ -327,6 +345,7 @@ impl Cell {
                 .with_context(|| format!("reading {}", doc_path.display()))?,
         )
         .with_context(|| format!("parsing {}", doc_path.display()))?;
+        cell_load_options(&doc)?;
         let need = |role: &str| {
             Self::file(dir, &doc, role)
                 .with_context(|| format!("{}: no {role} file", doc_path.display()))
@@ -550,7 +569,7 @@ impl Cell {
         Ok(Forest::load_ablated(
             &self.model_treelite,
             &self.walker_config,
-            &LoadOptions::default(),
+            &cell_load_options(&self.doc)?,
             ablation,
         )?)
     }
@@ -572,7 +591,7 @@ impl Cell {
             std::fs::File::open(&self.model_treelite)?,
             ModelFormat::TreeliteBinaryV4,
             config,
-            &LoadOptions::default(),
+            &cell_load_options(&self.doc)?,
         )?)
     }
 
@@ -638,6 +657,31 @@ pub fn discover(artifacts: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cell_caps_are_opt_in_and_checked() {
+        let defaults = LoadOptions::default();
+        assert_eq!(
+            cell_load_options(&serde_json::json!({}))
+                .unwrap()
+                .max_rank_table_bytes,
+            defaults.max_rank_table_bytes
+        );
+        let raised = cell_load_options(&serde_json::json!({
+            "load_options": {"max_rank_table_bytes": 4_294_967_296_u64}
+        }))
+        .unwrap();
+        assert_eq!(raised.max_rank_table_bytes, 4_294_967_296);
+        assert_eq!(raised.max_json_bytes, defaults.max_json_bytes);
+        for bad in [
+            serde_json::json!({"load_options": null}),
+            serde_json::json!({"load_options": {"max_rank_table_bytes": -1}}),
+            serde_json::json!({"load_options": {"max_rank_table_bytes": "4GiB"}}),
+            serde_json::json!({"load_options": {"max_rank_tables_bytes": 42}}),
+        ] {
+            assert!(cell_load_options(&bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn variant_ids_are_stable() {
