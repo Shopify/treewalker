@@ -107,6 +107,7 @@ impl Forest {
                 threshold_type,
                 plan,
                 max_rank_bytes: options.max_rank_table_bytes,
+                category_bits_above: choices.category_bits_above,
                 prefix_depths: &prefix_depths,
             },
             decoded.into_layout_source(),
@@ -124,6 +125,11 @@ impl Forest {
             &points,
             options.max_rank_table_bytes,
         )?;
+        debug_assert!(
+            (size_of::<u32>() * (masks.flip_bounds.len() + masks.flips.len())) as u64
+                <= layout.bins.flip_bytes_bound(),
+            "the layout bounds the masks' flips"
+        );
         drop(points);
 
         // SAFETY: malloc_trim takes no pointers; it only returns free heap pages to

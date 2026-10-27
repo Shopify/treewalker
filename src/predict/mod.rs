@@ -133,15 +133,27 @@ impl Predictor {
         let Workspace { kernel: s, idle } = &mut self.workspace;
         debug_assert!(STATS == stats.is_some(), "a counted call gives its stats");
         let stats = stats.unwrap_or(idle);
+        // Only a model with bit splits takes the kernel whose fill copies bits and whose
+        // walks shift; the others' is the kernel without them.
         macro_rules! at {
             ($x:ty) => {
-                match model.threshold_type {
-                    ThresholdType::F64 => model.kernel_groups_at::<$x, false, STATS, ABLATE>(
-                        data, out, groups, s, options, stats, finalize,
-                    ),
-                    ThresholdType::F32 => model.kernel_groups_at::<$x, true, STATS, ABLATE>(
-                        data, out, groups, s, options, stats, finalize,
-                    ),
+                match (model.threshold_type, model.layout.bins.has_bits()) {
+                    (ThresholdType::F64, false) => model
+                        .kernel_groups_at::<$x, false, STATS, ABLATE, false>(
+                            data, out, groups, s, options, stats, finalize,
+                        ),
+                    (ThresholdType::F64, true) => model
+                        .kernel_groups_at::<$x, false, STATS, ABLATE, true>(
+                            data, out, groups, s, options, stats, finalize,
+                        ),
+                    (ThresholdType::F32, false) => model
+                        .kernel_groups_at::<$x, true, STATS, ABLATE, false>(
+                            data, out, groups, s, options, stats, finalize,
+                        ),
+                    (ThresholdType::F32, true) => model
+                        .kernel_groups_at::<$x, true, STATS, ABLATE, true>(
+                            data, out, groups, s, options, stats, finalize,
+                        ),
                 }
             };
         }

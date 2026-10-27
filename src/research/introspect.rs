@@ -34,7 +34,8 @@ pub struct LayoutStats {
     /// 126-bit rule and take an `i128`.
     pub wide_limbs: usize,
     /// Bytes of the categorical features' rank tables: an unlisted category's rank
-    /// in each chain, and each code's exceptions, its ranks where they differ.
+    /// in each chain, and each code's exceptions, its ranks where they differ; and
+    /// of the bit features' rows, each code's bits.
     pub rank_table_bytes: usize,
     /// Bytes of the varying categorical features' flip lists: per code, the
     /// predicates whose masks its rows flip, and their bounds.
@@ -43,6 +44,10 @@ pub struct LayoutStats {
     /// tables, and the distinct heavy sets of their splits, which the chains cover.
     pub chain_slots: usize,
     pub chain_sets: usize,
+    /// The bit features' slots, 32 distinct heavy sets each, which a row fills from
+    /// its code's row, and their distinct heavy sets.
+    pub bit_slots: usize,
+    pub bit_sets: usize,
     /// Bytes per cache line, and the L1 data cache's and L2's share per CPU.
     pub line_bytes: usize,
     pub l1_bytes: usize,
@@ -123,8 +128,8 @@ impl Forest {
         let latency = machine::latency(level, &layout.nodes, &model.rules.pool_latency);
         LayoutStats {
             varying_share: layout.varying_share,
-            lanes: rules::lanes(true),
-            lanes_constant: rules::lanes(false),
+            lanes: rules::lanes(true, layout.bins.has_bits()),
+            lanes_constant: rules::lanes(false, layout.bins.has_bits()),
             registers: machine::GENERAL_REGISTERS,
             vector_bits: machine::VECTOR_BITS,
             pool_bytes: size_of_val(layout.nodes.as_slice()),
@@ -141,6 +146,8 @@ impl Forest {
                 + size_of_val(model.masks.flips.as_slice()),
             chain_slots: layout.bins.chain_slots(),
             chain_sets: layout.chain_sets,
+            bit_slots: layout.bins.bit_slots(),
+            bit_sets: layout.bit_sets,
             line_bytes: caches.line,
             l1_bytes: caches.level(1).map_or(0, |c| c.bytes),
             l2_share_bytes: caches.level(2).map_or(0, machine::Cache::per_cpu),
