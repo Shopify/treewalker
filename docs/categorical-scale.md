@@ -51,28 +51,27 @@ library versions.
 
 ## The default-cap gap
 
-**Known expectation on TreeWalker 3.0 and 3.1:** the full model fails at the
-default 256 MiB `LoadOptions::max_rank_table_bytes`, with a `LoadError::Limit`
-that the inclusion graph of a feature's categorical splits exceeds the cap. On a
-GCP c3d-standard-90, 3.1 rejected the reference model in about 1.3 s; with a 4 GiB
+TreeWalker 3.0 and 3.1 reject the full model at the default 256 MiB
+`LoadOptions::max_rank_table_bytes`, with a `LoadError::Limit` that the
+inclusion graph of a feature's categorical splits exceeds the cap. On a GCP
+c3d-standard-90, 3.1 rejected the reference model in about 1.3 s; with a 4 GiB
 cap it loaded in about 4.7 s, with 190,335 chains in 31 MB of rank tables.
 
-To time inference despite that gap, preparation records
-`load_options.max_rank_table_bytes = 4294967296` in this dataset's `cell.json`
-and its content identity. Ordinary/ablated and alternate-width loads in the
-runner, and the correctness test's JSON comparison, take that override; all
-other limits remain the library defaults. Cells without it retain the defaults.
-`preflight` loads the model at the recorded options, so a cap too small for it
-fails there, not in the run. The override does not fix the chain cover and must
-not be reported as default-cap support. The suite times TreeWalker only,
-avoiding compiled-baseline preparation of this large model; it is opt-in rather
-than an addition to the paper's factorial.
+Category bits close the gap (the changelog's Unreleased section): the 265,406
+distinct sets of `srch_destination_id` take a bit each, and the model loads at
+the default limits in about 1.0 s, with the same outputs. Its bits take 242 MB
+of the 256 MiB cap. The cell records no load options, so the runner's loads take
+the library defaults, and a regression of the fix fails in the run; `preflight`
+loads a model only for a cell that records load options, so not this one. The
+runner's loads and the correctness test's JSON comparison still honour a
+`load_options.max_rank_table_bytes` that a cell's `cell.json` and identity
+record. The suite times TreeWalker only, avoiding compiled-baseline preparation
+of this large model; it is opt-in rather than an addition to the paper's
+factorial.
 
 For a loader change, check the full binary and its walker configuration with
-`Forest::load` at default options as well as running the raised-cap suite.
-Record whether the default load still gives that `Limit`; accepting it is a
-gap closed, not a reason to keep asserting rejection forever. A small-tree
-smoke model need not fail the default cap.
+`Forest::load` at default options as well as running the suite. A small-tree
+smoke model need not reach the bits' threshold.
 
 ## Reproduce
 
@@ -93,4 +92,4 @@ c3d-standard-90 the reference preparation took 11 minutes, 10 of them training,
 and peaked at 8.5 GB; the two-tree smoke test is not a full-training time
 estimate. The experiments test suite prepares and resumes a synthetic tiny
 cell through the same code, checking the split, feature types, candidate
-order, cohort cap, parameters and load override independently.
+order, cohort cap, parameters and load options independently.

@@ -137,7 +137,8 @@ def test_tiny_categorical_cell_prepares_and_resumes(categorical_context):
     assert mdoc["categorical_features"] == FEATURES[:7]
     doc = cells.ensure_cell(ctx, cell, td, mdoc, False)
     assert doc["status"] == "ready" and doc["contracts"]["ok"]
-    assert doc["load_options"] == {"max_rank_table_bytes": 4 * 1024**3}
+    # The model loads at the default limits, so the cell records no load options.
+    assert "load_options" not in doc
     assert doc["grouping"]["n_groups"] == 20
     assert {"model_treelite_bin", "test_data", "group_offsets", "entities", "oracle"} <= set(
         doc["files"]
