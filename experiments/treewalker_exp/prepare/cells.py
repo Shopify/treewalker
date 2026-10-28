@@ -220,11 +220,6 @@ def cell_identity(cell: Cell, mdoc: dict[str, Any], built: Built) -> dict[str, A
         "params": cell.param,
         "model_key": mdoc["key"],
         "data_sha256": dict(sorted(built.hashes.items())),
-        **(
-            {"load_options": {"max_rank_table_bytes": 4 * 1024**3}}
-            if cell.model.dataset == "expedia-cat"
-            else {}
-        ),
     }
 
 
