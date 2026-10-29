@@ -30,6 +30,9 @@
 
 use std::ops::Range;
 
+use crate::config::WalkerConfig;
+use crate::exact::Plan;
+
 // ---------------------------------------------------------------------------
 // Node
 // ---------------------------------------------------------------------------
@@ -194,6 +197,12 @@ impl VaryingPredicate {
     #[inline]
     pub(crate) const fn of(node: &Node) -> Self {
         Self::new(node.feature, node.flags, node.value)
+    }
+
+    /// The predicate of a decoded split.
+    #[inline]
+    pub(crate) const fn of_split(split: &crate::load::parse::decoded::Split) -> Self {
+        Self::new(split.feature, split.flags, split.value)
     }
 
     /// The predicate on `feature` with a parsed node's `flags` and `value`.
@@ -397,4 +406,71 @@ pub struct Output {
     /// The tree count for averaging models (random forests), else 1.
     pub divisor: f64,
     pub postprocessor: Postprocessor,
+}
+
+/// A loaded model: its trees, varying predicates and their mask plan, prefix groups,
+/// exact-sum plan and prediction layout, with the configuration it was laid out for.
+/// Immutable once loaded, and shared by a [`crate::Forest`]'s clones and predictors.
+///
+/// `repr(C)` with the research-only field last keeps the other fields' offsets, and
+/// with them production's code, independent of the `research` feature.
+#[repr(C)]
+pub(crate) struct Model {
+    pub(crate) output: Output,
+    pub(crate) trees: Vec<Tree>,
+    pub(crate) config: WalkerConfig,
+    /// The categorical splits' lists: each its length, then its sorted categories.
+    pub(crate) categories: Vec<u32>,
+    pub(crate) varying_predicates: Vec<VaryingPredicate>,
+    /// Each varying feature's predicates, and the categorical ones' left regions.
+    pub(crate) masks: crate::load::layout::MaskPlan,
+    pub(crate) threshold_type: ThresholdType,
+    /// Runs of trees sharing constant heavy-path prefixes, by first tree.
+    pub(crate) prefix_groups: Vec<PrefixGroup>,
+    /// What the prefix groups save, as the rule counts it.
+    pub(crate) prefix: crate::rules::PrefixStats,
+    /// Each tree's root, in tree order; the nodes are in input order.
+    pub(crate) tree_starts: Vec<u32>,
+    /// Expected walk steps per tree for rows like the training data.
+    pub(crate) steps: crate::rules::Steps,
+    /// How the leaf values are summed exactly.
+    pub(crate) plan: Plan,
+    /// The kernel's nodes, bins, pooled regions and leaf values, the trees' nodes in
+    /// input order and their leaf values in tree order.
+    pub(crate) layout: crate::load::layout::Layout,
+    /// What each tree's passes need of a predictor's scratch.
+    pub(crate) needs: Vec<crate::load::layout::Need>,
+    /// The walks' item lengths and the node pool's latency, for the rules.
+    pub(crate) rules: Box<crate::rules::RuleInputs>,
+    /// The parsed nodes, for introspection and the full walk.
+    #[cfg(any(test, feature = "research"))]
+    pub(crate) nodes: Vec<Node>,
+}
+
+impl Model {
+    /// The tree-local index of the child node `abs_idx` sends `features` to.
+    #[cfg(any(test, feature = "research"))]
+    #[inline]
+    pub(crate) fn step<const F32: bool>(
+        &self,
+        nodes: &[Node],
+        abs_idx: usize,
+        local_idx: usize,
+        features: &[f64],
+    ) -> usize {
+        let node = &nodes[abs_idx];
+        if self.eval_split::<F32>(node, features) == node.heavy_is_left() {
+            local_idx + 1
+        } else {
+            node.skip as usize
+        }
+    }
+
+    /// Whether `node` sends `features` left.
+    #[cfg(any(test, feature = "research"))]
+    #[inline]
+    pub(crate) fn eval_split<const F32: bool>(&self, node: &Node, features: &[f64]) -> bool {
+        VaryingPredicate::of(node)
+            .goes_left::<F32>(features[node.feature as usize], &self.categories)
+    }
 }

@@ -41,37 +41,14 @@ use std::io::Read;
 pub(crate) use validation::{Output, ParsedModel, Postprocessor};
 
 use rustc_hash::FxHashMap as HashMap;
-use std::path::Path;
 
+use crate::ModelFormat;
 use crate::config::{LoadOptions, WalkerConfig};
 use crate::legacy::forest::{FeatureRange, Node, PrefixGroup, Threshold, Tree, VaryingPredicate};
 
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
-
-/// Explicit format for loading models from memory or readers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ModelFormat {
-    /// Treelite 4.0 to 4.7 binary checkpoint, from `Model.serialize_bytes()`.
-    TreeliteBinaryV4,
-    /// Treelite JSON dump, from `Model.dump_as_json()`.
-    TreeliteJson,
-}
-
-impl ModelFormat {
-    pub(crate) fn from_path(path: &Path) -> Result<Self, LoadError> {
-        match path.extension().and_then(|e| e.to_str()) {
-            Some("bin") => Ok(Self::TreeliteBinaryV4),
-            Some("json") => Ok(Self::TreeliteJson),
-            _ => Err(LoadError::Unsupported(format!(
-                "model path {} must end in .bin or .json; use Forest::from_reader with an explicit ModelFormat",
-                path.display()
-            ))),
-        }
-    }
-}
 
 pub(crate) fn parse_reader(
     reader: impl Read,

@@ -30,13 +30,12 @@
 //! ensures no padding. The `left` child pointer is eliminated entirely — it's
 //! always `idx + 1` (the fall-through convention).
 
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::{LoadOptions, WalkerConfig};
 use crate::legacy::parser;
 use crate::{LoadError, ModelFormat};
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 
 // ---------------------------------------------------------------------------
 // Node
@@ -364,146 +363,66 @@ pub(crate) struct Model {
     pub(crate) fixed_scale: Option<i32>,
 }
 
-/// A loaded model: a cheap, immutable handle that can be cloned and shared
-/// across threads.
-///
-/// Predictions go through a [`Predictor`](crate::Predictor), which owns the
-/// scratch space; create one per worker with [`Forest::predictor`].
-#[derive(Clone)]
-pub struct Forest {
-    pub(crate) model: Arc<Model>,
-}
+/// Today's model of `bytes`, loaded beside the new one while `src/legacy/` serves the
+/// Predictor and the research API.
+pub(crate) fn load(
+    bytes: &[u8],
+    format: ModelFormat,
+    config: WalkerConfig,
+    options: &LoadOptions,
+) -> Result<Arc<Model>, LoadError> {
+    let reader = Cursor::new(bytes);
+    let parser::ParsedModel {
+        trees,
+        mut nodes,
+        bitsets,
+        threshold_type,
+        output,
+    } = parser::parse_reader(reader, format, &config, options)?;
+    let mut varying_predicates = if options.disable_predicate_dedup {
+        parser::build_varying_predicates_no_dedup(&mut nodes)?
+    } else {
+        parser::build_varying_predicates(&mut nodes)?
+    };
+    parser::sort_varying_predicates(&mut varying_predicates, &mut nodes);
+    let feature_ranges = parser::build_feature_ranges(&varying_predicates);
+    let (prefix_groups, prefix_depth) = if options.prefix_depth > 0 {
+        let (groups, _ungrouped) =
+            parser::build_prefix_groups(&trees, &nodes, &config, options.prefix_depth);
+        (groups, options.prefix_depth)
+    } else {
+        (Vec::new(), 0)
+    };
 
-impl std::fmt::Debug for Forest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let m = &*self.model;
-        f.debug_struct("Forest")
-            .field("trees", &m.trees.len())
-            .field("nodes", &m.nodes.len())
-            .field("bitsets_bytes", &m.bitsets.len())
-            .field("varying_predicates", &m.varying_predicates.len())
-            .field("threshold_type", &m.threshold_type)
-            .finish_non_exhaustive()
-    }
-}
+    let fixed_scale = if options.exact_sums {
+        crate::exact::scale(
+            nodes.iter().filter(|n| n.is_leaf()).map(|n| n.value),
+            trees.len(),
+        )
+    } else {
+        None
+    };
 
-impl Forest {
-    /// Load a supported Treelite `.bin` or `.json` model and its grouping
-    /// configuration file, with the default [`LoadOptions`].
-    ///
-    /// The model format follows the file extension. Unsupported model semantics, such
-    /// as multiclass output, return [`LoadError::Unsupported`].
-    pub fn load(
-        model_path: impl AsRef<Path>,
-        config_path: impl AsRef<Path>,
-    ) -> Result<Self, LoadError> {
-        Self::load_with(model_path, config_path, &LoadOptions::default())
-    }
-
-    /// As [`Self::load`], with explicit load options.
-    pub fn load_with(
-        model_path: impl AsRef<Path>,
-        config_path: impl AsRef<Path>,
-        options: &LoadOptions,
-    ) -> Result<Self, LoadError> {
-        let config = WalkerConfig::from_file(config_path)?;
-        let format = ModelFormat::from_path(model_path.as_ref())?;
-        Self::from_reader(std::fs::File::open(model_path)?, format, config, options)
-    }
-
-    /// Load a model from memory with explicit format and validated grouping metadata.
-    pub fn from_bytes(
-        bytes: &[u8],
-        format: ModelFormat,
-        config: WalkerConfig,
-        options: &LoadOptions,
-    ) -> Result<Self, LoadError> {
-        Self::from_reader(Cursor::new(bytes), format, config, options)
+    // SAFETY: malloc_trim takes no pointers; it only returns free heap pages to
+    // the system.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        libc::malloc_trim(0);
     }
 
-    /// Load a model from a reader. Binary decoding streams with reusable tree buffers;
-    /// JSON decoding materializes a bounded document. Structural validation precedes
-    /// optimized layout, and unsupported prediction semantics return an error.
-    pub fn from_reader(
-        reader: impl Read,
-        format: ModelFormat,
-        config: WalkerConfig,
-        options: &LoadOptions,
-    ) -> Result<Self, LoadError> {
-        let parser::ParsedModel {
-            trees,
-            mut nodes,
-            bitsets,
-            threshold_type,
-            output,
-        } = parser::parse_reader(reader, format, &config, options)?;
-        let mut varying_predicates = if options.disable_predicate_dedup {
-            parser::build_varying_predicates_no_dedup(&mut nodes)?
-        } else {
-            parser::build_varying_predicates(&mut nodes)?
-        };
-        parser::sort_varying_predicates(&mut varying_predicates, &mut nodes);
-        let feature_ranges = parser::build_feature_ranges(&varying_predicates);
-        let (prefix_groups, prefix_depth) = if options.prefix_depth > 0 {
-            let (groups, _ungrouped) =
-                parser::build_prefix_groups(&trees, &nodes, &config, options.prefix_depth);
-            (groups, options.prefix_depth)
-        } else {
-            (Vec::new(), 0)
-        };
-
-        let fixed_scale = if options.exact_sums {
-            crate::exact::scale(
-                nodes.iter().filter(|n| n.is_leaf()).map(|n| n.value),
-                trees.len(),
-            )
-        } else {
-            None
-        };
-
-        // SAFETY: malloc_trim takes no pointers; it only returns free heap pages to
-        // the system.
-        #[cfg(target_os = "linux")]
-        unsafe {
-            libc::malloc_trim(0);
-        }
-
-        Ok(Self {
-            model: Arc::new(Model {
-                output,
-                trees,
-                config,
-                nodes,
-                bitsets,
-                varying_predicates,
-                feature_ranges,
-                threshold_type,
-                prefix_groups,
-                prefix_depth,
-                fixed_scale,
-            }),
-        })
-    }
-
-    /// The feature classification the model was loaded with.
-    #[inline]
-    #[must_use]
-    pub fn config(&self) -> &WalkerConfig {
-        &self.model.config
-    }
-
-    /// Whether prediction sums leaf values exactly and rounds once, so each row's tree
-    /// sum is the `f64` nearest to the true sum whatever the tree order. Averaging, the
-    /// base score and the link function are applied afterwards in ordinary `f64`.
-    /// False if the model was loaded with [`LoadOptions::exact_sums`] off, or if a leaf
-    /// is not finite or the leaf exponents span too wide a range for a 126-bit fixed
-    /// point; prediction then adds each row's leaves in `f64` in tree order, as the
-    /// full walk does.
-    #[inline]
-    #[must_use]
-    pub fn exact_sums(&self) -> bool {
-        self.model.fixed_scale.is_some()
-    }
+    Ok(Arc::new(Model {
+        output,
+        trees,
+        config,
+        nodes,
+        bitsets,
+        varying_predicates,
+        feature_ranges,
+        threshold_type,
+        prefix_groups,
+        prefix_depth,
+        fixed_scale,
+    }))
 }
 
 impl Model {

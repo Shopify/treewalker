@@ -17,8 +17,23 @@ mod steps;
 
 pub(crate) use lanes::{MAX_LANES, lanes};
 pub(crate) use prefetch::{Distance, MAX_DISTANCE, distance, pass_distance};
-pub(crate) use prefix::Prefix;
+pub(crate) use prefix::{
+    PathNode, Paths, Prefix, PrefixStats, Token, compare_paths, prefix_groups,
+};
 pub(crate) use steps::{ItemLengths, StepSums, Steps};
+
+/// What the rules read of a model besides its layout and steps, boxed in
+/// [`crate::model::Model`]: its walks' item lengths, and its node pool's latency when
+/// the pool passes the last cache, measured by the first predictor that needs it
+/// ([`machine::latency`]). A cell inline would make `Model` interior-mutable, so that
+/// LLVM could no longer treat the kernel's `&Model` as read-only (it changed the code
+/// of every kernel function that takes one), and the item lengths inline would move
+/// the kernel's fields.
+#[derive(Debug, Default)]
+pub(crate) struct RuleInputs {
+    pub(crate) items: ItemLengths,
+    pub(crate) pool_latency: std::sync::OnceLock<machine::Latency>,
+}
 
 use machine::Caches;
 
@@ -41,4 +56,52 @@ pub(crate) fn chunk_budget(caches: &Caches) -> usize {
     caches
         .level(2)
         .map_or(machine::ASSUMED[1].bytes, machine::Cache::per_cpu)
+}
+
+// ---------------------------------------------------------------------------
+// A predictor's choices
+// ---------------------------------------------------------------------------
+
+/// What a predictor's kernel runs with on this machine: the chunk budget and the
+/// prefetch distances of the walk without varying stops (single rows) and with
+/// them (groups).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Tuning {
+    pub(crate) chunk_bytes: usize,
+    pub(crate) constant: Distance,
+    pub(crate) varying: Distance,
+}
+
+impl Tuning {
+    /// The rules applied to `model` on this machine. The first call probes the
+    /// caches' latencies.
+    pub(crate) fn new(model: &crate::model::Model) -> Self {
+        let caches = machine::caches();
+        let layout = &model.layout;
+        let pool = size_of_val(layout.nodes.as_slice());
+        // Prefix starts skip the grouped trees' shared splits.
+        let skipped = model.prefix.saved / model.trees.len().max(1) as f64;
+        let (leaf, stop) = (model.steps.leaf - skipped, model.steps.stop - skipped);
+        Self {
+            chunk_bytes: chunk_budget(caches),
+            constant: distance(
+                pool,
+                &layout.nodes,
+                &model.rules.pool_latency,
+                leaf,
+                Some(&model.rules.items.leaf_short),
+                lanes(false),
+                caches,
+            ),
+            varying: distance(
+                pool,
+                &layout.nodes,
+                &model.rules.pool_latency,
+                stop,
+                None,
+                lanes(true),
+                caches,
+            ),
+        }
+    }
 }

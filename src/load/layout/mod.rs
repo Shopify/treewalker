@@ -84,7 +84,11 @@
 //! fill restores the held code's exceptions and writes the new code's. The tables
 //! take at most [`crate::LoadOptions::max_rank_table_bytes`] in all.
 
+mod build;
 mod chains;
+mod masks;
+#[cfg(test)]
+mod tests;
 
 use std::hint::select_unpredictable;
 use std::ops::Range;
@@ -92,6 +96,9 @@ use std::ops::Range;
 use crate::LoadError;
 use crate::exact::WideLeaf;
 use crate::model::category;
+
+pub(crate) use build::{Built, Input};
+pub(crate) use masks::{ChainPoint, MaskChain, MaskFeature, MaskPlan};
 
 // ---------------------------------------------------------------------------
 // Nodes
