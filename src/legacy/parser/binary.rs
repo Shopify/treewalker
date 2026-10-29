@@ -4,7 +4,7 @@ use super::common::{
     reorder_and_emit,
 };
 use super::validation::{self, MAX_TREES, Metadata, ParsedModel};
-use crate::forest::{ThresholdType, Tree};
+use crate::legacy::forest::{ThresholdType, Tree};
 use crate::{LoadError, LoadOptions, WalkerConfig};
 use rustc_hash::FxHashMap;
 use std::io::{BufReader, Read};

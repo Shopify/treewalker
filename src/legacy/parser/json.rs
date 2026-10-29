@@ -4,7 +4,7 @@ use super::common::{
     reorder_and_emit,
 };
 use super::validation::{self, MAX_JSON_BYTES, Metadata, ParsedModel};
-use crate::forest::Tree;
+use crate::legacy::forest::Tree;
 use crate::{LoadError, LoadOptions, WalkerConfig};
 use rustc_hash::FxHashMap;
 use simd_json::{OwnedValue as Value, prelude::*};

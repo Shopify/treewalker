@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap as HashMap;
 use super::validation::{MAX_DEPTH, MAX_NODES, MAX_POOL_BYTES};
 use crate::LoadError;
 use crate::config::WalkerConfig;
-use crate::forest::{
+use crate::legacy::forest::{
     FLAG_CATEGORICAL, FLAG_DEFAULT_LEFT, FLAG_HEAVY_IS_LEFT, FLAG_INLINE_CAT,
     FLAG_VARYING_TYPE_SHIFT, FLAG_WALKABLE, Node, SPLIT_CONSTANT, SPLIT_MONO_DEC, SPLIT_MONO_INC,
     SPLIT_NON_MONO, ThresholdType, Tree,
