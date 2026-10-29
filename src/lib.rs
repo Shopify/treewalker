@@ -85,6 +85,8 @@ mod load;
 mod model;
 #[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
 mod predict;
+#[allow(dead_code, unused_imports, unfulfilled_lint_expectations)]
+mod predictor;
 #[cfg(feature = "research")]
 #[path = "legacy/research.rs"]
 pub mod research;
