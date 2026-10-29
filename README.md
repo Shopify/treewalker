@@ -14,7 +14,9 @@ and the cloud setup used for them.
 The measurements here are the 2.0 engine's final run (October 2026). The
 paper as submitted, its engine, its result CSVs and the scripts that read them
 are preserved under the `neurips2026-submission` tag; the camera-ready paper's code,
-measurements and figure code are under `neurips2026-final`.
+measurements and figure code are under `neurips2026-final`. Since 3.0 the library
+has a new prediction kernel that sums every model's leaves exactly; the
+measurements here predate it.
 
 This repository serves two purposes: as a source for the library and as a
 permanent archive of the code at time of submission. The latter can always be
@@ -24,7 +26,8 @@ found [under the neurips2026-submission tag](https://github.com/Shopify/treewalk
 
 | Path | Contents |
 |---|---|
-| `src/` | inference library and treelite model parser |
+| `src/` | inference library: the public API (`forest.rs`, `predictor.rs`, `config.rs`, `error.rs`); loading (`load/`: the Treelite decoders in `parse/`, tree order, varying predicates, the prediction layout in `layout/`); prediction (`predict/`: precompute, walk, resolve, leaf pass, finish, row masks in `mask/`); exact sums (`exact/`); the kernel's rules and the machine model (`rules/`); and the `research` API (`research/`) |
+| `tests/` | the library's integration tests: import fixtures and their GTIL references, recorded output vectors (`fixtures/vectors.bin`), property tests on generated models, and small cases for Miri |
 | `experiments/benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
 | `experiments/treewalker_exp/` | `treewalker-exp`: dataset preparation, workloads, training, compiled baselines |
 | `experiments/grids.toml` | the benchmark suites, resolved by `treewalker-exp` into execution manifests |
@@ -45,8 +48,9 @@ cargo package
 ```
 
 `cargo test` also runs the research API's tests: the crate's dev-dependency on
-itself turns the `research` feature on. Version 2.0 changed the API; the
-[changelog](CHANGELOG.md) maps every 1.x call to its replacement.
+itself turns the `research` feature on. Versions 2.0 and 3.0 changed the API; the
+[changelog](CHANGELOG.md) maps every 1.x call and every 2.x research call to its
+replacement.
 
 The package includes the Rust library sources, loading documentation, README,
 license, and small independent compatibility fixtures with their optional Python
@@ -194,10 +198,49 @@ rather than every feature silently treated as constant.
 The supported subset includes scalar regression, ranking and binary
 classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base
 scores. Binary Treelite v4 is recommended; native XGBoost JSON must first be
-converted through Treelite. Inputs have up to 64 features; groups can have any
-number of rows.
+converted through Treelite. Inputs have up to `i32::MAX` features, Treelite's own
+limit; trees, nodes, depth and category IDs are bounded only by the input caps of
+`LoadOptions`, memory and 32-bit node indices; groups can have any number of rows.
 See [Treelite loading](docs/treelite-loading.md) for export examples, the exact
-output and precision policy, errors, limits, and the caller's grouping contract.
+output and precision policy, errors, limits, prediction scratch, and the caller's
+grouping contract.
+
+### Research API
+
+The `research` feature adds `treewalker_gbdt::research`, which the benchmark harness
+uses to measure the kernel. Serving needs none of it.
+
+- `forest.research_predictor(ablation)` runs the kernel with runtime ablations, each
+  disabling one optimization or forcing one choice: `disable_predicate_sweep`,
+  `disable_varying_precompute`, `disable_monotonic`, `disable_unsplit`,
+  `disable_g1_constant`, `disable_width_dispatch`, `disable_restart_prefetch` and
+  `lanes` (1 to 12, for every walk, instead of the rule's per walk). An ablation's
+  tokens are its flags' names and `lanes=N`; `Ablation::id()` joins them with `+`
+  (`all-on` for production), `from_id` parses an ID, and `with(token)` sets one
+  field.
+- `Forest::load_ablated`, `from_bytes_ablated` and `from_reader_ablated` take a
+  `LoadAblation`, the load-time choices turned off or forced:
+  `disable_tree_ordering`, `disable_bitset_intern`, `disable_predicate_dedup` and
+  `prefix_depth` (every run of trees sharing that many constant splits, instead of
+  the rule's groups; 0 for none).
+- `predict_group` and `predict_groups` are the timed build; `predict_group_counted`
+  returns `WorkCounters` (`COUNTERS_VERSION` 6: groups, single rows, bins, precompute,
+  event scans, prefix and walk steps, lane slots, passes, events, splits, runs and
+  arena slots; `fields()` lists them) and adds its phase times to `take_phases()`
+  (`Phases`: bins, precompute, prefix, walk, resolve, leaf pass and finish).
+- `predict_group_stages` keeps each row's `tree_sum`, `raw_margin` and `output`.
+- `forest.layout_stats()` gives what the kernel's rules chose for the model on this
+  machine and their inputs, and the size of its layout: the lanes per walk and the
+  registers they were counted from, the cache sizes and their source, the chunk
+  budget, the expected walk steps per tree, the cache level holding the nodes with
+  its probed latency and the prefetch distances, the prefix groups with the steps
+  they save and cost, and the bytes of the node pool, leaf table, categorical
+  rank tables (with the chain slots and the heavy sets they cover) and the varying
+  categorical features' flip lists.
+- `forest.predict_full_walk(rows, out)` walks every tree for every row and sums
+  exactly: an independent reference that production matches bit for bit.
+- `nodes()`, `trees()`, `tree_nodes()`, `bitset_bytes()`, `threshold_type()` and
+  `predicate_masks()` expose the parsed model.
 
 ## Datasets
 
@@ -241,6 +284,17 @@ The factorial suite also prepares two kinds of derived models
   on the features the released model splits on most) and `expedia/nt500_md8`
   (sessions). A model's `model.json` records the sample (`replicate`) or the
   encoding (`missing_values`).
+- What-if grids (`whatif-grid-v1`, in the kernel suite), groups of more than 1,024
+  rows, on the kernel's runtime-width masks, which no panel reaches (FLCHAIN realizes at most 1,008 steps,
+  SUPPORT 104). Each of 64 seeded base entities over an ICE grid of its model's two
+  most-split covariates, at 64 x 32 or 64 x 64 levels: training values at evenly
+  spaced quantiles, so levels repeat where values tie. On `credit/nt500_md8` and
+  `flchain/nt50_md4_h16`, groups of 2,048 and 4,096 rows; they validate the kernel
+  and tune nothing.
+- Scattered leaves (`kernel-whatif-credit`, whatif-v2 in the kernel suite): credit
+  what-ifs at `credit/nt500_md8`, k = 1 and 8, G = 128, where most runs of a leaf's
+  rows are one row long. They check the leaf pass on fragmented masks and tune
+  nothing.
 
 ## Released results
 
@@ -275,7 +329,7 @@ camera-ready ones, are in the history at `2562892`.
 
 `experiments/data/precision/{intel,arm}/` holds App. A.3's measurements, taken
 on the campaign's machine types (2026-10-13, the `precision` diagnostic):
-`precision_order.json`, `sweep_bench precision-order` over every
+`precision_order.json`, 2.0's `sweep_bench precision-order` over every
 camera-ready LightGBM cell (tree ordering on against off with exact sums off,
 and both against prepare's GTIL reference); `audit_f32.md`, `audit-f32` with
 native XGBoost's margins from the library the campaign timed
@@ -438,6 +492,10 @@ The protocol, per cell (settings in `grids.toml [run]`):
   slower by the end of an earlier factorial, with the same instructions: a model
   loaded into a glibc heap that hundreds of models had churned. A new process, or
   jemalloc, showed none.
+- A cell with a row order, the kernel suite's single-row cells, is timed in its
+  prepared order, independent rows (a fixed-seed shuffle) or file order, the same
+  rows in the same order for every method; every other cell's groups are timed in
+  a seeded order.
 - A sentinel, SUPPORT's acceptance cell, runs at the start of each run
   invocation (a warm-up, then a measure) and after every 25 measured cells,
   under `sentinel/`, its ticks and rows in `run.json`. It measures the machine;
@@ -473,12 +531,14 @@ over any index in a user's uv configuration. Relock with `uv lock`,
 
 ### The camera-ready rerun
 
-The camera-ready reruns the paper's cells with the algorithm as reviewed: every
-TreeWalker forest loads with exact sums off (`exact_sums = false`), so each row's
-leaves add in f64 in tree order, as Algorithms 1 and 2 describe, and production
-`predict` equals `predict_full_walk` bit for bit. The library's default stays on
-(`LoadOptions::exact_sums`, true by default: the leaves add as exact fixed-point
-integers rounded once; see `docs/treelite-loading.md`). In the final run's
+The camera-ready reruns the paper's cells with the algorithm as reviewed, on the
+2.0 engine (the `neurips2026-final` tag): every TreeWalker forest loads with exact
+sums off (`exact_sums = false`), so each row's leaves add in f64 in tree order, as
+Algorithms 1 and 2 describe, and production `predict` equals `predict_full_walk`
+bit for bit. 2.0's default was on (`LoadOptions::exact_sums`: the leaves add as
+exact fixed-point integers rounded once), and since 3.0 every model sums exactly
+(`docs/treelite-loading.md`), so this runner refuses `exact_sums = false`: the
+commands below run at the tag. In the final run's
 ablation suites (`ablation-{x86_64,aarch64}`, measured 2026-10-09/10, `numbers`
 item README), turning exact sums off (`disable_exact_sums`, research build, serving,
 T=500, L=8) took 1.26-1.29x the default's latency at G=128 on Intel and 1.59-1.60x
@@ -503,8 +563,8 @@ run with `--set exact_sums=false`:
 
 ```bash
 cd infra
-terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse HEAD) -var 'suites=["acceptance"]' -var layout_check=true -var 'run_settings=["exact_sums=false"]'
-terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse HEAD) -var-file=camera-ready.tfvars
+terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse 'neurips2026-final^{commit}') -var 'suites=["acceptance"]' -var layout_check=true -var 'run_settings=["exact_sums=false"]'
+terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse 'neurips2026-final^{commit}') -var-file=camera-ready.tfvars
 ```
 
 The runs land as `camera-ready-ARCH`, `camera-ready-ablation-1-ARCH`,
@@ -524,11 +584,11 @@ cargo run --release --manifest-path experiments/benchmarks/Cargo.toml --features
 
 `audit-f32 --suite camera-ready` reads TreeWalker's f32 margins from each run's
 packed `stages.parquet` and compares them, and native XGBoost's, with the same f64
-oracle. `sweep_bench precision-order` runs offline over prepared LightGBM cells
+oracle. `sweep_bench precision-order`, a 2.0 command (at the tag; under 3.0's exact
+sums tree order cannot change a sum), runs offline over prepared LightGBM cells
 (cell directories, or `--manifest` with `--cells` and `--artifacts-dir`): with
 exact sums off it compares tree ordering on against off on the tree sums and raw
-margins, and both orderings' outputs with the cell's GTIL reference
-(`experiments/benchmarks/src/precision.rs`, `docs/treelite-loading.md`).
+margins, and both orderings' outputs with the cell's GTIL reference.
 
 `check-run` exits non-zero when a validity gate fails, and fails closed: the
 run's tables missing, a failed cell or sentinel attempt that no later attempt of
@@ -539,7 +599,8 @@ did not pass, a required method not timed, a timed interface without a passing
 check on the timed rows, process 0's samples not covering the timed groups in
 every round, or a forest whose `exact_sums` differs from the run's, which the
 camera-ready suites must set off (pass `--exact-sums off` for the campaign's
-acceptance and layout runs). It prints the warnings (sentinel drift, the layout
+acceptance and layout runs); from output schema 7 (3.0) every forest sums exactly,
+no forest's record is written, and the gate passes when the setting is on. It prints the warnings (sentinel drift, the layout
 check, G=1 at the survival anchors, E1 against the released numbers).
 
 Re-timing runs on each machine, from that machine's own execution manifest (the
@@ -628,19 +689,28 @@ intervals; the sentinel measures the machine's drift over the run, which
 
 A prediction has three stages: `tree_sum`, the sum of the row's leaf values;
 `raw_margin`, `tree_sum / divisor + base_score`; and the output, after the
-identity or the sigmoid. When `Forest::exact_sums()` is true, as it is for the
-12 models of the cells measured below, the leaves are added as exact fixed-point
-integers and rounded once: `tree_sum` is the `f64` nearest to the true sum, and tree
-order, layout and every ablation except `disable_exact_sums` leave it unchanged.
-The margin and the link are ordinary rounded `f64` operations.
+identity or the sigmoid. The leaves of every model are added as exact fixed-point
+integers and rounded once: `tree_sum` is the `f64` nearest to the true sum, and
+tree order, layout, lanes, group width, chunking, platform and every ablation leave
+it unchanged. Leaves whose scaled sums fit in 126 bits add as `i128`; others, with
+exponents too far apart, add in a wider accumulator of 29-bit digits. The margin and
+the link are ordinary rounded `f64` operations.
 
 LightGBM (f64) predictions match Treelite GTIL within 1e-13, and XGBoost (f32)
-predictions match native XGBoost within 1e-5 (`experiments/benchmarks/tests/correctness.rs`).
-GTIL and the full walk add leaves in `f64` in tree order, so they differ from the
-exact sum by their rounding, which grows with the partial sums. Measured on
-2026-10-04, the full walk's outputs differ by at most 2.2e-15 on the FLCHAIN and
-SUPPORT LightGBM cells at horizons 16 and 128, 7.2e-16 on Expedia and 1.1e-14 on
-FLCHAIN at horizon 1,024; the XGBoost models' outputs are bit-identical.
+predictions match native XGBoost within 1e-5 (`experiments/benchmarks/tests/correctness.rs`);
+`tree_sum` and `raw_margin` match `math.fsum` of GTIL's per-tree outputs bit for bit.
+GTIL adds leaves in `f64` in tree order, so it differs from the exact sum by its
+rounding, which grows with the partial sums.
+
+The library's tests check production bit for bit against `predict_full_walk`, which
+walks every tree for every row on its own and sums exactly, and against output
+vectors recorded for the import fixtures and for generated models
+(`tests/vectors.rs`). Property tests generate Treelite models, configurations and
+groups across every mask width and piece boundary and compare production and the
+full walk with an independent evaluator and a big-integer sum (`tests/property.rs`;
+`TW_PROPTEST_CASES` widens the sweep). Lane counts, width dispatch, single rows
+with and without the constant walk, and chunk sizes are checked to give identical
+outputs.
 
 ## Citation
 
