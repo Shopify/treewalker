@@ -10,7 +10,7 @@ use super::machine::GENERAL_REGISTERS;
 pub(crate) const MAX_LANES: usize = 12;
 
 /// Registers the walk's loop holds besides its lanes and a step's temporaries: the
-/// node pool, the bins, the items, the words written per step and the dummy's index;
+/// node pool, the bins, the items, the words written per step and the dummy's link;
 /// with varying stops the stops written per step. On
 /// x86-64 the 64-bit stop or leaf mask too, since its instructions take at most 32-bit
 /// immediates (AArch64 encodes it as a logical immediate). On AArch64 a walk with
@@ -83,15 +83,18 @@ const fn one_instruction_advance(k: usize, varying: bool) -> bool {
 const X86_L1_CYCLES: usize = 5;
 const X86_L2_CYCLES: usize = 16;
 
-/// x86-64: one lane step's dependent chain, in cycles: the node address (`shl`), the
-/// node's load, its slot (`shr`), the bin's load folded into the compare (`cmp`), the
-/// heavy select (`cmova`) and the stop select (`cmovne`), five one-cycle operations
-/// and two loads. Read from the post-LTO assembly of `examples/walk_asm.rs`
-/// (emeraldrapids and x86-64-v4, rustc 1.97.1), alike for every walk. The bins are
-/// small and stay in L1; the node comes from L2, the level a pool comes from when it
-/// does not fit L1 (a pool in L1 is a model of a few dozen small trees, whose walk
-/// is a small part of its time): 16 + 5 + 5 = 26.
-const X86_CHAIN_CYCLES: usize = X86_L2_CYCLES + X86_L1_CYCLES + 5;
+/// x86-64: one lane step's dependent chain, in cycles: the node's load, at the pool
+/// plus the lane's byte offset ([`crate::load::layout`]), its slot (`shr`), the
+/// bin's load folded into the compare (`cmp`), the heavy select (`cmovae`) and the
+/// stop select (`cmovne`), four one-cycle operations and two loads; the path through
+/// the stop to the next item is as long. Read from the post-LTO assembly of
+/// `examples/walk_asm.rs` (emeraldrapids and x86-64-v4, rustc 1.97.1), alike for every
+/// walk. The bins are small and stay in L1; the node comes from L2, the level a pool
+/// comes from when it does not fit L1 (a pool in L1 is a model of a few dozen small
+/// trees, whose walk is a small part of its time): 16 + 5 + 4 = 25. With node indices
+/// the address took a `shl` more, and the heavy select was `cmova`, whose two flags
+/// take 2 cycles on Intel.
+const X86_CHAIN_CYCLES: usize = X86_L2_CYCLES + X86_L1_CYCLES + 4;
 
 /// x86-64: the uops the core renames per cycle, which bound the walk's throughput
 /// whatever its lanes: 6 on Golden Cove and its successors (Intel's optimization
@@ -101,10 +104,12 @@ const X86_ISSUE_WIDTH: usize = 6;
 /// x86-64: the uops of one lane step with every lane in registers (2 lanes, a
 /// prefetch every round): instructions, less a macro-fused compare-and-branch per
 /// lane, plus one for each load-op with an index register (unlaminated) and for each
-/// `cmova`/`cmovbe` (2 uops on Intel). Counted from the same assembly: 24 for the walk
-/// without varying stops, 24 and 27.5 for those with them over 8- and 16-byte items;
-/// the fewest, 24, which reach the issue bound last.
-const X86_STEP_UOPS: usize = 24;
+/// `cmova`/`cmovbe` (2 uops on Intel; the walks have none). Counted from the same
+/// assembly: 21 for the walk without varying stops, 20 and 23 for those with them over
+/// 8- and 16-byte items; the fewest, 20, which reach the issue bound last. With node
+/// indices they were 24, 24 and 27.5: a `shl` for the node's address and one for the
+/// prefetch's, and `cmova`'s or `cmovbe`'s second uop.
+const X86_STEP_UOPS: usize = 20;
 
 /// x86-64: uops a lane value that does not fit the registers adds per round, its store
 /// and its reload. The assembly adds more per lane step (at 8 lanes 3 to 6 against
@@ -158,35 +163,38 @@ const fn parse(s: &str) -> usize {
 ///   wants 7 to 9 lanes, at Neoverse V2's 6, 4 to 5. On the M4, research lanes 2 to 12
 ///   over R5's 90 cells put 9 and 8 within 0.8% of the best everywhere (10 lanes 0.992
 ///   overall, 11 and 12 about 1.02, 8 for both 1.026).
-/// - x86-64: 15 registers fit 2 lanes, which are bound by the chain (13 cycles per step
-///   with nodes in L2, against an issue bound near 4). A spilled lane costs uops, a
-///   store and a reload, but on Golden Cove and Zen 3 and later no chain latency, since
+/// - x86-64: 15 registers fit 2 lanes, which are bound by the chain (12.5 cycles per
+///   step with nodes in L2, against an issue bound near 3.3). A spilled lane costs uops,
+///   a store and a reload, but on Golden Cove and Zen 3 and later no chain latency, since
 ///   those cores forward a store to a load of the same address with zero latency. So
 ///   the lanes are the fewest powers of two that reach the issue bound
-///   ([`x86_issue_bound`]) with the spilled values' uops counted: 8, `26 × 6 = 156 <=
-///   8 × 24 + 2 × 10` (4 give 100). Without zero-latency forwarding a spilled lane's
-///   chain is about 31 cycles, and 8 lanes still step every 3.9 cycles against 4 lanes'
-///   6.5 to 7.75, so the choice does not depend on it. On Emerald Rapids, over R5's 90
-///   cells at both alignments, research lanes=4 took 0.793 of 2 lanes' time (lanes=1
-///   1.455); over 4 lanes, 5 to 8 lanes took 0.964, 0.936, 0.944 and 0.937. At 8:
-///   sessions 0.921, panels 0.93 to 0.94, what-ifs 0.972, grids 0.990, and the cells
-///   whose pools fit L1 0.98 to 1.00. Single rows are faster at 6 (0.841) than at 8
-///   (0.892), but 6 and 8 tie overall, and a power of two keeps the cursor advance one
-///   instruction on both walks.
+///   ([`x86_issue_bound`]) with the spilled values' uops counted: 8, `25 × 6 = 150 <=
+///   8 × 20 + 2 × 10` (4 give 84). Without zero-latency forwarding a spilled lane's
+///   chain is about 30 cycles, and 8 lanes still step every 3.75 cycles against 4
+///   lanes' 6.25 to 7.5, so the choice does not depend on it. On Emerald Rapids, with
+///   node indices, over R5's 90 cells at both alignments, research lanes=4 took 0.793
+///   of 2 lanes' time (lanes=1 1.455); over 4 lanes, 5 to 8 lanes took 0.964, 0.936,
+///   0.944 and 0.937. At 8: sessions 0.921, panels 0.93 to 0.94, what-ifs 0.972, grids
+///   0.990, and the cells whose pools fit L1 0.98 to 1.00. Single rows are faster at 6
+///   (0.841) than at 8 (0.892), but 6 and 8 tie overall, and a power of two keeps the
+///   cursor advance one instruction on both walks.
 ///
-/// With 29 registers (AArch64 on Apple; Linux's 30 fit the same):
+/// With 29 registers (AArch64 on Apple) and 30 (Linux):
 ///
 /// | Walk | invariants | temporaries | lanes that fit | lanes |
 /// |---|---|---|---|---|
 /// | varying | 7 | 4 | 9 | 9 |
-/// | constant | 5 | 5 | 9 | 8 (a power of two) |
+/// | constant | 5 | 5 | 9; 10 on Linux | 8 (a power of two) |
 ///
-/// On x86-64 (15 registers, 6 uops renamed per cycle, a chain of 26 cycles):
+/// On x86-64 (15 registers, 6 uops renamed per cycle, a chain of 25 cycles):
 ///
 /// | Walk | uops per step | lanes that fit | values spilled at 8 | lanes |
 /// |---|---|---|---|---|
-/// | varying | 24 | 2 | 11 | 8 (`156 <= 192 + 22`; 4 give 102) |
-/// | constant | 24 | 3 | 10 | 8 (`156 <= 192 + 20`; 4 give 100) |
+/// | varying | 20 | 2 | 11 | 8 (`150 <= 160 + 22`; 4 give 86) |
+/// | constant | 20 (21 counted) | 3 | 10 | 8 (`150 <= 160 + 20`; 4 give 84) |
+///
+/// The counts that changed with byte offsets and the one-flag select, 26 cycles to 25
+/// and 24 uops to 20, leave both walks at 8.
 ///
 /// Not capped by the items of a pass. A pass's last round leaves lanes on the dummy:
 /// with `n` items of similar length, `⌈n / k⌉ k − n` slots, on average `k / 2n` of
@@ -196,10 +204,54 @@ const fn parse(s: &str) -> usize {
 /// LightGBM single rows, while the XGBoost model's paths filled both alike). Choosing
 /// the lanes per model would compile every walk once per lane count.
 ///
-/// Open question: on Emerald Rapids, the varying walks over pools in L1 take about 20
-/// cycles per step at one lane (the counted walk), where the chain with its nodes in
-/// L1 is 15; walks over pools in L2 take about 19.5, between that and the 26 of
-/// [`X86_CHAIN_CYCLES`], as heavy children, the next 16 bytes, often hit L1.
+/// On Emerald Rapids the one-lane step is the documented chain: with node indices and a
+/// pool in L1, 16.1 cycles per step without the restart prefetch and 17.4 with forced
+/// lanes' prefetch, against 16 from uops.info's latencies (`shl` 1, the load 5, `shr`
+/// 1, the compare from memory 6, `cmova` 2, `cmovne` 1). The about 20 cycles per step
+/// the counted walk took at one lane, which no documented latency explained, came from
+/// its counting and that prefetch. Beyond one lane the lanes' steps contend for ports 0
+/// and 6, Golden Cove's only ports for shifts, `cmov`, `setcc` and branches, to which a
+/// uop is bound when it is allocated. A 4-lane round over a pool in L1 took 21.8 cycles
+/// against the 17.4-cycle chain, with 7.25 such uops per step, 5 of them on the chain,
+/// and the two ports busy 66% of cycles; at 2 MiB it took 23.1. With byte offsets and
+/// the one-flag select a step has 4.3 of them, and the round takes 16.7 cycles against
+/// a 14.0-cycle chain. Measured under the performance counters with a benchmark of
+/// these loops (instruction-identical with node indices; with byte offsets, the same
+/// steps with registers allocated differently), on pools whose splits take the heavy
+/// side as real models' do. So 4 lanes do not reach the issue bound there, and 8 stay
+/// right: over a pool in L1 a 4-lane slot and an 8-lane one cost about the same (4.17
+/// and 4.13 cycles), at 2 MiB 8 lanes cost 11% less (4.19 against 4.73).
+///
+/// The links are byte offsets on x86-64 and node indices elsewhere
+/// ([`crate::load::layout`], "Links"), as each instruction set addresses a 16-byte
+/// node. x86-64 scales an index register by at most 8, so a node's index took a `shl`
+/// on every step's chain, one of the port 0 and 6 uops above on Golden Cove, and the
+/// heavy select for `bin <= k`, `cmova`, reads two flags and takes 2 uops on Intel,
+/// where `cmovae` for `bin < k + 1` takes 1. AArch64 scales the index by 16 in the add
+/// of the node's address (`add x, nodes, w, uxtw #4`), and `csinc` selects the heavy
+/// child, the index plus 1, in one instruction; byte offsets cost it an `add` per lane
+/// step for the heavy child's offset, and on Apple a register: at 9 lanes the walk
+/// with varying stops kept a lane's cursor on the stack. Over 90 cells at the default
+/// alignment and with functions aligned to 64 bytes, the walks with byte offsets and
+/// the test `bin < k + 1` took, against node indices and `bin <= k`, 0.961 and 0.959
+/// of the time on Emerald Rapids, 0.962 and 0.958 on Ice Lake, 0.959 and 0.961 on
+/// Milan, 0.958 and 0.958 on Genoa and 0.960 and 0.965 on Turin, but 1.008 and 1.007
+/// on Axion (Neoverse V2) and 1.023 and 1.021 on Altra (Neoverse N1).
+///
+/// The x86-64 counts are Intel's. AMD's Zen 3, 4 and 5 count the same steps differently,
+/// which the rule does not model (AMD's software optimization guides for Zen 3, 56665
+/// rev. 3.00, Zen 4, 57647 rev. 1.00, and Zen 5, 58455 rev. 1.00, with their instruction
+/// tables):
+///
+/// - A memory operand with a base and an index register takes 2 macro ops, a load or a
+///   store as much as a load-op (56665 and 57647 section 2.3, 58455 appendix A). An
+///   8-lane round of the walk with varying stops over 8-byte items, 192 instructions at
+///   `znver4`, 64 of them addressed so, is about 248 macro ops.
+/// - On Zen 3 and 4 a shift by an immediate runs only on ALU1 and ALU2, and `cmov` and
+///   `setcc` only on ALU0 and ALU3: two ALUs each, where Golden Cove issues all three on
+///   ports 0 and 6.
+/// - On Zen 5 `prefetcht0` is microcoded, and `cmova` takes 2 macro ops where `cmovae`
+///   takes 1, as on Intel.
 pub(crate) const fn lanes(varying: bool) -> usize {
     if let Some(k) = FORCED_LANES {
         return k;

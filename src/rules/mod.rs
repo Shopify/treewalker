@@ -80,7 +80,7 @@ impl Tuning {
         let layout = &model.layout;
         let pool = size_of_val(layout.nodes.as_slice());
         // Prefix starts skip the grouped trees' shared splits.
-        let skipped = model.prefix.saved / model.tree_starts.len().max(1) as f64;
+        let skipped = model.prefix.saved / model.tree_roots.len().max(1) as f64;
         let (leaf, stop) = (model.steps.leaf - skipped, model.steps.stop - skipped);
         Self {
             chunk_bytes: chunk_budget(caches),

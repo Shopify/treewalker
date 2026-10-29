@@ -28,7 +28,7 @@ use super::scratch::{Common, Queues, Scratch, Sums, WIDE_ROWS, Width, Words, vie
 use super::walk::{self, MAX_PAD, Pools, Steps};
 use super::{Groups, WorkCounters};
 use crate::exact::{self, Plan, WIDE_SUMS, WideRuns};
-use crate::load::layout::LeafValues;
+use crate::load::layout::{LINK_STRIDE, LeafValues, node_index};
 use crate::model::Model;
 
 /// The kernel's runtime choices; production uses [`Options::default`].
@@ -254,15 +254,17 @@ impl Model {
                 counters.prefix_steps += (bail + 1).min(k) as u64;
             }
             let trees = group.first as usize..group.end as usize;
-            let (roots, starts) = (&mut c.roots[trees.clone()], &self.tree_starts[trees]);
+            let (roots, starts) = (&mut c.roots[trees.clone()], &self.tree_roots[trees]);
             if bail == k {
-                // Every tree's rows follow the whole prefix: a vector add.
+                // Every tree's rows follow the whole prefix, k heavy children on: a
+                // vector add.
+                let ahead = k as u32 * LINK_STRIDE;
                 for (root, &start) in roots.iter_mut().zip(starts) {
-                    *root = start + k as u32;
+                    *root = start + ahead;
                 }
             } else {
                 for (root, &start) in roots.iter_mut().zip(starts) {
-                    *root = layout.nodes[start as usize + bail].child();
+                    *root = layout.nodes[node_index(start) + bail].child();
                 }
             }
         }

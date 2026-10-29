@@ -31,7 +31,7 @@ use super::mask::{Mask, Wide};
 use super::scan::Scan;
 use super::walk::Item;
 use crate::exact::RunSink;
-use crate::load::layout::{FLAG_LEAF, MASK_FIELD, MASK_SHIFT};
+use crate::load::layout::{FLAG_LEAF, LINK_STRIDE, MASK_FIELD, MASK_SHIFT};
 
 /// How an item carries its rows: the mask itself when it fits a register, or a
 /// handle into the group's mask arena.
@@ -573,7 +573,7 @@ pub(super) unsafe fn resolve<
                 let (heavy, light, has_heavy, has_light) = split_of!(w1, carry, is_leaf);
                 let (pass_heavy, pass_light) = (has_heavy | EMPTY, has_light | EMPTY);
                 *out = Item {
-                    node: node + 1,
+                    node: node + LINK_STRIDE,
                     carry: heavy,
                 };
                 out = out.add(usize::from(is_varying & pass_heavy));
@@ -601,7 +601,7 @@ pub(super) unsafe fn resolve<
             let node = *pass.stops.add(j);
             let (heavy, light, has_heavy, has_light) = split_of!(w1, carry, is_leaf);
             *pass.out.add(n) = Item {
-                node: node + 1,
+                node: node + LINK_STRIDE,
                 carry: heavy,
             };
             let (pass_heavy, pass_light) = (has_heavy | EMPTY, has_light | EMPTY);
@@ -689,7 +689,7 @@ unsafe fn resolve_listed<
                 split!(*at as usize => w1, node, heavy, light, has_heavy, has_light);
                 at = at.add(1);
                 *out = Item {
-                    node: node + 1,
+                    node: node + LINK_STRIDE,
                     carry: heavy,
                 };
                 out = out.add(usize::from(has_heavy | EMPTY));
@@ -708,7 +708,7 @@ unsafe fn resolve_listed<
         for i in 0..listed {
             split!(*pass.listed.add(i) as usize => w1, node, heavy, light, has_heavy, has_light);
             *pass.out.add(n) = Item {
-                node: node + 1,
+                node: node + LINK_STRIDE,
                 carry: heavy,
             };
             n += usize::from(has_heavy | EMPTY);

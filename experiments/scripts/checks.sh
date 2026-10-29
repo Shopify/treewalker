@@ -85,11 +85,17 @@ lane_python() {
   step 30 mypy "$PY" -m mypy
 }
 
-# miri N KIND CPU TARGET FLAGS: the lib's prefetching_walks (KIND lib) or tests/miri.rs
-# (KIND test) under Miri, in its own target directory.
+# The layout's tests of x86-64's node encoding, byte-offset links and the bounds k + 1,
+# which an AArch64 machine's native tests do not take.
+X86_LAYOUT="load::layout::tests::split_bounds load::layout::tests::heavy_right_splits
+  load::layout::tests::signed_zero load::layout::tests::nested_heavy"
+
+# miri N KIND CPU TARGET FLAGS: the lib's prefetching_walks (KIND lib), with X86_LAYOUT at
+# x86-64, or tests/miri.rs (KIND test) under Miri, in its own target directory.
 miri() {
   local n=$1 kind=$2 cpu=$3 target=$4 flags=$5 sel
   if [ "$kind" = lib ]; then sel="--lib -- prefetching_walks"; else sel="--test miri"; fi
+  if [ "$kind $cpu" = "lib x86-64" ]; then sel="$sel $X86_LAYOUT"; fi
   step "$n" "miri $kind $cpu" env CARGO_TARGET_DIR="$OUT/miri-$kind-$cpu" \
     RUSTFLAGS="$flags" cargo +nightly miri test --target "$target" $sel
 }

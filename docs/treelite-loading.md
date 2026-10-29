@@ -232,7 +232,7 @@ Nothing else has a fixed limit. What bounds the representation:
 | Resource | Bound |
 |---|---|
 | Features | `i32::MAX`, Treelite's `num_feature`; feature roles take memory in proportion to the declared indices |
-| Trees, total nodes | below 2^32 − 1 nodes in all: 32-bit node indices, with the layout's dummy node |
+| Trees, total nodes | at most 2^28 − 2 nodes in all (268,435,454) on every target: with the layout's dummy node, a node pool below 4 GiB, which x86-64's walks address by 32-bit byte offsets; other targets use node indices and take the same bound, so that a model loads alike everywhere |
 | Nodes per tree, depth | the tree's input and the node total; every pass over a tree is iterative |
 | Category IDs | any `u32`: each categorical feature's splits share a codebook of the categories they name, and rank tables cover its codes, not the IDs |
 | Category-list entries | the binary `category_list` array; segments must not overlap, so decoding is linear in it |

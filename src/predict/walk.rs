@@ -15,7 +15,9 @@
 use std::hint::select_unpredictable;
 
 use super::isa::Isa;
-use crate::load::layout::{FLAG_LEAF, LayoutNode, SLOT_SHIFT, STOPS_VARYING};
+use crate::load::layout::{
+    FLAG_LEAF, LINK_STRIDE, LayoutNode, SLOT_SHIFT, STOPS_VARYING, node_at, takes_heavy,
+};
 
 pub(super) use crate::rules::{MAX_DISTANCE, MAX_LANES};
 
@@ -23,12 +25,13 @@ pub(super) use crate::rules::{MAX_DISTANCE, MAX_LANES};
 /// the items, stops and words without extending it, where a `u32` cursor takes a
 /// zero-extended copy for each address (x86-64 has no extending address mode), and
 /// spills more at 8 lanes. Instructions per round of 8 lane steps, `usize` against
-/// `u32` cursors, on emeraldrapids (x86-64-v4), rustc 1.97.1: the walk without varying
-/// stops 180 against 190 at distance 0 (180, 190) and 202 against 219 at distance
-/// 1 or more (213, 223); the walks with varying stops over 8-byte items 187 against
-/// 196 (187, 194) and 216 against 232 (218, 230), over 16-byte items 200 against 211
-/// (201, 211) and 236 against 237 (235, 238). Elsewhere a `u32`, which AArch64's
-/// addressing extends for free (`uxtw`) and the M4's pass loop keeps narrow.
+/// `u32` cursors, on emeraldrapids (x86-64-v4), rustc 1.97.1, with node indices rather
+/// than byte offsets ([`Item`]): the walk without varying stops 180 against 190 at
+/// distance 0 (180, 190) and 202 against 219 at distance 1 or more (213, 223); the
+/// walks with varying stops over 8-byte items 187 against 196 (187, 194) and 216
+/// against 232 (218, 230), over 16-byte items 200 against 211 (201, 211) and 236
+/// against 237 (235, 238). Elsewhere a `u32`, which AArch64's addressing extends for
+/// free (`uxtw`) and the M4's pass loop keeps narrow.
 #[cfg(target_arch = "x86_64")]
 type Cursor = usize;
 #[cfg(not(target_arch = "x86_64"))]
@@ -60,7 +63,8 @@ pub(super) const fn lanes_of(k: usize, varying: bool) -> usize {
     }
 }
 
-/// A walk item: a node and the rows that reach it.
+/// A walk item: a node, as its link ([`crate::load::layout`]), and the rows that
+/// reach it.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Item<C> {
@@ -68,8 +72,8 @@ pub(super) struct Item<C> {
     pub(super) carry: C,
 }
 
-/// What a walk reads of its items: their nodes. A pass without varying stops walks
-/// the trees' roots in place, as bare nodes.
+/// What a walk reads of its items: their nodes' links. A pass without varying stops
+/// walks the trees' roots in place, as bare links.
 pub(super) trait Start: Copy {
     fn node(self) -> u32;
 }
@@ -88,7 +92,8 @@ impl Start for u32 {
     }
 }
 
-/// What a pass reads of the model.
+/// What a pass reads of the model: the node pool, which links address, the bins and
+/// the dummy's link.
 #[derive(Clone, Copy)]
 pub(super) struct Pools {
     pub(super) nodes: *const LayoutNode,
@@ -96,22 +101,23 @@ pub(super) struct Pools {
     pub(super) dummy: u32,
 }
 
-/// One lane's step: the next node, whether the lane stopped at `index`, and the
-/// node's word 1. Every split is `bin <= k` on word 0's low 32 bits, so the slot
-/// above them costs no masking.
+/// One lane's step: the next node's link, from the node at `link`, and the node's
+/// word 1. Every split tests its bin against its bound on word 0's low 32 bits, so
+/// the slot above them costs no masking: on x86-64 `bin < k + 1`, whose heavy select
+/// reads one flag ([`crate::load::layout`]).
 ///
 /// # Safety
 ///
-/// `index` is a node of the pool, and its slot a bin.
+/// `link` is a node's of the pool, and its slot a bin.
 #[inline(always)]
-unsafe fn step(p: &Pools, index: u32) -> (u32, u64) {
-    // SAFETY: the caller guarantees index and its slot are in range.
+unsafe fn step(p: &Pools, link: u32) -> (u32, u64) {
+    // SAFETY: the caller guarantees link and its slot are in range.
     unsafe {
-        let node = *p.nodes.add(index as usize);
+        let node = *node_at(p.nodes, link);
         let x = *p.bins.add((node.w0 >> SLOT_SHIFT) as usize);
-        let heavy = x <= node.w0 as u32;
+        let heavy = takes_heavy(x, node.w0 as u32);
         (
-            select_unpredictable(heavy, index + 1, node.w1 as u32),
+            select_unpredictable(heavy, link + LINK_STRIDE, node.w1 as u32),
             node.w1,
         )
     }
@@ -224,19 +230,19 @@ pub(super) unsafe fn walk_at<
 /// lane through the step. At a lane count that reaches the issue bound
 /// ([`crate::rules::lanes`]) the chain does not bind, and an early load is worth only
 /// the difference in instructions. At x86-64's 8 lanes (instructions per round of 8
-/// lane steps, emeraldrapids, rustc 1.97.1) it saved 3% on the walk without varying
-/// stops at distance 0 and at prefetch rates 2 and 4 (180 → 174, 397 → 385) and lost
-/// 2% at distance 1 or more, rate 1 (202 → 207; on x86-64-v4 it saved 7%, 213 → 198);
-/// it cost 1% on the walks with varying stops over 8-byte items at distance 1 or more
-/// (216 → 219), and 7–16% on those at distance 0 (187 → 217 over 8-byte items, 200 →
-/// 232 over 16-byte items) and over 16-byte items at any distance (236 → 252).
-/// On Emerald Rapids the walks with it ran in 0.985 and 0.983 of the time without it
-/// (and `u32` cursors) at the two alignments, but 6 cells were slower at both, exactly
-/// those that walk the instantiations it lengthens (the 64-row panels by 2.5–5.2%,
-/// their instructions per group up 3.4–3.8% and their IPC unchanged), and the gains
-/// came mostly from the `usize` cursors ([`Cursor`]). On the M4, whose 8 or 9 lanes
-/// keep the walk bound by throughput as well, it cost 1 or 2 instructions per lane
-/// step and spilled the varying walks' lanes.
+/// lane steps, emeraldrapids, rustc 1.97.1, with node indices) it saved 3% on the
+/// walk without varying stops at distance 0 and at prefetch rates 2 and 4 (180 → 174,
+/// 397 → 385) and lost 2% at distance 1 or more, rate 1 (202 → 207; on x86-64-v4 it
+/// saved 7%, 213 → 198); it cost 1% on the walks with varying stops over 8-byte items
+/// at distance 1 or more (216 → 219), and 7–16% on those at distance 0 (187 → 217
+/// over 8-byte items, 200 → 232 over 16-byte items) and over 16-byte items at any
+/// distance (236 → 252). On Emerald Rapids the walks with it ran in 0.985 and 0.983 of
+/// the time without it (and `u32` cursors) at the two alignments, but 6 cells were
+/// slower at both, exactly those that walk the instantiations it lengthens (the
+/// 64-row panels by 2.5–5.2%, their instructions per group up 3.4–3.8% and their IPC
+/// unchanged), and the gains came mostly from the `usize` cursors ([`Cursor`]). On
+/// the M4, whose 8 or 9 lanes keep the walk bound by throughput as well, it cost 1 or
+/// 2 instructions per lane step and spilled the varying walks' lanes.
 ///
 /// # Safety
 ///
@@ -290,11 +296,7 @@ pub(super) unsafe fn walk<
                 // The lane's next item, taken if it stops here.
                 let item = (*items.add(at(cursor))).node();
                 if D > 0 && ahead {
-                    prefetch(
-                        p.nodes
-                            .add((*items.add(at(cursor) + D * k)).node() as usize)
-                            .cast(),
-                    );
+                    prefetch(node_at(p.nodes, (*items.add(at(cursor) + D * k)).node()).cast());
                 }
                 *c = cursor;
                 *i = select_unpredictable(stop, item, next);

@@ -245,8 +245,8 @@ impl Scratch {
         let dummy = layout.dummy();
         let chunk_bytes = tuning.chunk_bytes;
 
-        let mut roots = model.tree_starts.clone();
-        roots.resize(model.tree_starts.len() + MAX_PAD, dummy);
+        let mut roots = model.tree_roots.clone();
+        roots.resize(model.tree_roots.len() + MAX_PAD, dummy);
 
         let needs = &model.needs;
         // Chunks of consecutive trees within the budget at each width class, less the
@@ -269,7 +269,7 @@ impl Scratch {
                 .max()
                 .unwrap_or(0)
         };
-        let constant = constant_chunks(model.tree_starts.len(), chunk_bytes);
+        let constant = constant_chunks(model.tree_roots.len(), chunk_bytes);
         let constant_leaves = constant.iter().map(|c| c.leaves).max().unwrap_or(0);
         let constant_roots = if constant.len() > 1 {
             vec![dummy; constant_leaves + MAX_PAD]

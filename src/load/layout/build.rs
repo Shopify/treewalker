@@ -10,14 +10,15 @@
 
 use super::chains::{self, Sets};
 use super::{
-    BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, FIRST_CATEGORY, FLAG_LEAF,
-    FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT, MAX_PREDICATES, MAX_SLOTS, MISSING,
-    Need, SLOT_SHIFT,
+    BOUND_BIAS, BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, FIRST_CATEGORY,
+    FLAG_LEAF, FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT, MAX_PREDICATES, MAX_SLOTS,
+    MISSING, Need, SLOT_SHIFT, node_link,
 };
 use crate::LoadError;
 use crate::config::WalkerConfig;
 use crate::exact::Plan;
 use crate::load::parse::decoded::{LayoutSource, Packed, Split, TreeNodes};
+use crate::load::parse::tree::check_node_total;
 use crate::load::predicates::PredicateIds;
 use crate::model::{FLAG_CATEGORICAL, FLAG_VARYING, ThresholdType, category_list};
 use crate::rules::{ItemLengths, StepSums, Steps};
@@ -201,10 +202,11 @@ fn chain_slots(
     };
     let cover = chains::cover(&sets, f.max_bytes - set_bytes)?;
 
-    // Each split side's chain slot and position.
+    // Each split side's chain slot and position, as its bound.
     for (&(s, side), &i) in owners.iter().zip(&set_of) {
         let (chain, k) = cover.at[i as usize];
-        words[s as usize][side] = u64::from(k) | ((f.slot as u64 + u64::from(chain)) << SLOT_SHIFT);
+        words[s as usize][side] =
+            u64::from(k + BOUND_BIAS) | ((f.slot as u64 + u64::from(chain)) << SLOT_SHIFT);
     }
 
     // A chain's listed sets come first, as a complement, which holds no category, is
@@ -289,13 +291,11 @@ impl Layout {
                 "{n_predicates} varying predicates exceed {MAX_PREDICATES}"
             )));
         }
-        // Children, leaf indices and the dummy's index are 32-bit, and the dummy's
-        // heavy child, one past it, too.
+        // At most MAX_NODES with the dummy, on every target, which the decoders
+        // checked as they appended trees.
         let total = source.nodes.len();
-        let dummy = u32::try_from(total)
-            .ok()
-            .filter(|&d| d < u32::MAX)
-            .ok_or_else(|| LoadError::Limit(format!("{total} nodes exceed u32")))?;
+        check_node_total(total, 0)?;
+        let dummy = node_link(total);
         let mut words = vec![[0u64; 2]; source.splits.len()];
         let (bins, chain_sets) = bin_map(input, &source.splits, &mut words)?;
         Ok(encode_trees(input, source, &words, dummy, bins, chain_sets))
@@ -399,9 +399,11 @@ fn bin_map(
             debug_assert!(t[k] <= split.value, "threshold is in its feature's bins");
             let left = (numeric as u64 + right) << SLOT_SHIFT;
             let inverted = (numeric as u64 + 2 + right) << SLOT_SHIFT;
+            // The bounds of `bin <= k` and, inverted, of `u32::MAX - bin <= u32::MAX -
+            // 1 - k` for `bin > k`.
             words[s as usize] = [
-                k as u64 | left,
-                u64::from(u32::MAX - 1 - k as u32) | inverted,
+                (k as u64 + u64::from(BOUND_BIAS)) | left,
+                u64::from(u32::MAX - 1 - k as u32 + BOUND_BIAS) | inverted,
             ];
         }
         let b = FeatureBins {
@@ -443,9 +445,9 @@ fn bin_map(
     Ok((bins, chain_sets))
 }
 
-/// The trees' layout nodes, in tree order, from the words of `bin_map`: each tree's
-/// nodes rewritten in place, its leaf values in the model's exact-sum [`Plan`], its
-/// expected steps and its scratch needs.
+/// The trees' layout nodes, in tree order, from the words of `bin_map`, and the dummy
+/// at link `dummy`: each tree's nodes rewritten in place, its leaf values in the
+/// model's exact-sum [`Plan`], its expected steps and its scratch needs.
 fn encode_trees(
     input: &Input<'_>,
     source: LayoutSource,
@@ -583,13 +585,15 @@ fn encode_trees(
             if split.flags & VARYING_CATEGORICAL == VARYING_CATEGORICAL {
                 points[id as usize] = ChainPoint {
                     slot: (w0 >> SLOT_SHIFT) as u32,
-                    k: w0 as u32,
+                    // Word 0 holds the bound.
+                    k: w0 as u32 - BOUND_BIAS,
                     invert: !heavy_left,
                 };
             }
             nodes[at] = LayoutNode {
                 w0,
-                w1: (start as u64 + u64::from(kinds.light[local as usize])) | mask << MASK_SHIFT,
+                w1: u64::from(node_link(start + kinds.light[local as usize] as usize))
+                    | mask << MASK_SHIFT,
             };
             #[cfg(any(test, feature = "research"))]
             {
@@ -615,7 +619,7 @@ fn encode_trees(
         !matches!(predicates, PredicateIds::ByNode(ids) if ids.len() != next_predicate),
         "the nodes take every predicate assigned by node"
     );
-    debug_assert_eq!(nodes.len(), dummy as usize);
+    debug_assert_eq!(node_link(nodes.len()), dummy);
     // The decoders leave room for it.
     debug_assert!(nodes.capacity() > nodes.len());
     nodes.push(LayoutNode::dummy(dummy));
