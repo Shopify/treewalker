@@ -2,9 +2,10 @@
 //! walks ([`Walks`]): the lanes and prefetch distance each walk is compiled for.
 
 use super::counters::{Clock, Stats};
+use super::isa::Isa;
 use super::kernel::Options;
 use super::mask::Mask;
-use super::resolve::{COMPRESS, Carrier, LISTED_SLACK, Resolve, Splits};
+use super::resolve::{Carrier, LISTED_SLACK, Resolve, Splits, compress};
 use super::scan::Scan;
 use super::scratch::Queues;
 use super::walk::{self, Item, MAX_PAD, Pools, Steps, lanes_of, pad};
@@ -49,7 +50,15 @@ impl Walks {
     /// items.
     pub(super) fn for_pass<const ABLATE: bool>(self, n: usize, varying: bool) -> (Self, usize) {
         let forced = if ABLATE { self.lanes } else { None };
-        let lanes = lanes_of(forced.unwrap_or(0), varying);
+        // The rule's lanes, evaluated at compile time. Called at run time, the const fn
+        // is left to LLVM, which did not fold it at x86-64's dispatched base level:
+        // there the rule's loop ran every pass, and `pass_distance` divided by a lane
+        // count it could not see.
+        let lanes = match forced.unwrap_or(0) {
+            0 if varying => const { lanes_of(0, true) },
+            0 => const { lanes_of(0, false) },
+            k => k,
+        };
         let wanted = match forced {
             Some(_) => self.distance.min(1),
             None => self.distance,
@@ -124,6 +133,58 @@ pub(super) struct Pass<'a, M> {
 }
 
 impl<M: Mask> Pass<'_, M> {
+    /// [`Self::run`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::run`].
+    #[cfg_attr(not(dispatch), inline(always))]
+    #[cfg_attr(dispatch, inline(never))]
+    pub(super) unsafe fn run_at<
+        X: Isa,
+        C: Carrier<M>,
+        const STATS: bool,
+        const ABLATE: bool,
+        const SCAN: bool,
+        const EMPTY: bool,
+    >(
+        &mut self,
+        walks: Walks,
+        arena: &mut [M],
+        queues: &mut Queues<C>,
+        stops: &mut [u32],
+        words: &mut [u64],
+        scan: &mut impl Scan<M>,
+    ) -> (usize, usize) {
+        if X::NATIVE {
+            // SAFETY: the caller's, which `run` shares.
+            return unsafe {
+                self.run::<X, C, STATS, ABLATE, SCAN, EMPTY>(
+                    walks, arena, queues, stops, words, scan,
+                )
+            };
+        }
+        X::with7(
+            #[inline(always)]
+            |pass: &mut Self, walks, arena, queues, stops, words, scan| {
+                // SAFETY: as above.
+                unsafe {
+                    pass.run::<X, C, STATS, ABLATE, SCAN, EMPTY>(
+                        walks, arena, queues, stops, words, scan,
+                    )
+                }
+            },
+            self,
+            walks,
+            arena,
+            queues,
+            stops,
+            words,
+            scan,
+        )
+    }
+
     /// Every walk and resolve pass of the chunk; returns the number of leaf entries in
     /// `q.leaves` and how many of them, first, the first pass wrote. With `SCAN`,
     /// varying events scan their rows with `scan` instead of reading the precomputed
@@ -134,8 +195,10 @@ impl<M: Mask> Pass<'_, M> {
     /// The scratch holds the chunk as [`Model::masked_group`](crate::model::Model::masked_group) asserts, `masks` the all-rows
     /// mask and every predicate's left and right masks, `scratch` a mask, and `p` is
     /// valid for [`walk::walk`].
-    #[inline(never)]
+    #[cfg_attr(dispatch, inline(always))]
+    #[cfg_attr(not(dispatch), inline(never))]
     pub(super) unsafe fn run<
+        X: Isa,
         C: Carrier<M>,
         const STATS: bool,
         const ABLATE: bool,
@@ -155,7 +218,7 @@ impl<M: Mask> Pass<'_, M> {
         // past the last leaf entry and position: the scratch gives both that many more
         // than the chunk's leaves plus one, which the items' length bounds with the most
         // padding (`Model::masked_group` asserts it).
-        if C::ARENA && !C::RUNTIME && COMPRESS {
+        if C::ARENA && !C::RUNTIME && compress::<X>() {
             let room = queues.items.len() - MAX_PAD + LISTED_SLACK;
             assert!(
                 queues.leaves.len() >= room && queues.listed.len() >= room,
@@ -204,7 +267,8 @@ impl<M: Mask> Pass<'_, M> {
                 // The walk with varying stops prefetches every round
                 // (`rules::RATES`): a rate of 1 here leaves one walk per distance.
                 let walks = Walks { rate: 1, ..walks };
-                walk_with!(ABLATE, walks, |K, D, R| walk::walk::<
+                walk_with!(ABLATE, walks, |K, D, R| walk::walk_at::<
+                    X,
                     Item<C>,
                     K,
                     true,
@@ -219,7 +283,7 @@ impl<M: Mask> Pass<'_, M> {
                 res.out = next;
                 let leaves_before = res.n_leaves;
                 let items_in_pass = n;
-                n = super::resolve::resolve::<M, C, SCAN, EMPTY, STATS>(
+                n = super::resolve::resolve::<X, M, C, SCAN, EMPTY, STATS>(
                     &mut res,
                     items_in_pass,
                     scan,

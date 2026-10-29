@@ -64,6 +64,14 @@ impl Forest {
 }
 
 impl ResearchPredictor {
+    /// The instruction-set level the kernel runs at: on x86-64 builds without AVX2 and
+    /// FMA, `base`, `v3` or `v4`, the highest the CPU has unless `TREEWALKER_ISA` asks for
+    /// a lower one; in other builds `native`, the build's own and only level.
+    #[must_use]
+    pub const fn isa(&self) -> &'static str {
+        self.inner.level.name()
+    }
+
     /// The runtime ablation every call runs with.
     #[must_use]
     pub const fn ablation(&self) -> Ablation {

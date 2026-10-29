@@ -4,6 +4,7 @@ use super::ops::{WordMaps, add_wide_runs};
 use super::rows::{self, Unit};
 use super::{Mask, Wide, scalar};
 use crate::exact::RunSink;
+use crate::predict::isa::Native;
 use crate::rng::Rng;
 
 /// Group sizes at and around every word and width boundary.
@@ -60,10 +61,10 @@ macro_rules! impl_words {
                 w
             }
             fn from_words(w: &[u64; 16]) -> Self {
-                Self(w[..$w].try_into().unwrap())
+                Self::new(w[..$w].try_into().unwrap())
             }
             fn add_runs_reference<S: RunSink + ?Sized>(&self, v: S::Value, sink: &mut S) {
-                add_wide_runs::<$w, scalar::Maps, S>(&self.0, v, sink);
+                add_wide_runs::<$w, scalar::Maps<Native>, S>(&self.0, v, sink);
             }
             fn check_maps(&self) {
                 check_maps::<$w>(&self.0);
@@ -125,7 +126,7 @@ fn random(rng: &mut Rng, n: usize) -> [u64; 16] {
             set_range(&mut w, start, end);
         }
     }
-    scalar::and(&w, &rows(n))
+    scalar::and::<Native, _>(&w, &rows(n))
 }
 
 /// Fixed masks over rows `0..n`: empty, full, single rows at both ends and at word
@@ -140,7 +141,7 @@ fn fixed(n: usize) -> Vec<[u64; 16]> {
         let mut one = [0; 16];
         set_range(&mut one, r, r + 1);
         out.push(one);
-        out.push(scalar::xor(&rows(n), &one));
+        out.push(scalar::xor::<Native, _>(&rows(n), &one));
     }
     let mut ends = [0; 16];
     set_range(&mut ends, 0, 1);
@@ -243,8 +244,8 @@ fn check_runs<M: Words>(m: M, n: usize, v: i64) {
 /// The vector nonzero-word map of `w` against the reference's, word by word: each
 /// word's `stride` bits all set or all clear, and no bits past the last word.
 fn check_maps<const W: usize>(w: &[u64; W]) {
-    type Fast = super::simd::Maps;
-    type Reference = scalar::Maps;
+    type Fast = super::simd::Maps<Native>;
+    type Reference = scalar::Maps<Native>;
     let stride = Fast::stride::<W>();
     assert!(stride >= 1 && stride as usize * W <= 64);
     let group = u64::MAX >> (64 - stride);
@@ -262,16 +263,19 @@ fn check_maps<const W: usize>(w: &[u64; W]) {
 fn check_pair<M: Words>(a: [u64; 16], b: [u64; 16], n: usize, rng: &mut Rng) {
     let (ma, mb) = (M::from_words(&a), M::from_words(&b));
     assert_eq!(ma.words(), a);
-    assert_eq!(ma.and(mb).words(), scalar::and(&a, &b));
-    assert_eq!(ma.and_not(mb).words(), scalar::and_not(&a, &b));
-    assert_eq!(ma.or(mb).words(), scalar::or(&a, &b));
-    assert_eq!(ma.xor(mb).words(), scalar::xor(&a, &b));
-    assert_eq!(ma.is_zero(), scalar::is_zero(&a));
-    assert_eq!(ma.popcount(), scalar::popcount(&a));
+    assert_eq!(ma.and(mb).words(), scalar::and::<Native, _>(&a, &b));
+    assert_eq!(ma.and_not(mb).words(), scalar::and_not::<Native, _>(&a, &b));
+    assert_eq!(ma.or(mb).words(), scalar::or::<Native, _>(&a, &b));
+    assert_eq!(ma.xor(mb).words(), scalar::xor::<Native, _>(&a, &b));
+    assert_eq!(ma.is_zero(), scalar::is_zero::<Native, _>(&a));
+    assert_eq!(ma.popcount(), scalar::popcount::<Native, _>(&a));
     assert_eq!(ma == mb, a == b);
     assert_eq!(ma, M::from_words(&a));
     for c in [false, true] {
-        assert_eq!(M::select(c, ma, mb).words(), scalar::select(c, &a, &b));
+        assert_eq!(
+            M::select(c, ma, mb).words(),
+            scalar::select::<Native, _>(c, &a, &b)
+        );
     }
     if n > 0 {
         let r = rng.below_mod(n);
@@ -379,15 +383,15 @@ fn mask_1024() {
 fn scalar_reference() {
     let a = [0b1100, u64::MAX];
     let b = [0b1010, 1];
-    assert_eq!(scalar::and(&a, &b), [0b1000, 1]);
-    assert_eq!(scalar::and_not(&a, &b), [0b0100, u64::MAX - 1]);
-    assert_eq!(scalar::or(&a, &b), [0b1110, u64::MAX]);
-    assert_eq!(scalar::xor(&a, &b), [0b0110, u64::MAX - 1]);
-    assert_eq!(scalar::popcount(&a), 66);
-    assert!(scalar::is_zero(&[0u64; 4]));
-    assert!(!scalar::is_zero(&[0, 0, 0, 1 << 63]));
-    assert_eq!(scalar::select(true, &a, &b), a);
-    assert_eq!(scalar::select(false, &a, &b), b);
+    assert_eq!(scalar::and::<Native, _>(&a, &b), [0b1000, 1]);
+    assert_eq!(scalar::and_not::<Native, _>(&a, &b), [0b0100, u64::MAX - 1]);
+    assert_eq!(scalar::or::<Native, _>(&a, &b), [0b1110, u64::MAX]);
+    assert_eq!(scalar::xor::<Native, _>(&a, &b), [0b0110, u64::MAX - 1]);
+    assert_eq!(scalar::popcount::<Native, _>(&a), 66);
+    assert!(scalar::is_zero::<Native, _>(&[0u64; 4]));
+    assert!(!scalar::is_zero::<Native, _>(&[0, 0, 0, 1 << 63]));
+    assert_eq!(scalar::select::<Native, _>(true, &a, &b), a);
+    assert_eq!(scalar::select::<Native, _>(false, &a, &b), b);
 }
 
 #[test]
@@ -443,7 +447,7 @@ fn empty_mask_needs_no_entries() {
 /// A random runtime-width mask over rows `0..n` in `units(n)` units: random bits of a
 /// random density, runs of short to long lengths, or one run.
 fn random_rows(rng: &mut Rng, n: usize) -> Vec<Unit> {
-    let mut m = vec![Unit::ZERO; rows::units(n)];
+    let mut m = vec![<Unit>::ZERO; rows::units(n)];
     let w = rows::words_mut(&mut m);
     let set = |w: &mut [u64], start: usize, end: usize| {
         for r in start..end {
@@ -517,7 +521,7 @@ fn runtime_width() {
     for &n in sizes {
         let u = rows::units(n);
         assert_eq!(u, n.div_ceil(128));
-        let mut all = vec![Unit::ZERO; u];
+        let mut all = vec![<Unit>::ZERO; u];
         rows::first(&mut all, n);
         assert!(
             (0..128 * u).all(|r| row_bit(&all, r) == (r < n)),
@@ -534,7 +538,7 @@ fn runtime_width() {
             // The split, to separate slots and with the heavy side over the rows, of the
             // whole mask and of its span alone, with junk in the units outside it.
             let span = span_of(&a);
-            let (mut heavy, mut light) = (vec![Unit::ZERO; u], vec![Unit::ZERO; u]);
+            let (mut heavy, mut light) = (vec![<Unit>::ZERO; u], vec![<Unit>::ZERO; u]);
             // SAFETY: each buffer holds u units, and none overlap.
             let (hs, ls) = unsafe {
                 rows::split(
@@ -559,7 +563,7 @@ fn runtime_width() {
                     }
                 }
             };
-            let (mut in_place, mut light2) = (a.clone(), vec![Unit::ZERO; u]);
+            let (mut in_place, mut light2) = (a.clone(), vec![<Unit>::ZERO; u]);
             junk(&mut in_place);
             junk(&mut light2);
             let p = in_place.as_mut_ptr();
@@ -631,7 +635,10 @@ fn span_tracker() {
                 ]
             })
             .collect();
-        let (mut fast, mut reference) = (super::simd::Spans::new(start), scalar::Spans::new(start));
+        let (mut fast, mut reference) = (
+            super::simd::Spans::<Native>::new(start),
+            scalar::Spans::<Native>::new(start),
+        );
         for [a, b] in &units {
             fast.add(a, b);
             reference.add(a, b);
@@ -661,7 +668,7 @@ fn span_tracker() {
 #[test]
 #[should_panic(expected = "a run ends past the sink")]
 fn runtime_width_run_past_sink() {
-    let mut m = vec![Unit::ZERO; rows::units(1500)];
+    let mut m = vec![<Unit>::ZERO; rows::units(1500)];
     rows::first(&mut m, 1500);
     let s = rows::Span::first(1500);
     let mut diff = vec![0i128; 1500];

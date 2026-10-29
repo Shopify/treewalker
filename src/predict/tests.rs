@@ -23,7 +23,7 @@ use groups::{Role, config, group, offsets};
 use model::{Precision, Settings};
 use rng::Rng;
 
-use super::{Groups, Options, Predictor, Workspace};
+use super::{Groups, Level, Options, Predictor, Stats, Workspace};
 use crate::config::Choices;
 use crate::rules::{Prefix, Tuning};
 use crate::{Forest, LoadOptions, ModelFormat, WalkerConfig};
@@ -113,6 +113,7 @@ fn predictor(forest: &Forest, chunk_bytes: Option<usize>) -> Predictor {
     Predictor {
         workspace: Workspace::with_tuning(&forest.model, tuning),
         model: std::sync::Arc::clone(&forest.model),
+        level: super::level(),
     }
 }
 
@@ -125,6 +126,28 @@ fn kernel(c: &Case, chunk_bytes: Option<usize>, options: Options) -> Vec<f64> {
     p.check(&c.data, out.len(), groups);
     p.kernel::<false, true>(&c.data, &mut out, groups, options, None, true);
     out
+}
+
+/// The production kernel's outputs at `level`, and its counted ones (which also run the
+/// ablation's instantiations) with `options`.
+fn at_level(c: &Case, level: Level, options: Options) -> [Vec<f64>; 2] {
+    let mut p = predictor(&c.forest, None);
+    p.level = level;
+    let n = c.data.len() / c.forest.config().n_features();
+    let groups = Groups::Offsets(&c.offsets);
+    p.check(&c.data, n, groups);
+    let (mut out, mut counted) = (vec![f64::NAN; n], vec![f64::NAN; n]);
+    p.kernel::<false, false>(&c.data, &mut out, groups, Options::default(), None, true);
+    let mut stats = Stats::default();
+    p.kernel::<true, true>(
+        &c.data,
+        &mut counted,
+        groups,
+        options,
+        Some(&mut stats),
+        true,
+    );
+    [out, counted]
 }
 
 #[test]
@@ -200,6 +223,33 @@ fn outputs_do_not_depend_on_how_the_kernel_runs() {
         }
         for chunk in [1, 1_500, 40_000] {
             check(kernel(&c, Some(chunk), default), "chunks");
+        }
+    }
+}
+
+/// Every level this CPU has gives the same bits as the build's own: the levels change
+/// instructions, not operations (software `fma` rounds as FMA does). Off x86-64, and on
+/// x86-64 builds that enable AVX2 and FMA, the only level is the build's.
+#[test]
+fn outputs_do_not_depend_on_the_level() {
+    let levels = super::isa::levels();
+    for seed in 0..if MIRI { 1 } else { 25 } {
+        let c = case(0xC0FF_EE00 + seed);
+        let scan = Options {
+            precompute: false,
+            ..Options::default()
+        };
+        let options = [Options::default(), scan][seed as usize % 2];
+        let [reference, counted] = at_level(&c, Level::Native, options);
+        same(&counted, &reference, &format!("{seed} counted"));
+        for &level in &levels[1..] {
+            let [out, counted] = at_level(&c, level, options);
+            same(&out, &reference, &format!("{seed} {}", level.name()));
+            same(
+                &counted,
+                &reference,
+                &format!("{seed} {} counted", level.name()),
+            );
         }
     }
 }

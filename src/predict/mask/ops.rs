@@ -2,15 +2,21 @@
 //! arrays of 2 to 16 words, with the runs of rows they add to a difference array.
 
 use std::hint::select_unpredictable;
+use std::marker::PhantomData;
 
 use super::simd;
 use crate::exact::RunSink;
+use crate::predict::isa::{Isa, Native};
 
 /// A row mask: bit `r` set means row `r` is active.
 ///
 /// `u32` and `u64` are carried by value; [`Wide`] masks are meant to live in an arena
 /// and be read by reference.
 pub trait Mask: Copy + Eq + Send + Sync + 'static {
+    /// The level its operations are compiled for ([`Isa`]): [`Wide`]'s own, and
+    /// [`Native`] for the words, whose operations do not depend on one.
+    type Level: Isa;
+
     /// Rows the mask holds.
     const WIDTH: usize;
 
@@ -70,6 +76,7 @@ pub trait Mask: Copy + Eq + Send + Sync + 'static {
 macro_rules! impl_word_mask {
     ($ty:ty) => {
         impl Mask for $ty {
+            type Level = Native;
             const WIDTH: usize = <$ty>::BITS as usize;
             const ZERO: Self = 0;
 
@@ -157,36 +164,49 @@ impl_word_mask!(u32);
 impl_word_mask!(u64);
 
 /// Row mask of `W` 64-bit words, `64 * W` rows: bit `r` is bit `r % 64` of word
-/// `r / 64`. [`Mask`] is implemented for `W` of 2, 4, 8 and 16. Aligned to a NEON or
-/// SSE2 vector.
+/// `r / 64`, its operations those of level `X` ([`Isa`]). [`Mask`] is implemented for
+/// `W` of 2, 4, 8 and 16. Aligned to a NEON or SSE2 vector. Where the build dispatches
+/// to levels, its operations are `#[inline(always)]`, for the reason the x86-64
+/// backend's are.
 #[derive(Clone, Copy, Debug)]
 #[repr(C, align(16))]
-pub struct Wide<const W: usize>(pub [u64; W]);
+pub struct Wide<const W: usize, X = Native>(pub [u64; W], pub PhantomData<X>);
+
+impl<const W: usize, X> Wide<W, X> {
+    /// The mask of words `w`.
+    #[inline(always)]
+    pub const fn new(w: [u64; W]) -> Self {
+        Self(w, PhantomData)
+    }
+}
 
 macro_rules! impl_wide_mask {
     ($($w:literal),*) => {$(
-        impl PartialEq for Wide<$w> {
-            #[inline]
+        impl<X: Isa> PartialEq for Wide<$w, X> {
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn eq(&self, o: &Self) -> bool {
-                simd::is_zero(&simd::xor(&self.0, &o.0))
+                simd::is_zero::<X, $w>(&simd::xor::<X, $w>(&self.0, &o.0))
             }
         }
 
-        impl Eq for Wide<$w> {}
+        impl<X: Isa> Eq for Wide<$w, X> {}
 
-        impl Mask for Wide<$w> {
+        impl<X: Isa> Mask for Wide<$w, X> {
+            type Level = X;
             const WIDTH: usize = 64 * $w;
-            const ZERO: Self = Self([0; $w]);
+            const ZERO: Self = Self::new([0; $w]);
 
             // Always: outlined, its result goes through a stack copy on x86.
             #[inline(always)]
             fn first(n: usize) -> Self {
                 assert!(n <= Self::WIDTH, "first({n}) exceeds WIDTH={}", Self::WIDTH);
-                Self(simd::first(n))
+                Self::new(simd::first(n))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn ones_if(c: bool) -> Self {
-                Self([u64::from(c).wrapping_neg(); $w])
+                Self::new([u64::from(c).wrapping_neg(); $w])
             }
             // Always: the precompute's NaN gather calls this per missing row, and
             // outlined it reloads the loop's state after each call.
@@ -200,35 +220,43 @@ macro_rules! impl_wide_mask {
             fn flip(&mut self, r: usize) {
                 self.0[r / 64] ^= 1 << (r % 64);
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn and(self, o: Self) -> Self {
-                Self(simd::and(&self.0, &o.0))
+                Self::new(simd::and::<X, $w>(&self.0, &o.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn and_not(self, o: Self) -> Self {
-                Self(simd::and_not(&self.0, &o.0))
+                Self::new(simd::and_not::<X, $w>(&self.0, &o.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn or(self, o: Self) -> Self {
-                Self(simd::or(&self.0, &o.0))
+                Self::new(simd::or::<X, $w>(&self.0, &o.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn xor(self, o: Self) -> Self {
-                Self(simd::xor(&self.0, &o.0))
+                Self::new(simd::xor::<X, $w>(&self.0, &o.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn is_zero(&self) -> bool {
-                simd::is_zero(&self.0)
+                simd::is_zero::<X, $w>(&self.0)
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn popcount(&self) -> u32 {
-                simd::popcount(&self.0)
+                simd::popcount::<X, $w>(&self.0)
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn select(c: bool, a: Self, b: Self) -> Self {
-                Self(simd::select(c, &a.0, &b.0))
+                Self::new(simd::select::<X, $w>(c, &a.0, &b.0))
             }
-            #[inline]
+            #[cfg_attr(dispatch, inline(always))]
+            #[cfg_attr(not(dispatch), inline)]
             fn for_each_row(&self, mut f: impl FnMut(usize)) {
                 for (i, &w) in self.0.iter().enumerate() {
                     let mut m = w;
@@ -242,7 +270,7 @@ macro_rules! impl_wide_mask {
             // call per entry.
             #[inline(always)]
             fn add_runs<S: RunSink + ?Sized>(&self, v: S::Value, sink: &mut S) {
-                add_wide_runs::<$w, simd::Maps, S>(&self.0, v, sink);
+                add_wide_runs::<$w, simd::Maps<X>, S>(&self.0, v, sink);
             }
         }
     )*};

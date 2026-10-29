@@ -15,7 +15,8 @@
 //! a chunk rather than the model, and wide masks get chunks of fewer trees.
 
 use super::counters::{Clock, Stats};
-use super::leaves::leaf_pass;
+use super::isa::Isa;
+use super::leaves::leaf_pass_at;
 use super::mask::rows::{self, Unit};
 use super::mask::{Mask, Wide};
 use super::passes::{Pass, Walks, walk_with};
@@ -73,6 +74,51 @@ impl Default for Options {
 }
 
 impl Model {
+    /// [`Self::kernel_groups`] at level `X` ([`Isa`]), inside the level's trampoline, so
+    /// that the code it inlines compiles with the level's features.
+    #[inline(always)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the call, its scratch and its variant"
+    )]
+    pub(super) fn kernel_groups_at<
+        X: Isa,
+        const F32: bool,
+        const STATS: bool,
+        const ABLATE: bool,
+    >(
+        &self,
+        data: &[f64],
+        out: &mut [f64],
+        groups: Groups<'_>,
+        s: &mut Scratch,
+        options: Options,
+        stats: &mut Stats,
+        finalize: bool,
+    ) {
+        if X::NATIVE {
+            return self.kernel_groups::<X, F32, STATS, ABLATE>(
+                data, out, groups, s, options, stats, finalize,
+            );
+        }
+        X::with8(
+            #[inline(always)]
+            |m: &Self, data, out, groups, s, options, stats, finalize| {
+                m.kernel_groups::<X, F32, STATS, ABLATE>(
+                    data, out, groups, s, options, stats, finalize,
+                );
+            },
+            self,
+            data,
+            out,
+            groups,
+            s,
+            options,
+            stats,
+            finalize,
+        );
+    }
+
     /// Tree sums, or with `finalize` outputs, of every group of a call, through the
     /// kernel. With `STATS`, the work and phase times are added to `stats`; with
     /// `ABLATE`, `options` apply, otherwise the defaults do. The input must have
@@ -81,7 +127,7 @@ impl Model {
         clippy::too_many_arguments,
         reason = "the call, its scratch and its variant"
     )]
-    pub(super) fn kernel_groups<const F32: bool, const STATS: bool, const ABLATE: bool>(
+    fn kernel_groups<X: Isa, const F32: bool, const STATS: bool, const ABLATE: bool>(
         &self,
         data: &[f64],
         out: &mut [f64],
@@ -105,7 +151,7 @@ impl Model {
                 .bins
                 .fill_with::<F32>(&rows[..nf], &mut c.bins, constant);
             let t = t.lap(&mut stats.phases.bins);
-            self.prefix_starts::<STATS, ABLATE>(c, &mut stats.counters);
+            self.prefix_starts_at::<X, STATS, ABLATE>(c, &mut stats.counters);
             t.lap(&mut stats.phases.prefix);
             if STATS {
                 stats.counters.groups += 1;
@@ -120,30 +166,50 @@ impl Model {
             let c = &mut s.common;
             macro_rules! group {
                 ($m:ty, $c:ty, $q:expr, $u:expr) => {
-                    self.masked_group::<F32, $m, $c, STATS, ABLATE>(
+                    self.masked_group_at::<X, F32, $m, $c, STATS, ABLATE>(
                         rows, results, c, $q, $u, options, stats,
                     )
                 };
             }
             match Width::of(held) {
-                _ if held > WIDE_ROWS => group!(Unit, Slot, &mut s.slots, rows::units(held)),
+                _ if held > WIDE_ROWS => group!(Unit<X>, Slot, &mut s.slots, rows::units(held)),
                 Width::W32 if constant => {
-                    self.constant_group::<STATS, ABLATE>(results, c, options, stats);
+                    self.constant_group_at::<X, STATS, ABLATE>(results, c, options, stats);
                 }
                 Width::W32 => group!(u32, u32, &mut s.q32, 1),
                 Width::W64 => group!(u64, u64, &mut s.q64, 1),
-                Width::W128 => group!(Wide<2>, Handle, &mut s.handles, 1),
-                Width::W256 => group!(Wide<4>, Handle, &mut s.handles, 1),
-                Width::W512 => group!(Wide<8>, Handle, &mut s.handles, 1),
-                Width::W1024 => group!(Wide<16>, Handle, &mut s.handles, 1),
+                Width::W128 => group!(Wide<2, X>, Handle, &mut s.handles, 1),
+                Width::W256 => group!(Wide<4, X>, Handle, &mut s.handles, 1),
+                Width::W512 => group!(Wide<8, X>, Handle, &mut s.handles, 1),
+                Width::W1024 => group!(Wide<16, X>, Handle, &mut s.handles, 1),
                 _ => unreachable!("wider groups take runtime-width masks"),
             }
             if finalize {
                 let t = Clock::<STATS>::start();
-                self.finalize(&mut out[start..end]);
+                self.finalize_at::<X>(&mut out[start..end]);
                 t.lap(&mut stats.phases.finish);
             }
         }
+    }
+
+    /// [`Self::prefix_starts`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    #[cfg_attr(not(dispatch), inline(always))]
+    fn prefix_starts_at<X: Isa, const STATS: bool, const ABLATE: bool>(
+        &self,
+        c: &mut Common,
+        counters: &mut WorkCounters,
+    ) {
+        if X::NATIVE {
+            return self.prefix_starts::<STATS, ABLATE>(c, counters);
+        }
+        X::with3(
+            #[inline(always)]
+            |m: &Self, c, counters| m.prefix_starts::<STATS, ABLATE>(c, counters),
+            self,
+            c,
+            counters,
+        );
     }
 
     /// Each tree's start: its root, or after its prefix group's shared constant splits
@@ -151,6 +217,7 @@ impl Model {
     ///
     /// `ABLATE` only keeps the research builds' instantiation apart from
     /// production's, so that compiling `research` in cannot change production code.
+    #[cfg_attr(dispatch, inline(always))]
     fn prefix_starts<const STATS: bool, const ABLATE: bool>(
         &self,
         c: &mut Common,
@@ -189,15 +256,66 @@ impl Model {
         }
     }
 
-    /// Tree sums of one group at mask type `M` carried by `C`, its masks of
-    /// `runtime_units` units of `M` for runtime-width carriers and one otherwise. `ABLATE` keeps research's
-    /// instantiation apart, as in [`Self::prefix_starts`].
-    #[inline(never)]
+    /// [`Self::masked_group`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    #[cfg_attr(not(dispatch), inline(always))]
+    #[cfg_attr(dispatch, inline(never))]
     #[expect(
         clippy::too_many_arguments,
         reason = "the group, its scratch and its variant"
     )]
-    fn masked_group<const F32: bool, M, C, const STATS: bool, const ABLATE: bool>(
+    fn masked_group_at<X: Isa, const F32: bool, M, C, const STATS: bool, const ABLATE: bool>(
+        &self,
+        rows: &[f64],
+        results: &mut [f64],
+        c: &mut Common,
+        queues: &mut Queues<C>,
+        runtime_units: usize,
+        options: Options,
+        stats: &mut Stats,
+    ) where
+        M: Mask + Words,
+        C: Carrier<M>,
+    {
+        if X::NATIVE {
+            return self.masked_group::<X, F32, M, C, STATS, ABLATE>(
+                rows,
+                results,
+                c,
+                queues,
+                runtime_units,
+                options,
+                stats,
+            );
+        }
+        X::with8(
+            #[inline(always)]
+            |m: &Self, rows, results, c, queues, u, options, stats| {
+                m.masked_group::<X, F32, M, C, STATS, ABLATE>(
+                    rows, results, c, queues, u, options, stats,
+                );
+            },
+            self,
+            rows,
+            results,
+            c,
+            queues,
+            runtime_units,
+            options,
+            stats,
+        );
+    }
+
+    /// Tree sums of one group at mask type `M` carried by `C`, its masks of
+    /// `runtime_units` units of `M` for runtime-width carriers and one otherwise. `ABLATE` keeps research's
+    /// instantiation apart, as in [`Self::prefix_starts`].
+    #[cfg_attr(dispatch, inline(always))]
+    #[cfg_attr(not(dispatch), inline(never))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the group, its scratch and its variant"
+    )]
+    fn masked_group<X: Isa, const F32: bool, M, C, const STATS: bool, const ABLATE: bool>(
         &self,
         rows: &[f64],
         results: &mut [f64],
@@ -321,16 +439,16 @@ impl Model {
             macro_rules! passes {
                 ($scan:expr) => {
                     match (options.precompute, options.unsplit) {
-                        (true, true) => pass.run::<C, STATS, ABLATE, false, false>(
+                        (true, true) => pass.run_at::<X, C, STATS, ABLATE, false, false>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (true, false) => pass.run::<C, STATS, ABLATE, false, true>(
+                        (true, false) => pass.run_at::<X, C, STATS, ABLATE, false, true>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (false, true) => pass.run::<C, STATS, ABLATE, true, false>(
+                        (false, true) => pass.run_at::<X, C, STATS, ABLATE, true, false>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (false, false) => pass.run::<C, STATS, ABLATE, true, true>(
+                        (false, false) => pass.run_at::<X, C, STATS, ABLATE, true, true>(
                             walks, arena, queues, stops, words, $scan,
                         ),
                     }
@@ -344,7 +462,7 @@ impl Model {
                 if ABLATE {
                     passes!(&mut scan)
                 } else {
-                    pass.run::<C, STATS, ABLATE, false, false>(
+                    pass.run_at::<X, C, STATS, ABLATE, false, false>(
                         walks,
                         arena,
                         queues,
@@ -360,7 +478,7 @@ impl Model {
                 (LeafValues::Fixed(values), Sums::Fixed(diff)) => {
                     let half = diff.len() / 2;
                     let (even, odd) = diff.split_at_mut(half);
-                    leaf_pass::<M, C, _, STATS>(
+                    leaf_pass_at::<X, M, C, _, STATS>(
                         entries,
                         full,
                         arena,
@@ -379,7 +497,7 @@ impl Model {
                     let limbs = (n + 1) * wide.limbs();
                     let half = diff.len() / 2;
                     let (even, odd) = diff.split_at_mut(half);
-                    leaf_pass::<M, C, _, STATS>(
+                    leaf_pass_at::<X, M, C, _, STATS>(
                         entries,
                         full,
                         arena,
@@ -400,8 +518,35 @@ impl Model {
             stats.counters.scan_rows += scanner.counters.scan_rows;
             stats.counters.scan_evals += scanner.counters.scan_evals;
         }
-        self.finish(results, &mut c.sums);
+        self.finish_at::<X>(results, &mut c.sums);
         clock.lap(&mut stats.phases.finish);
+    }
+
+    /// [`Self::constant_group`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    #[cfg_attr(not(dispatch), inline(always))]
+    #[cfg_attr(dispatch, inline(never))]
+    fn constant_group_at<X: Isa, const STATS: bool, const ABLATE: bool>(
+        &self,
+        results: &mut [f64],
+        c: &mut Common,
+        options: Options,
+        stats: &mut Stats,
+    ) {
+        if X::NATIVE {
+            return self.constant_group::<X, STATS, ABLATE>(results, c, options, stats);
+        }
+        X::with5(
+            #[inline(always)]
+            |m: &Self, results, c, options, stats| {
+                m.constant_group::<X, STATS, ABLATE>(results, c, options, stats);
+            },
+            self,
+            results,
+            c,
+            options,
+            stats,
+        );
     }
 
     /// Tree sums of a group whose walks stop only at leaves: rows whose bins hold
@@ -411,8 +556,9 @@ impl Model {
     /// the walk's words, which hold each stop's leaf-value index, and the sum is every
     /// row's. No mask, item, leaf entry or difference array is touched. `ABLATE` keeps
     /// research's instantiation apart, as in [`Self::prefix_starts`].
-    #[inline(never)]
-    fn constant_group<const STATS: bool, const ABLATE: bool>(
+    #[cfg_attr(dispatch, inline(always))]
+    #[cfg_attr(not(dispatch), inline(never))]
+    fn constant_group<X: Isa, const STATS: bool, const ABLATE: bool>(
         &self,
         results: &mut [f64],
         c: &mut Common,
@@ -426,7 +572,7 @@ impl Model {
         if let Sums::Wide { acc, .. } = &mut c.sums {
             acc.fill(0);
         }
-        let fixed = self.constant_chunks::<STATS, ABLATE>(c, options, stats, &mut clock);
+        let fixed = self.constant_chunks::<X, STATS, ABLATE>(c, options, stats, &mut clock);
         let sum = match (&mut c.sums, self.plan) {
             (Sums::Fixed(_), Plan::Fixed(e)) => exact::to_f64(fixed, e),
             (Sums::Wide { wide, acc, .. }, _) => {
@@ -445,7 +591,7 @@ impl Model {
     /// The chunks of [`Self::constant_group`]: returns the `i128` sum, or adds a wide
     /// model's to its accumulators.
     #[inline(always)]
-    fn constant_chunks<const STATS: bool, const ABLATE: bool>(
+    fn constant_chunks<X: Isa, const STATS: bool, const ABLATE: bool>(
         &self,
         c: &mut Common,
         options: Options,
@@ -482,7 +628,8 @@ impl Model {
             // the layout's children and slots are in range by construction.
             unsafe {
                 let roots = roots.as_ptr();
-                walk_with!(ABLATE, walks, |K, D, R| walk::walk::<
+                walk_with!(ABLATE, walks, |K, D, R| walk::walk_at::<
+                    X,
                     u32,
                     K,
                     false,

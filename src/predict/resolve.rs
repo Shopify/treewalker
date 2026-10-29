@@ -25,6 +25,7 @@
 
 use std::hint::select_unpredictable;
 
+use super::isa::{DISPATCH, Isa, Native};
 use super::mask::rows::{self, Span, Unit};
 use super::mask::{Mask, Wide};
 use super::scan::Scan;
@@ -189,11 +190,11 @@ pub(super) struct Handle(u32);
 
 macro_rules! impl_handle {
     ($($w:literal),*) => {$(
-        impl Carrier<Wide<$w>> for Handle {
+        impl<X: Isa> Carrier<Wide<$w, X>> for Handle {
             const ARENA: bool = true;
             const RUNTIME: bool = false;
             const NONE: Self = Self(0);
-            type Side = Wide<$w>;
+            type Side = Wide<$w, X>;
 
             #[inline(always)]
             fn slot_units(_: usize) -> usize {
@@ -201,14 +202,14 @@ macro_rules! impl_handle {
             }
 
             #[inline(always)]
-            unsafe fn root(arena: *mut Wide<$w>, n: usize, _: usize) -> Self {
+            unsafe fn root(arena: *mut Wide<$w, X>, n: usize, _: usize) -> Self {
                 // SAFETY: the caller guarantees slot 0.
-                unsafe { *arena = Wide::<$w>::first(n) };
+                unsafe { *arena = Wide::<$w, X>::first(n) };
                 Self(0)
             }
 
             #[inline(always)]
-            unsafe fn side(masks: *const Wide<$w>, field: usize, _: usize) -> Wide<$w> {
+            unsafe fn side(masks: *const Wide<$w, X>, field: usize, _: usize) -> Wide<$w, X> {
                 // SAFETY: the caller guarantees the mask exists.
                 unsafe { *masks.add(field) }
             }
@@ -216,24 +217,24 @@ macro_rules! impl_handle {
             #[inline(always)]
             unsafe fn scan_side(
                 self,
-                arena: *const Wide<$w>,
+                arena: *const Wide<$w, X>,
                 pred: usize,
                 right: bool,
-                scan: &mut impl Scan<Wide<$w>>,
-                _: *mut Wide<$w>,
+                scan: &mut impl Scan<Wide<$w, X>>,
+                _: *mut Wide<$w, X>,
                 _: usize,
-            ) -> Wide<$w> {
+            ) -> Wide<$w, X> {
                 // SAFETY: the caller guarantees self is a written slot.
                 let rows = unsafe { *arena.add(self.0 as usize) };
-                scan.left(pred, rows).xor(Wide::<$w>::ones_if(right))
+                scan.left(pred, rows).xor(Wide::<$w, X>::ones_if(right))
             }
 
             #[inline(always)]
             unsafe fn split(
                 self,
-                side: Wide<$w>,
+                side: Wide<$w, X>,
                 force: bool,
-                arena: *mut Wide<$w>,
+                arena: *mut Wide<$w, X>,
                 next: &mut usize,
                 _: usize,
             ) -> (Self, Self, bool, bool) {
@@ -248,7 +249,7 @@ macro_rules! impl_handle {
                     let shared = split & (self.0 == 0);
                     let keep = select_unpredictable(shared, *next as u32, self.0);
                     let fresh = *next + usize::from(shared);
-                    *arena.add(keep as usize) = Wide::<$w>::select(h | split, heavy, light);
+                    *arena.add(keep as usize) = Wide::<$w, X>::select(h | split, heavy, light);
                     *arena.add(fresh) = light;
                     *next += usize::from(split) + usize::from(shared);
                     (
@@ -263,7 +264,7 @@ macro_rules! impl_handle {
             #[inline(always)]
             unsafe fn add_runs<S: RunSink + ?Sized>(
                 &self,
-                arena: *const Wide<$w>,
+                arena: *const Wide<$w, X>,
                 v: S::Value,
                 sink: &mut S,
                 _: usize,
@@ -292,7 +293,7 @@ impl Slot {
     ///
     /// `arena` holds the slot.
     #[inline(always)]
-    const unsafe fn at(self, arena: *const Unit) -> *const Unit {
+    const unsafe fn at<X>(self, arena: *const Unit<X>) -> *const Unit<X> {
         // SAFETY: the caller guarantees the slot, whose mask follows its header.
         unsafe { arena.add(self.0 as usize + 1) }
     }
@@ -303,7 +304,7 @@ impl Slot {
     ///
     /// `arena` holds the slot, written.
     #[inline(always)]
-    const unsafe fn span(self, arena: *const Unit) -> Span {
+    const unsafe fn span<X>(self, arena: *const Unit<X>) -> Span {
         // SAFETY: the caller guarantees the slot's header.
         let [lo, hi] = unsafe { (*arena.add(self.0 as usize)).0 };
         Span {
@@ -318,17 +319,17 @@ impl Slot {
     ///
     /// `arena` holds the slot.
     #[inline(always)]
-    const unsafe fn set_span(arena: *mut Unit, at: usize, s: Span) {
+    const unsafe fn set_span<X>(arena: *mut Unit<X>, at: usize, s: Span) {
         // SAFETY: the caller guarantees the slot's header.
-        unsafe { *arena.add(at) = Wide([s.lo as u64, s.hi as u64]) };
+        unsafe { *arena.add(at) = Wide::new([s.lo as u64, s.hi as u64]) };
     }
 }
 
-impl Carrier<Unit> for Slot {
+impl<X: Isa> Carrier<Unit<X>> for Slot {
     const ARENA: bool = true;
     const RUNTIME: bool = true;
     const NONE: Self = Self(0);
-    type Side = *const Unit;
+    type Side = *const Unit<X>;
 
     #[inline(always)]
     fn slot_units(u: usize) -> usize {
@@ -336,7 +337,7 @@ impl Carrier<Unit> for Slot {
     }
 
     #[inline(always)]
-    unsafe fn root(arena: *mut Unit, n: usize, u: usize) -> Self {
+    unsafe fn root(arena: *mut Unit<X>, n: usize, u: usize) -> Self {
         // SAFETY: the caller guarantees slot 0, a header and u units.
         unsafe {
             Self::set_span(arena, 0, Span::first(n));
@@ -346,7 +347,7 @@ impl Carrier<Unit> for Slot {
     }
 
     #[inline(always)]
-    unsafe fn side(masks: *const Unit, field: usize, u: usize) -> *const Unit {
+    unsafe fn side(masks: *const Unit<X>, field: usize, u: usize) -> *const Unit<X> {
         // SAFETY: the caller guarantees the mask exists.
         unsafe { masks.add(field * u) }
     }
@@ -355,13 +356,13 @@ impl Carrier<Unit> for Slot {
     #[inline(always)]
     unsafe fn scan_side(
         self,
-        arena: *const Unit,
+        arena: *const Unit<X>,
         pred: usize,
         right: bool,
-        scan: &mut impl Scan<Unit>,
-        scratch: *mut Unit,
+        scan: &mut impl Scan<Unit<X>>,
+        scratch: *mut Unit<X>,
         _: usize,
-    ) -> *const Unit {
+    ) -> *const Unit<X> {
         // SAFETY: the caller guarantees the slot, written.
         let units = unsafe { self.span(arena) }.units();
         // SAFETY: as above, and the scratch, which no slot overlaps, has room for a
@@ -375,7 +376,7 @@ impl Carrier<Unit> for Slot {
         scan.left_rows(pred, rows, left, units.start);
         if right {
             for x in left {
-                *x = x.xor(Unit::ones_if(true));
+                *x = x.xor(Unit::<X>::ones_if(true));
             }
         }
         scratch
@@ -390,13 +391,13 @@ impl Carrier<Unit> for Slot {
     #[inline(always)]
     unsafe fn split(
         self,
-        side: *const Unit,
+        side: *const Unit<X>,
         force: bool,
-        arena: *mut Unit,
+        arena: *mut Unit<X>,
         next: &mut usize,
         u: usize,
     ) -> (Self, Self, bool, bool) {
-        let stride = Self::slot_units(u);
+        let stride = <Self as Carrier<Unit<X>>>::slot_units(u);
         let root = self.0 == 0;
         let keep = select_unpredictable(root, *next as u32, self.0);
         let fresh = *next as u32 + select_unpredictable(root, stride as u32, 0);
@@ -404,7 +405,7 @@ impl Carrier<Unit> for Slot {
         // exist; keep is self or a new slot, and fresh a new slot past keep.
         let (heavy, light) = unsafe {
             let (k, f) = (Self(keep), Self(fresh));
-            let spans = rows::split(
+            let spans = rows::split::<X>(
                 self.at(arena),
                 side,
                 k.at(arena).cast_mut(),
@@ -431,7 +432,7 @@ impl Carrier<Unit> for Slot {
     #[inline(always)]
     unsafe fn add_runs<S: RunSink + ?Sized>(
         &self,
-        arena: *const Unit,
+        arena: *const Unit<X>,
         v: S::Value,
         sink: &mut S,
         _: usize,
@@ -474,17 +475,19 @@ pub(super) struct Resolve<M, C> {
 }
 
 /// Whether resolve lists fixed-width handles' varying stops with AVX-512's compress
-/// (`list_avx512`, x86-64-v4) rather than item by item.
-pub(super) const COMPRESS: bool = cfg!(all(
-    target_arch = "x86_64",
-    target_feature = "avx512f",
-    target_feature = "avx512vl"
-));
+/// (`list_avx512`) at level `X` rather than item by item: with AVX-512F, VL and DQ.
+pub(super) const fn compress<X: Isa>() -> bool {
+    cfg!(target_arch = "x86_64") && X::AVX512 && X::AVX512DQ
+}
 
 /// Entries past the last that listing fixed-width handles' varying stops may write, in
-/// `leaves` and in `listed`: `list_avx512` stores a block of 8 whole; 0 for the
-/// loop item by item.
-pub(super) const LISTED_SLACK: usize = if COMPRESS { 7 } else { 0 };
+/// `leaves` and in `listed`: `list_avx512` stores a block of 8 whole, where the build
+/// or a level it may dispatch to compresses; 0 for the loop item by item.
+pub(super) const LISTED_SLACK: usize = if compress::<Native>() || DISPATCH {
+    7
+} else {
+    0
+};
 
 /// Turn a pass's stops into the next pass's items, returned as a count, and leaf
 /// entries.
@@ -500,6 +503,7 @@ pub(super) const LISTED_SLACK: usize = if COMPRESS { 7 } else { 0 };
 /// [`LISTED_SLACK`].
 #[inline(always)]
 pub(super) unsafe fn resolve<
+    X: Isa,
     M: Mask,
     C: Carrier<M>,
     const SCAN: bool,
@@ -513,7 +517,7 @@ pub(super) unsafe fn resolve<
 ) -> usize {
     if C::ARENA && !C::RUNTIME {
         // SAFETY: the caller guarantees the bounds above.
-        return unsafe { resolve_listed::<M, C, SCAN, EMPTY, STATS>(pass, n_items, scan, seen) };
+        return unsafe { resolve_listed::<X, M, C, SCAN, EMPTY, STATS>(pass, n_items, scan, seen) };
     }
     let u = pass.units;
     // The split of an item, given its word 1, carry and kind, as (heavy, light,
@@ -622,6 +626,7 @@ pub(super) unsafe fn resolve<
 /// As for [`resolve`].
 #[inline(always)]
 unsafe fn resolve_listed<
+    X: Isa,
     M: Mask,
     C: Carrier<M>,
     const SCAN: bool,
@@ -636,7 +641,7 @@ unsafe fn resolve_listed<
     let u = pass.units;
     // SAFETY: the caller guarantees the bounds of [`resolve`], with the slack.
     let (n_leaves, listed) = unsafe {
-        list(
+        list::<X, C>(
             pass.words,
             pass.items,
             n_items,
@@ -728,7 +733,7 @@ unsafe fn resolve_listed<
 /// past `n_leaves` plus 1 + [`LISTED_SLACK`], and `listed` for `n_items` +
 /// [`LISTED_SLACK`] positions.
 #[inline(always)]
-unsafe fn list<C: Copy>(
+unsafe fn list<X: Isa, C: Copy>(
     words: *const u64,
     items: *const Item<C>,
     n_items: usize,
@@ -736,13 +741,10 @@ unsafe fn list<C: Copy>(
     n_leaves: usize,
     listed: *mut u32,
 ) -> (usize, usize) {
-    #[cfg(all(
-        target_arch = "x86_64",
-        target_feature = "avx512f",
-        target_feature = "avx512vl"
-    ))]
-    if size_of::<C>() == 4 {
-        // SAFETY: the caller guarantees the bounds, and the carrier's size.
+    #[cfg(target_arch = "x86_64")]
+    if compress::<X>() && size_of::<C>() == 4 {
+        // SAFETY: the caller guarantees the bounds, and the carrier's size; the level
+        // has AVX-512F, VL and DQ.
         return unsafe { list_avx512(words, items, n_items, leaves, n_leaves, listed) };
     }
     // SAFETY: the caller guarantees the bounds.
@@ -794,14 +796,11 @@ unsafe fn list_scalar<C: Copy>(
 ///
 /// # Safety
 ///
-/// As for [`list`], and `C` is 4 bytes, so that an item is its node's 4 bytes then the
-/// carry's.
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "avx512f",
-    target_feature = "avx512vl"
-))]
-#[inline(always)]
+/// As for [`list`], `C` is 4 bytes, so that an item is its node's 4 bytes then the
+/// carry's, and the CPU has AVX-512F, VL and DQ.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f,avx512vl,avx512dq")]
+#[inline]
 unsafe fn list_avx512<C: Copy>(
     words: *const u64,
     items: *const Item<C>,
@@ -819,28 +818,22 @@ unsafe fn list_avx512<C: Copy>(
     /// `!leaf & block` by one `kandnb` (AVX512DQ), a mask-register instruction on
     /// port 0. Written in Rust, LLVM folds the complement into a second test of the
     /// words (`vptestnmq`), a port-5 µop beside the test's and the compresses'.
-    #[inline(always)]
+    #[target_feature(enable = "avx512f,avx512dq")]
+    #[inline]
     fn others(leaf: __mmask8, block: __mmask8) -> __mmask8 {
-        #[cfg(target_feature = "avx512dq")]
-        {
-            let out: __mmask8;
-            // SAFETY: AVX512DQ is enabled at build time; the instruction reads and
-            // writes mask registers only.
-            unsafe {
-                std::arch::asm!(
-                    "kandnb {o}, {l}, {b}",
-                    l = in(kreg) leaf,
-                    b = in(kreg) block,
-                    o = lateout(kreg) out,
-                    options(pure, nomem, nostack, preserves_flags),
-                );
-            }
-            out
+        let out: __mmask8;
+        // SAFETY: the function enables AVX512DQ; the instruction reads and writes mask
+        // registers only.
+        unsafe {
+            std::arch::asm!(
+                "kandnb {o}, {l}, {b}",
+                l = in(kreg) leaf,
+                b = in(kreg) block,
+                o = lateout(kreg) out,
+                options(pure, nomem, nostack, preserves_flags),
+            );
         }
-        #[cfg(not(target_feature = "avx512dq"))]
-        {
-            !leaf & block
-        }
+        out
     }
     debug_assert_eq!(size_of::<Item<C>>(), 8);
     let mut n_listed = 0usize;

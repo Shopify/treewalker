@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use anyhow::{Context as _, Result};
 use serde_json::{Value, json};
+use treewalker_gbdt::research::Ablation;
 
 use crate::artifacts::{Cell, ManifestCell, Natives, RunConfig};
 use crate::output::{self, V};
@@ -352,6 +353,9 @@ pub fn run_cell(
             "threshold_type": format!("{:?}", forest.threshold_type()),
             "layout": layout_stats(forest),
         },
+        // The instruction-set level the cell's predictors ran at: each is chosen when a
+        // predictor is made, from the CPU and TREEWALKER_ISA, which a run does not change.
+        "isa": forest.research_predictor(Ablation::default()).isa(),
         "load_seconds": loaded.load_seconds,
         "memory": {"source": crate::memory::SOURCE, "methods": loaded.memory},
         "groups": cell.n_groups(),
