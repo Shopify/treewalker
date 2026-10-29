@@ -109,6 +109,7 @@ def test_export_skips_json_over_the_loader_limit(tmp_path, monkeypatch):
     json_path, bin_path = tmp_path / "model_treelite.json", tmp_path / "model_treelite.bin"
     _, size = tr.export_treelite("lightgbm", native, json_path, bin_path)
     assert json_path.stat().st_size == size and bin_path.exists()
+    assert size is not None
     monkeypatch.setattr(tr, "MAX_JSON_BYTES", size - 1)
     _, again = tr.export_treelite("lightgbm", native, json_path, bin_path)
     assert again == size and not json_path.exists() and bin_path.exists()

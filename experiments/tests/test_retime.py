@@ -1,6 +1,7 @@
 """Re-timing: cells with wide intervals, their manifests, and the longer attempt."""
 
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import pytest
@@ -44,7 +45,7 @@ def test_flagged_lists_each_cell_and_mode_above_the_threshold_once():
 
 
 def test_manifests_double_each_cells_rounds_one_manifest_per_round_count():
-    manifest = {
+    manifest: dict[str, Any] = {
         "suite": "camera-ready",
         "run": {"min_rounds": 4, "max_rounds": 10, "seed": 42},
         "counts": {"ready": 3},
@@ -152,10 +153,10 @@ def counterexample():
         ],
         orient="row",
     )
-    g = pl.DataFrame(
+    groups = pl.DataFrame(
         {"cell": [cid] * 8, "group": range(8), "entity": range(8), "rows": 16, "timed": True}
     )
-    est = estimand.block_estimates(s, g, {cid: {}}, n_boot=1000)
+    est = estimand.block_estimates(s, groups, {cid: {}}, n_boot=1000)
     return pl.DataFrame(
         [
             dict(zip(["cell", "method", "variant", "mode"], k, strict=True))

@@ -82,7 +82,7 @@ def native_libs(paths: Paths) -> dict[str, Any]:
 
 
 # The sentinel times what the acceptance suite times on its cell.
-SENTINEL_PLAN = {"methods": "factorial", "variants": [], "modes": ["serving"]}
+SENTINEL_PLAN = grids.Plan()
 
 
 def sentinel(
@@ -118,7 +118,7 @@ def sentinel(
         "status": status,
         "key": cdoc["key"],
         **({} if status == "ready" else {"reason": f"status {status}"}),
-        **SENTINEL_PLAN,
+        **SENTINEL_PLAN.to_json(),
     }
 
 
@@ -143,7 +143,7 @@ def build(
             "framework": cell.framework,
             "grid_workload": cell.workload,
             "generator": cell.generator,
-            **suite.plan_for(cell),
+            **suite.plan_for(cell).to_json(),
         }
         if not doc_path.exists():
             cells.append({**entry, "status": "missing"})
@@ -177,6 +177,8 @@ def build(
                 "workload": wkey,
                 "rows": doc["grouping"]["rows"],
                 "n_groups": doc["grouping"]["n_groups"],
+                # Single-row cells: the runner times their rows in file order.
+                **({"row_order": doc["row_order"]} if "row_order" in doc else {}),
             }
         )
     counts: dict[str, int] = {}
