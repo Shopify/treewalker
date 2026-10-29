@@ -148,7 +148,6 @@ impl Forest {
                 #[cfg(any(test, feature = "research"))]
                 nodes,
             }),
-            legacy: None,
         })
     }
 }

@@ -79,10 +79,9 @@ fresh_process = true
 # from the blocks' instructions per row.
 xgboost_processes = 6
 xgboost_process_arches = ["x86_64"]
-# Load every TreeWalker forest with exact leaf sums (LoadOptions::exact_sums),
-# the library's default. false adds each row's leaves in f64, as the paper's
-# algorithms do; the runner refuses a cell whose forests report otherwise, and
-# records each forest's setting in its manifest.
+# Exact leaf sums. 3.0 sums every model exactly, so its runner accepts only
+# true; the suites that set false measure 2.0's per-row f64 sums, as the paper's
+# algorithms do, and run at their recorded ref (README, the camera-ready rerun).
 exact_sums = true
 
 # Compiled baselines. tl2cgen's parallel_comp is the number of source files;

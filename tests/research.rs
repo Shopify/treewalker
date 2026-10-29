@@ -1,8 +1,11 @@
-//! The research API: ablated builds use their flags, counted and timed builds agree,
-//! and the stages compose to production's output.
+//! The research API: every ablation computes production's outputs, counted and timed
+//! builds agree, the counters count the work each ablation changes, and the stages
+//! compose to production's output.
 #![expect(clippy::float_cmp, reason = "exact hand-computable expectations")]
 use simd_json::{OwnedValue as Value, prelude::*};
-use treewalker_gbdt::research::{Ablation, COUNTERS_VERSION, Stages};
+use treewalker_gbdt::research::{
+    Ablation, COUNTERS_VERSION, LoadAblation, Phases, Stages, WorkCounters,
+};
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -37,14 +40,25 @@ fn load(name: &str, parse: &LoadOptions) -> Forest {
 fn bits(values: &[f64]) -> Vec<u64> {
     values.iter().map(|v| v.to_bits()).collect()
 }
-/// Every combination of the five runtime flags.
+/// Panic at the first row whose bits differ.
+fn same(actual: &[f64], expected: &[f64], what: &str) {
+    assert_eq!(actual.len(), expected.len(), "{what}");
+    for (r, (a, e)) in actual.iter().zip(expected).enumerate() {
+        assert_eq!(a.to_bits(), e.to_bits(), "{what}: row {r}: {a} != {e}");
+    }
+}
+/// Every combination of the seven runtime flags, each with a lane count drawn from
+/// its index.
 fn variants() -> impl Iterator<Item = Ablation> {
-    (0..32u8).map(|b| Ablation {
-        disable_varying_precompute: b & 1 != 0,
-        disable_predicate_sweep: b & 2 != 0,
-        disable_unsplit: b & 4 != 0,
-        disable_monotonic: b & 8 != 0,
-        disable_exact_sums: b & 16 != 0,
+    (0..128u32).map(|b| Ablation {
+        disable_predicate_sweep: b & 1 != 0,
+        disable_varying_precompute: b & 2 != 0,
+        disable_monotonic: b & 4 != 0,
+        disable_unsplit: b & 8 != 0,
+        disable_g1_constant: b & 16 != 0,
+        disable_width_dispatch: b & 32 != 0,
+        disable_restart_prefetch: b & 64 != 0,
+        lanes: [None, Some(1), Some(2), Some(3), Some(4), Some(8), Some(12)][(b % 7) as usize],
     })
 }
 const MODELS: [&str; 6] = [
@@ -56,12 +70,12 @@ const MODELS: [&str; 6] = [
     "random_forest.bin",
 ];
 
-/// Three trees that send `x0 <= 1` to leaves 1e16, 1 and -1e16, in that order. The
+/// Three trees that send `x0 <= 1` to leaves `big`, 1 and `-big`, in that order. The
 /// exact sum is 1; adding in f64 in tree order loses the 1 and gives 0.
-fn cancellation() -> Forest {
+fn cancellation(big: f64) -> Forest {
     let mut model = simd_json::to_owned_value(&mut fixture("identity.json")).unwrap();
     let tree = model["trees"][0].clone();
-    let trees: Vec<Value> = [1e16, 1.0, -1e16]
+    let trees: Vec<Value> = [big, 1.0, -big]
         .into_iter()
         .map(|left| {
             let mut t = tree.clone();
@@ -75,160 +89,176 @@ fn cancellation() -> Forest {
     model["class_id"] = Value::Array(Box::new(vec![0.into(); 3]));
     model["base_scores"] = Value::Array(Box::new(vec![0.0.into()]));
     // Keep the tree order, which decides the f64 sum.
-    let parse = LoadOptions {
+    let ablation = LoadAblation {
         disable_tree_ordering: true,
         ..Default::default()
     };
-    Forest::from_bytes(
+    Forest::from_bytes_ablated(
         &simd_json::to_vec(&model).unwrap(),
         ModelFormat::TreeliteJson,
         config(),
-        &parse,
+        &LoadOptions::default(),
+        &ablation,
     )
     .unwrap()
 }
 
 #[test]
-fn disabling_exact_sums_changes_the_timed_and_counted_outputs() {
-    let forest = cancellation();
-    assert!(forest.exact_sums());
-    let rows = [0.5, 0.0, 0.5, 0.0, 2.0, 0.0];
-    let mut production = [f64::NAN; 3];
-    forest.predictor().predict_group(&rows, &mut production);
-    assert_eq!(production, [1.0, 1.0, 0.0]);
-    let mut full = [f64::NAN; 3];
-    forest.predict_full_walk(&rows, &mut full);
-    assert_eq!(full, [0.0, 0.0, 0.0]);
-    for variant in variants() {
-        let expected = if variant.disable_exact_sums {
-            full
-        } else {
-            production
-        };
-        let mut r = forest.research_predictor(variant);
-        let (mut timed, mut counted, mut batch) = ([f64::NAN; 3], [f64::NAN; 3], [f64::NAN; 6]);
-        r.predict_group(&rows, &mut timed);
-        r.predict_group_counted(&rows, &mut counted);
-        // Batch calls run the same flags: two groups of the three rows.
-        let doubled: Vec<f64> = rows.iter().chain(&rows).copied().collect();
-        r.predict_groups(&doubled, &[0, 3, 6], &mut batch);
-        assert_eq!(bits(&timed), bits(&expected), "timed {variant:?}");
-        assert_eq!(bits(&counted), bits(&expected), "counted {variant:?}");
-        assert_eq!(bits(&batch[..3]), bits(&expected), "batch {variant:?}");
-        assert_eq!(bits(&batch[3..]), bits(&expected), "batch {variant:?}");
-        let mut stages = Stages::default();
-        r.predict_group_stages(&rows, &mut stages);
-        assert_eq!(
-            bits(&stages.tree_sum),
-            bits(&expected),
-            "stages {variant:?}"
-        );
-    }
-}
-
-#[test]
-fn every_variant_matches_production_or_the_full_walk() {
-    // Variants that keep exact sums are bit-identical to production. Variants that add
-    // in f64 add in tree order, as the full walk does, so they match it bit for bit.
+fn every_variant_matches_production_and_the_full_walk() {
     let data = raw("data.bin");
     let n = data.len() / 2;
+    // The rows come in blocks of 128 that share their constant feature. Groups of 1
+    // to 128 rows within the blocks give single rows and every width up to 128 bits.
+    let splits: [&[usize]; 3] = [&[1, 2, 17, 33, 64, 11], &[65, 63], &[128]];
+    let mut offsets = vec![0];
+    for b in 0..n / 128 {
+        for &size in splits[b % 3] {
+            offsets.push(offsets.last().unwrap() + size);
+        }
+    }
     for name in MODELS {
         let forest = load(name, &LoadOptions::default());
         let mut production = vec![0.0; n];
         forest
             .predictor()
-            .predict_fixed(&data, 128, &mut production);
+            .predict_groups(&data, &offsets, &mut production);
         let mut full = vec![0.0; n];
         forest.predict_full_walk(&data, &mut full);
+        same(&full, &production, &format!("{name} full walk"));
         for variant in variants() {
-            let expected = if variant.disable_exact_sums && forest.exact_sums() {
-                &full
-            } else {
-                &production
-            };
             let mut r = forest.research_predictor(variant);
+            let mut batch = vec![f64::NAN; n];
+            r.predict_groups(&data, &offsets, &mut batch);
+            same(&batch, &production, &format!("{name} batch {variant:?}"));
             let (mut timed, mut counted) = (vec![f64::NAN; n], vec![f64::NAN; n]);
-            for ((rows, t), c) in data
-                .chunks(256)
-                .zip(timed.chunks_mut(128))
-                .zip(counted.chunks_mut(128))
-            {
-                r.predict_group(rows, t);
-                r.predict_group_counted(rows, c);
+            for w in offsets.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                r.predict_group(&data[2 * a..2 * b], &mut timed[a..b]);
+                r.predict_group_counted(&data[2 * a..2 * b], &mut counted[a..b]);
             }
-            assert_eq!(bits(&timed), bits(expected), "{name} timed {variant:?}");
-            assert_eq!(bits(&counted), bits(&timed), "{name} counted {variant:?}");
+            same(&timed, &production, &format!("{name} timed {variant:?}"));
+            same(
+                &counted,
+                &production,
+                &format!("{name} counted {variant:?}"),
+            );
+            let mut stages = Stages::default();
+            r.predict_group_stages(&data[..256], &mut stages);
+            same(
+                &stages.output,
+                &production[..128],
+                &format!("{name} {variant:?}"),
+            );
         }
     }
 }
 
 #[test]
-fn counters_show_each_flag() {
-    let data = raw("data.bin");
-    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
-    // One row: every varying split leaves one side empty.
-    let count = |variant: Ablation| {
-        let mut r = forest.research_predictor(variant);
-        r.predict_group_counted(&data[..2], &mut [0.0])
-    };
-    let all_on = count(Ablation::default());
-    assert!(all_on.precompute_row_evals > 0);
-    assert_eq!(all_on.partition_row_evals, 0);
-    assert!(all_on.unsplit_skips > 0);
-    let no_precompute = count(Ablation {
-        disable_varying_precompute: true,
-        ..Default::default()
-    });
-    assert_eq!(no_precompute.precompute_row_evals, 0);
-    assert!(no_precompute.partition_row_evals > 0);
-    let no_unsplit = count(Ablation {
-        disable_unsplit: true,
-        ..Default::default()
-    });
-    assert_eq!(no_unsplit.unsplit_skips, 0);
-    assert!(no_unsplit.recursive_calls > all_on.recursive_calls);
+fn ablation_ids_round_trip() {
+    for variant in variants() {
+        assert_eq!(
+            Ablation::from_id(&variant.id()),
+            Ok(variant),
+            "{}",
+            variant.id()
+        );
+    }
+    assert_eq!(Ablation::default().id(), "all-on");
+    let a = Ablation::default()
+        .with("disable_unsplit")
+        .and_then(|a| a.with("lanes=2"))
+        .unwrap();
+    assert_eq!(a.id(), "disable_unsplit+lanes=2");
+    assert_eq!(a.tokens(), ["disable_unsplit", "lanes=2"]);
+    for bad in [
+        "disable_exact_sums",
+        "lanes=13",
+        "lanes=0",
+        "lanes=x",
+        "distance=4",
+        "rate=2",
+        "layout=2e",
+        "",
+    ] {
+        assert!(Ablation::from_id(bad).is_err(), "{bad}");
+    }
 }
 
 #[test]
-fn counters_count_actual_work() {
-    assert_eq!(COUNTERS_VERSION, 2);
-    let data = raw("data.bin");
-    let rows = &data[..256];
-    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
-    assert!(forest.exact_sums());
-    let count = |variant: Ablation, rows: &[f64]| {
-        let mut out = vec![0.0; rows.len() / 2];
-        forest
-            .research_predictor(variant)
-            .predict_group_counted(rows, &mut out)
-    };
-    // Exact sums write a run's two difference-array entries; f64 sums every row.
-    let one_row = count(Ablation::default(), &rows[..2]);
-    assert_eq!(one_row.leaf_adds, 2 * one_row.leaf_hits);
-    let f64_sums = Ablation {
-        disable_exact_sums: true,
+#[should_panic(expected = "lanes must be 1 to 12")]
+fn research_predictors_take_1_to_12_lanes() {
+    let forest = load("identity.bin", &LoadOptions::default());
+    let _ = forest.research_predictor(Ablation {
+        lanes: Some(13),
         ..Default::default()
-    };
-    let one_row = count(f64_sums, &rows[..2]);
-    assert_eq!(one_row.leaf_adds, one_row.leaf_hits);
-    assert!(count(f64_sums, rows).leaf_adds > count(Ablation::default(), rows).leaf_adds);
-    // The sweep reads each row once for the one varying feature, sorts and merges;
-    // the brute force evaluates every predicate on every row.
-    let sweep = count(Ablation::default(), rows);
-    assert_eq!(sweep.precompute_row_evals, 128);
-    assert!(sweep.precompute_sort_compares >= 127);
-    assert!(sweep.precompute_sweep_compares > 0);
-    let brute = count(
-        Ablation {
-            disable_predicate_sweep: true,
-            ..Default::default()
-        },
-        rows,
+    });
+}
+
+fn counted(forest: &Forest, variant: Ablation, rows: &[f64]) -> WorkCounters {
+    let mut out = vec![0.0; rows.len() / 2];
+    forest
+        .research_predictor(variant)
+        .predict_group_counted(rows, &mut out)
+}
+
+#[test]
+fn counters_count_the_work_of_a_group() {
+    assert_eq!(COUNTERS_VERSION, 6);
+    let data = raw("data.bin");
+    let rows = &data[..64];
+    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
+    let c = counted(&forest, Ablation::default(), rows);
+    assert_eq!((c.groups, c.bins_computed, c.single_rows), (1, 1, 0));
+    // The sweep reads each row once for the one varying feature.
+    assert_eq!(c.precompute_row_evals, 32);
+    assert!(c.precompute_sort_compares >= 31 && c.precompute_sweep_compares > 0);
+    assert_eq!(
+        c.precompute_mask_writes as usize,
+        forest_predicates(&forest)
     );
-    assert_eq!(brute.precompute_mask_writes, sweep.precompute_mask_writes);
+    assert_eq!((c.scan_rows, c.scan_evals), (0, 0));
+    // Every tree reaches at least one leaf, and each split adds one item.
+    let trees = forest.trees().len() as u64;
+    assert!(c.passes >= 1 && c.walk_steps > 0 && c.lane_slots >= c.walk_steps);
+    assert!(c.splits <= c.varying_events);
+    assert_eq!(c.leaf_events, trees + c.splits);
+    assert!(c.runs_written >= c.leaf_events);
+    assert_eq!((c.empty_sides, c.arena_slots), (0, 0));
+    // Two groups count twice the work of one.
+    let mut r = forest.research_predictor(Ablation::default());
+    let (mut a, mut b) = (vec![0.0; 32], vec![0.0; 32]);
+    let mut twice = r.predict_group_counted(rows, &mut a);
+    twice += r.predict_group_counted(rows, &mut b);
+    assert_eq!(twice.groups, 2);
+    assert_eq!(twice.walk_steps, 2 * c.walk_steps);
+    let phases = r.take_phases();
+    assert!(phases.walk + phases.resolve + phases.leaf_pass > std::time::Duration::ZERO);
+    assert_eq!(r.take_phases(), Phases::default());
+    assert!(
+        c.to_string()
+            .starts_with("groups=1, single_rows=0, bins_computed=1")
+    );
+    assert_eq!(c.fields().len(), 19);
+}
+
+fn forest_predicates(forest: &Forest) -> usize {
+    let masks = forest.predicate_masks(&[0.0, 0.0], true);
+    masks.len()
+}
+
+#[test]
+fn counters_show_each_ablation() {
+    let data = raw("data.bin");
+    let rows = &data[..64];
+    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
+    let base = counted(&forest, Ablation::default(), rows);
+    let with = |token: &str| counted(&forest, Ablation::default().with(token).unwrap(), rows);
+    // The brute force evaluates every predicate on every row, without sorting.
+    let brute = with("disable_predicate_sweep");
+    assert_eq!(brute.precompute_mask_writes, base.precompute_mask_writes);
     assert_eq!(
         brute.precompute_row_evals,
-        128 * brute.precompute_mask_writes
+        32 * brute.precompute_mask_writes
     );
     assert_eq!(
         (
@@ -237,41 +267,205 @@ fn counters_count_actual_work() {
         ),
         (0, 0)
     );
-    assert_eq!(brute.scan_row_evals, 0);
-    // Without precompute, the partitions count their own work instead.
-    let scans = count(
-        Ablation {
-            disable_varying_precompute: true,
-            ..Default::default()
-        },
-        rows,
-    );
+    // Without precompute, varying events scan their rows.
+    let scans = with("disable_varying_precompute");
     assert_eq!(scans.precompute_row_evals + scans.precompute_mask_writes, 0);
-    assert!(scans.scan_row_evals > 0);
-    assert!(scans.scan_row_evals <= scans.partition_row_evals);
-    assert_eq!(scans.scan_missing_checks, scans.scan_row_evals);
-    assert!(scans.scan_compares <= scans.scan_row_evals);
+    assert!(scans.scan_rows > 0);
+    assert_eq!(scans.scan_evals, scans.scan_rows, "no monotonic feature");
+    assert_eq!(scans.walk_steps, base.walk_steps);
+    // Without the unsplit shortcut, empty sides become items the walk steps through.
+    // One row stopping at varying splits leaves one side of every varying event
+    // empty.
+    let one_row = Ablation::from_id("disable_g1_constant").unwrap();
+    let single = counted(&forest, one_row, &data[..2]);
+    let empty = counted(
+        &forest,
+        one_row.with("disable_unsplit").unwrap(),
+        &data[..2],
+    );
+    assert!(single.varying_events > 0 && single.splits == 0);
+    assert_eq!(empty.empty_sides, single.varying_events);
+    assert!(empty.walk_steps > single.walk_steps);
+    assert_eq!(empty.runs_written, single.runs_written);
+    // Lanes change how the walk runs, not what it visits.
+    for token in ["lanes=1", "lanes=2", "lanes=4", "lanes=8"] {
+        let c = with(token);
+        assert_eq!(c.walk_steps, base.walk_steps, "{token}");
+        assert_eq!(c.leaf_events, base.leaf_events, "{token}");
+        assert_eq!(c.varying_events, base.varying_events, "{token}");
+        if let Some(n) = token.strip_prefix("lanes=") {
+            assert_eq!(c.lane_slots % n.parse::<u64>().unwrap(), 0, "{token}");
+        }
+    }
+    assert_eq!(with("disable_restart_prefetch"), base);
+    // A 32-row group fits 32-bit masks; at the configured 128 rows it takes an arena.
+    let widest = with("disable_width_dispatch");
+    assert!(widest.arena_slots > 0 && base.arena_slots == 0);
+    assert_eq!(widest.walk_steps, base.walk_steps);
+    // A single row steps through varying splits as constants, without masks: one
+    // pass reaches a leaf of every tree.
+    let trees = forest.trees().len() as u64;
+    let one = counted(&forest, Ablation::default(), &data[..2]);
+    assert_eq!((one.single_rows, one.groups, one.passes), (1, 1, 1));
+    assert_eq!((one.precompute_mask_writes, one.varying_events), (0, 0));
+    assert_eq!((one.leaf_events, one.runs_written), (trees, trees));
+    let one_masked = counted(
+        &forest,
+        Ablation::default().with("disable_g1_constant").unwrap(),
+        &data[..2],
+    );
+    assert_eq!((one_masked.single_rows, one_masked.groups), (0, 1));
+    assert!(one_masked.varying_events > 0 && one_masked.precompute_mask_writes > 0);
+    assert_eq!(one_masked.leaf_events, trees);
+    assert_eq!(one_masked.walk_steps, one.walk_steps);
 }
 
 #[test]
-fn walk_counters_count_empty_heavy_visits_without_unsplit() {
-    // Without the unsplit shortcut, a split whose rows all go light still walks its
-    // heavy side with no active row, so leaf_hits counts a leaf no row reaches. Only
-    // real rows write the accumulator: leaf_adds is unchanged.
-    let forest = load("identity.bin", &LoadOptions::default());
-    let count = |variant: Ablation| {
-        forest
-            .research_predictor(variant)
-            .predict_group_counted(&[2.0, 0.0], &mut [0.0])
+fn monotonic_scans_stop_comparing_early() {
+    // Feature 0 declared increasing, rows sorted on it: a scan compares until the
+    // first row past the threshold, unless disable_monotonic.
+    let config = WalkerConfig::builder(2)
+        .max_group_width(128)
+        .varying([])
+        .increasing([0])
+        .build()
+        .unwrap();
+    let forest = Forest::from_bytes(
+        &fixture("sigmoid_f64.bin"),
+        ModelFormat::TreeliteBinaryV4,
+        config,
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let mut rows: Vec<[f64; 2]> = raw("data.bin")
+        .chunks_exact(2)
+        .take(64)
+        .map(|r| [r[0], 0.25])
+        .collect();
+    rows.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let rows: Vec<f64> = rows.concat();
+    let scan = counted(
+        &forest,
+        Ablation::default()
+            .with("disable_varying_precompute")
+            .unwrap(),
+        &rows,
+    );
+    let full = counted(
+        &forest,
+        Ablation::from_id("disable_monotonic+disable_varying_precompute").unwrap(),
+        &rows,
+    );
+    assert_eq!(scan.scan_rows, full.scan_rows);
+    assert!(scan.scan_evals < full.scan_evals);
+    assert_eq!(full.scan_evals, full.scan_rows);
+    let mut a = vec![0.0; 64];
+    let mut b = vec![0.0; 64];
+    forest.predictor().predict_group(&rows, &mut a);
+    forest
+        .research_predictor(
+            Ablation::default()
+                .with("disable_varying_precompute")
+                .unwrap(),
+        )
+        .predict_group(&rows, &mut b);
+    assert_eq!(bits(&a), bits(&b));
+}
+
+#[test]
+fn monotonic_promises_do_not_change_outputs() {
+    // Feature 0 declared increasing or decreasing: rows in the promised order or out
+    // of it predict as without the promise, in production and every precompute.
+    let load_as = |increasing: bool, decreasing: bool| {
+        let builder = WalkerConfig::builder(2).max_group_width(128).varying([0]);
+        let builder = if increasing {
+            builder.increasing([0])
+        } else if decreasing {
+            builder.decreasing([0])
+        } else {
+            builder
+        };
+        Forest::from_bytes(
+            &fixture("sigmoid_f64.bin"),
+            ModelFormat::TreeliteBinaryV4,
+            builder.build().unwrap(),
+            &LoadOptions::default(),
+        )
+        .unwrap()
     };
-    let all_on = count(Ablation::default());
-    let no_unsplit = count(Ablation {
-        disable_unsplit: true,
-        ..Default::default()
-    });
-    assert_eq!((all_on.leaf_hits, all_on.leaf_adds), (2, 4));
-    assert_eq!((no_unsplit.leaf_hits, no_unsplit.leaf_adds), (3, 4));
-    assert!(no_unsplit.varying_splits >= all_on.varying_splits);
+    let mut rows: Vec<[f64; 2]> = raw("data.bin")
+        .chunks_exact(2)
+        .take(64)
+        .map(|r| [r[0], 0.25])
+        .collect();
+    rows.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let ascending: Vec<f64> = rows.concat();
+    rows.reverse();
+    let descending: Vec<f64> = rows.concat();
+    let outputs = |forest: &Forest, variant: &str, rows: &[f64]| {
+        let mut out = vec![0.0; 64];
+        forest
+            .research_predictor(Ablation::from_id(variant).unwrap())
+            .predict_group(rows, &mut out);
+        bits(&out)
+    };
+    let unordered = load_as(false, false);
+    for forest in [load_as(true, false), load_as(false, true)] {
+        for rows in [&ascending, &descending] {
+            for variant in ["all-on", "disable_predicate_sweep"] {
+                assert_eq!(
+                    outputs(&forest, variant, rows),
+                    outputs(&unordered, variant, rows),
+                    "{variant}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn layout_stats_describe_the_kernel_choices() {
+    let forest = load("sigmoid_f64.bin", &LoadOptions::default());
+    let s = forest.layout_stats();
+    assert!((0.0..=1.0).contains(&s.varying_share));
+    assert!((1..=12).contains(&s.lanes) && (1..=12).contains(&s.lanes_constant));
+    assert!(s.registers >= 14 && s.l1_bytes > 0 && s.l2_share_bytes > 0);
+    assert!(s.line_bytes.is_power_of_two() && s.chunk_bytes == s.l2_share_bytes);
+    assert!(s.steps_leaf >= s.steps_stop && s.steps_stop >= 1.0);
+    // A tiny model's nodes fit L1: no prefetch.
+    assert_eq!((s.pool_level, s.distance, s.distance_constant), (1, 0, 0));
+    assert!(s.prefix_trees >= 2 * s.prefix_groups && s.prefix_saved_steps >= s.prefix_cost_steps);
+    assert_eq!(s.pool_bytes, 16 * (forest.nodes().len() + 1));
+    let leaves = forest.nodes().iter().filter(|n| n.is_leaf()).count();
+    assert_eq!(s.leaf_bytes, 16 * leaves);
+    assert_eq!((s.rank_table_bytes, s.chain_slots, s.chain_sets), (0, 0, 0));
+    assert_eq!(s.flip_table_bytes, 0);
+    // Two categorical features, each with one split: a chain of one set apiece,
+    // each with a default rank and 5 exception bounds (for 2 categories, no
+    // category and missing, and one past), and an exception per listed code: 1
+    // and 40 with missing sent left, then 1 and 2.
+    let categories = load("categories_left.bin", &LoadOptions::default());
+    let s = categories.layout_stats();
+    assert_eq!(
+        (s.rank_table_bytes, s.chain_slots, s.chain_sets),
+        (2 * (4 + 4 * 5) + 8 * (3 + 2), 2, 2)
+    );
+}
+
+#[test]
+fn the_full_walk_sums_exactly_past_the_126_bit_rule() {
+    // Leaves 2^200 and 1 leave no 126-bit fixed point. Production and the full walk
+    // sum in the wide accumulator, so neither loses the 1.
+    let forest = cancellation(2f64.powi(200));
+    // 201 bits of span: seven 29-bit digits in the wide accumulator.
+    assert_eq!(forest.layout_stats().wide_limbs, 7);
+    let rows = [0.5, 0.0, 2.0, 0.0];
+    let mut production = [f64::NAN; 2];
+    forest.predictor().predict_group(&rows, &mut production);
+    assert_eq!(production, [1.0, 0.0]);
+    let mut full = [f64::NAN; 2];
+    forest.predict_full_walk(&rows, &mut full);
+    assert_eq!(full, [1.0, 0.0]);
 }
 
 #[test]

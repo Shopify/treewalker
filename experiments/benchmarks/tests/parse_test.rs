@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use treewalker_gbdt::research::LoadAblation;
 use treewalker_gbdt::{Forest, LoadError, LoadOptions, WalkerConfig};
 
 fn test_dir() -> PathBuf {
@@ -83,7 +84,7 @@ fn is_json_syntax_error(e: &LoadError) -> bool {
 /// Load the cell's LightGBM JSON export, or `None` if the export is missing or its
 /// empty thresholds are its only defect (with them filled, it parses). Every other
 /// load error fails the test.
-fn load_json(dir: &Path, parse: &LoadOptions) -> Option<Forest> {
+fn load_json(dir: &Path, parse: &LoadAblation) -> Option<Forest> {
     let model = dir.join("lightgbm/model_treelite.json");
     if !model.exists() {
         eprintln!(
@@ -92,7 +93,10 @@ fn load_json(dir: &Path, parse: &LoadOptions) -> Option<Forest> {
         );
         return None;
     }
-    let load = |path: &Path| Forest::load_with(path, dir.join("walker_config.json"), parse);
+    let load = |path: &Path| {
+        let config = dir.join("walker_config.json");
+        Forest::load_ablated(path, config, &LoadOptions::default(), parse)
+    };
     match load(&model) {
         Ok(forest) => Some(forest),
         Err(e) => {
@@ -143,7 +147,7 @@ fn temp_cell(test: &str, json: &str) -> PathBuf {
 #[test]
 fn test_an_export_whose_only_defect_is_an_empty_threshold_is_skipped() {
     let dir = temp_cell("only_empty_threshold", r#"{"threshold": , "x": 1}"#);
-    assert!(load_json(&dir, &LoadOptions::default()).is_none());
+    assert!(load_json(&dir, &LoadAblation::default()).is_none());
 }
 
 #[test]
@@ -153,7 +157,7 @@ fn test_a_syntax_error_beside_an_empty_threshold_fails() {
         "syntax_beside_empty_threshold",
         r#"{"foo": @, "threshold": , "x": 1}"#,
     );
-    load_json(&dir, &LoadOptions::default());
+    load_json(&dir, &LoadAblation::default());
 }
 
 #[test]
@@ -163,7 +167,7 @@ fn test_parse_model_basic() {
         return;
     }
 
-    let Some(forest) = load_json(&dir, &LoadOptions::default()) else {
+    let Some(forest) = load_json(&dir, &LoadAblation::default()) else {
         return;
     };
     assert!(!forest.trees().is_empty(), "should parse at least one tree");
@@ -193,16 +197,16 @@ fn test_tree_order_is_deterministic() {
         return;
     }
 
-    let Some(forest_a) = load_json(&dir, &LoadOptions::default()) else {
+    let Some(forest_a) = load_json(&dir, &LoadAblation::default()) else {
         return;
     };
-    let forest_b = load_json(&dir, &LoadOptions::default()).unwrap();
+    let forest_b = load_json(&dir, &LoadAblation::default()).unwrap();
 
     assert_eq!(forest_a.trees().len(), forest_b.trees().len());
     for (a, b) in forest_a.trees().iter().zip(forest_b.trees()) {
         assert_eq!(a.node_start, b.node_start);
         assert_eq!(a.node_count, b.node_count);
-        assert_eq!(a.bitset_start, b.bitset_start);
+        assert_eq!(a.category_start, b.category_start);
     }
 }
 
@@ -214,12 +218,12 @@ fn test_tree_ordering_changes_order_but_not_output() {
     }
 
     let config = WalkerConfig::from_file(dir.join("walker_config.json")).unwrap();
-    let Some(forest_ordered) = load_json(&dir, &LoadOptions::default()) else {
+    let Some(forest_ordered) = load_json(&dir, &LoadAblation::default()) else {
         return;
     };
     let forest_original = load_json(
         &dir,
-        &LoadOptions {
+        &LoadAblation {
             disable_tree_ordering: true,
             ..Default::default()
         },
@@ -266,7 +270,7 @@ fn test_lightgbm_json_matches_native() {
         return;
     }
 
-    let Some(forest) = load_json(&dir, &LoadOptions::default()) else {
+    let Some(forest) = load_json(&dir, &LoadAblation::default()) else {
         return;
     };
     let preds_path = dir.join("lightgbm/predictions.npy");
