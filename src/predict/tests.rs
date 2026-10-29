@@ -4,7 +4,7 @@
 //! is the property tests' (`tests/property.rs`).
 
 // The property tests' generator, groups and comparisons, with the exact module's copy
-// of their oracle.
+// of their oracle and the crate's own sigmoid for their evaluator.
 #[allow(dead_code, reason = "these tests use a part")]
 #[path = "../../tests/common/bits.rs"]
 mod bits;
@@ -23,6 +23,7 @@ use groups::{Role, config, group, offsets};
 use model::{Precision, Settings};
 use rng::Rng;
 
+use super::sigmoid::sigmoid;
 use super::{Groups, Level, Options, Predictor, Stats, Workspace};
 use crate::config::Choices;
 use crate::rules::{Prefix, Tuning};

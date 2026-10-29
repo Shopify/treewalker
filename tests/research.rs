@@ -9,7 +9,7 @@ use common::bits::{bits, same};
 use common::fixtures::{bytes, values};
 use simd_json::{OwnedValue as Value, prelude::*};
 use treewalker_gbdt::research::{
-    Ablation, COUNTERS_VERSION, LoadAblation, Phases, Stages, WorkCounters,
+    Ablation, COUNTERS_VERSION, LoadAblation, Phases, Stages, WorkCounters, sigmoid,
 };
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
@@ -474,7 +474,7 @@ fn stages_compose_to_the_output() {
     let mut r = forest.research_predictor(Ablation::default());
     r.predict_group_stages(&data[..256], &mut stages);
     for (&m, &o) in stages.raw_margin.iter().zip(&stages.output) {
-        assert_eq!(o, 1.0 / (1.0 + (-m).exp()));
+        assert_eq!(o, sigmoid(m));
     }
 }
 

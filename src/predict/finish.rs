@@ -3,6 +3,7 @@
 
 use super::isa::Isa;
 use super::scratch::Sums;
+use super::sigmoid::sigmoid_inplace;
 use crate::exact::{self, Plan};
 use crate::model::{Model, Postprocessor};
 
@@ -64,30 +65,21 @@ impl Model {
     }
 }
 
-/// `1 / (1 + exp(-x))` with `x = pre(v)` for every value `v`, two at a time.
-#[inline(always)]
-fn sigmoid_inplace(slice: &mut [f64], pre: impl Fn(f64) -> f64) {
-    let (chunks, remainder) = slice.split_at_mut(slice.len() & !1);
-    for pair in chunks.chunks_exact_mut(2) {
-        let (a, b) = ((-pre(pair[0])).exp(), (-pre(pair[1])).exp());
-        pair[0] = 1.0 / (1.0 + a);
-        pair[1] = 1.0 / (1.0 + b);
-    }
-    for v in remainder {
-        *v = 1.0 / (1.0 + (-pre(*v)).exp());
-    }
-}
-
 impl Model {
     /// Each tree sum divided by the averaging divisor, plus the base score, rounded at
-    /// each step; skipped when both are identities.
+    /// each step; skipped when both are identities, and the division by a divisor of 1,
+    /// whose quotient is the sum exactly.
     #[expect(clippy::float_cmp, reason = "exact fast-path identities")]
     #[inline(always)]
     pub(crate) fn apply_margin(&self, values: &mut [f64]) {
         let out = self.output;
-        if out.divisor != 1.0 || out.base_score != 0.0 {
+        if out.divisor != 1.0 {
             for v in &mut *values {
                 *v = *v / out.divisor + out.base_score;
+            }
+        } else if out.base_score != 0.0 {
+            for v in &mut *values {
+                *v += out.base_score;
             }
         }
     }
@@ -127,21 +119,22 @@ impl Model {
 
     /// Turn tree sums into outputs: [`Self::apply_margin`] then [`Self::apply_link`],
     /// in one pass, each value through the same operations in the same order; the
-    /// identities are skipped per call, as there.
+    /// identities and the division by 1 are skipped per call, as there.
     #[expect(clippy::float_cmp, reason = "exact fast-path identities")]
     #[cfg_attr(dispatch, inline(always))]
     #[cfg_attr(not(dispatch), inline)]
     pub(super) fn finalize(&self, values: &mut [f64]) {
         let out = self.output;
         let (divisor, base) = (out.divisor, out.base_score);
-        let margin = divisor != 1.0 || base != 0.0;
         match out.postprocessor {
             Postprocessor::Identity => self.apply_margin(values),
-            Postprocessor::Sigmoid(alpha) => match (margin, alpha != 1.0) {
-                (false, false) => sigmoid_inplace(values, |v| v),
-                (true, false) => sigmoid_inplace(values, |v| v / divisor + base),
-                (false, true) => sigmoid_inplace(values, |v| v * alpha),
-                (true, true) => sigmoid_inplace(values, |v| (v / divisor + base) * alpha),
+            Postprocessor::Sigmoid(alpha) => match (divisor != 1.0, base != 0.0, alpha != 1.0) {
+                (false, false, false) => sigmoid_inplace(values, |v| v),
+                (false, false, true) => sigmoid_inplace(values, |v| v * alpha),
+                (false, true, false) => sigmoid_inplace(values, |v| v + base),
+                (false, true, true) => sigmoid_inplace(values, |v| (v + base) * alpha),
+                (true, _, false) => sigmoid_inplace(values, |v| v / divisor + base),
+                (true, _, true) => sigmoid_inplace(values, |v| (v / divisor + base) * alpha),
             },
         }
     }

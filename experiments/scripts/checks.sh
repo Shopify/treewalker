@@ -90,7 +90,7 @@ lane_python() {
 miri() {
   local n=$1 kind=$2 cpu=$3 target=$4 flags=$5 sel
   if [ "$kind" = lib ]; then sel="--lib -- prefetching_walks"; else sel="--test miri"; fi
-  step "$n" "miri $kind $cpu" env CARGO_TARGET_DIR="$OUT/miri-$kind-$cpu" MIRIFLAGS=-Zmiri-deterministic-floats \
+  step "$n" "miri $kind $cpu" env CARGO_TARGET_DIR="$OUT/miri-$kind-$cpu" \
     RUSTFLAGS="$flags" cargo +nightly miri test --target "$target" $sel
 }
 

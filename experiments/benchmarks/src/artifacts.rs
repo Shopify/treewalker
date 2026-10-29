@@ -269,7 +269,7 @@ impl Oracle {
     /// The model's link applied to a raw margin, as production applies it.
     pub fn link(&self, raw_margin: f64) -> f64 {
         if self.postprocessor == "sigmoid" {
-            1.0 / (1.0 + (-(raw_margin * self.sigmoid_alpha)).exp())
+            treewalker_gbdt::research::sigmoid(raw_margin * self.sigmoid_alpha)
         } else {
             raw_margin
         }

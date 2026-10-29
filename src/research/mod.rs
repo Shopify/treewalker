@@ -38,4 +38,4 @@ pub use introspect::LayoutStats;
 pub use predictor::{ResearchPredictor, Stages};
 
 pub use crate::model::{Node, ThresholdType, Tree};
-pub use crate::predict::{COUNTERS_VERSION, Phases, WorkCounters};
+pub use crate::predict::{COUNTERS_VERSION, Phases, WorkCounters, sigmoid};
