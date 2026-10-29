@@ -82,6 +82,7 @@ pub(crate) use isa::{Level, level};
 
 pub(crate) use crate::predictor::{Groups, Predictor};
 pub(crate) use kernel::Options;
+pub(crate) use precompute::sweep_bounds;
 
 /// A predictor's scratch, with the rules' choices for the model on this machine.
 pub(crate) struct Workspace {

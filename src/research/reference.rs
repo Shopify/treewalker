@@ -106,7 +106,7 @@ impl Model {
     fn predicate_masks(&self, rows: &[f64], sweep: bool) -> Vec<u32> {
         let n = rows.len() / self.config.n_features();
         let mut sides = vec![[0u32; 2]; self.varying_predicates.len()];
-        let (mut order, mut codes) = (vec![(0.0, 0); n], vec![0; n]);
+        let (mut order, mut codes) = (vec![[0; 2]; 2 * n], vec![0; n]);
         let counters = &mut WorkCounters::default();
         let (out, left, missing) = (&mut sides[..], &mut 0u32, &mut 0u32);
         match (self.threshold_type, sweep) {
