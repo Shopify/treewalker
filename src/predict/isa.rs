@@ -80,12 +80,6 @@ pub trait Isa: Copy + Eq + Send + Sync + 'static {
         expect(dead_code, reason = "x86-64's choices")
     )]
     const SSE41: bool;
-    /// POPCNT: a mask of up to 8 words counts one word at a time.
-    #[cfg_attr(
-        not(target_arch = "x86_64"),
-        expect(dead_code, reason = "x86-64's choices")
-    )]
-    const POPCNT: bool;
     /// AVX2: four words per vector for masks of 256 bits and up.
     #[cfg_attr(
         not(target_arch = "x86_64"),
@@ -108,7 +102,6 @@ pub struct Native;
 impl Isa for Native {
     const NATIVE: bool = true;
     const SSE41: bool = cfg!(target_feature = "sse4.1");
-    const POPCNT: bool = cfg!(target_feature = "popcnt");
     const AVX2: bool = cfg!(target_feature = "avx2");
     const AVX512: bool = cfg!(all(target_feature = "avx512f", target_feature = "avx512vl"));
     const AVX512DQ: bool = cfg!(target_feature = "avx512dq");
@@ -159,7 +152,6 @@ macro_rules! level {
         impl Isa for $name {
             const NATIVE: bool = false;
             const SSE41: bool = true;
-            const POPCNT: bool = true;
             const AVX2: bool = true;
             const AVX512: bool = $avx512;
             const AVX512DQ: bool = $avx512;

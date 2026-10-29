@@ -82,10 +82,10 @@ pub fn is_zero<X: Isa, const W: usize>(a: &[u64; W]) -> bool {
     }
 }
 
-/// Byte counts summed in one vector, at most 8 per vector and 64 in all, then summed
-/// across the vector once.
+/// Rows set in `a`: byte counts summed in one vector, at most 8 per vector and 64 in
+/// all, then summed across the vector once.
 #[inline]
-pub fn popcount<X: Isa, const W: usize>(a: &[u64; W]) -> u32 {
+pub fn popcount<const W: usize>(a: &[u64; W]) -> u32 {
     // SAFETY: NEON is always available on AArch64.
     unsafe {
         let acc = pairs(a).iter().fold(vdupq_n_u8(0), |acc, p| {
@@ -132,11 +132,6 @@ impl<X: Isa> WordMaps for Maps<X> {
     fn nonzero<const W: usize>(w: &[u64; W]) -> u64 {
         // SAFETY: NEON is always available on AArch64.
         word_map(w, |x| unsafe { vtstq_u64(x, x) })
-    }
-
-    #[inline]
-    fn popcount<const W: usize>(w: &[u64; W]) -> u32 {
-        popcount::<X, W>(w)
     }
 }
 

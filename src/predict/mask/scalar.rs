@@ -33,11 +33,6 @@ pub fn is_zero<X: Isa, const W: usize>(a: &[u64; W]) -> bool {
     a.iter().fold(0, |acc, &x| acc | x) == 0
 }
 
-#[inline]
-pub fn popcount<X: Isa, const W: usize>(a: &[u64; W]) -> u32 {
-    a.iter().map(|x| x.count_ones()).sum()
-}
-
 /// Word maps of one bit per word.
 pub struct Maps<X>(PhantomData<X>);
 
@@ -52,11 +47,6 @@ impl<X: Isa> WordMaps for Maps<X> {
         w.iter()
             .enumerate()
             .fold(0, |m, (i, &x)| m | u64::from(x != 0) << i)
-    }
-
-    #[inline]
-    fn popcount<const W: usize>(w: &[u64; W]) -> u32 {
-        popcount::<X, W>(w)
     }
 }
 

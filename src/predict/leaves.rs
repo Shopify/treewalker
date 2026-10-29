@@ -72,7 +72,8 @@ pub(super) fn leaf_pass<M: Mask, C: Carrier<M>, S: RunSink + ?Sized, const STATS
 
 /// The loop of [`leaf_pass`]. Full entries, the leaves of trees whose path has no
 /// varying split before the leaf, add to one sum rather than
-/// to the first entry, where each add would wait on the previous one's store. The
+/// to the first entry, where each add would wait on the previous one's store; without
+/// any, the sum is zero, and flushing it would add zeros, so neither runs. The
 /// others go two at a time.
 #[inline(always)]
 fn add_entries<M: Mask, C: Carrier<M>, S: RunSink + ?Sized>(
@@ -84,9 +85,11 @@ fn add_entries<M: Mask, C: Carrier<M>, S: RunSink + ?Sized>(
     even: &mut S,
     odd: &mut S,
 ) {
-    let mut sum = S::Sum::default();
-    even.add_all_of(&mut sum, full.iter().map(|e| values[e.node as usize]));
-    even.flush(sum);
+    if !full.is_empty() {
+        let mut sum = S::Sum::default();
+        even.add_all_of(&mut sum, full.iter().map(|e| values[e.node as usize]));
+        even.flush(sum);
+    }
     let mut pairs = entries.chunks_exact(2);
     for pair in &mut pairs {
         let (a, b) = (&pair[0], &pair[1]);

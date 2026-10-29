@@ -54,13 +54,6 @@ pub trait Mask: Copy + Eq + Send + Sync + 'static {
     /// True if no row is set.
     fn is_zero(&self) -> bool;
 
-    /// Number of rows set.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the leaf pass counts rows inside add_runs")
-    )]
-    fn popcount(&self) -> u32;
-
     /// `a` if `c`, else `b`, without a branch.
     fn select(c: bool, a: Self, b: Self) -> Self;
 
@@ -118,10 +111,6 @@ macro_rules! impl_word_mask {
             #[inline]
             fn is_zero(&self) -> bool {
                 *self == 0
-            }
-            #[inline]
-            fn popcount(&self) -> u32 {
-                self.count_ones()
             }
             #[inline]
             fn select(c: bool, a: Self, b: Self) -> Self {
@@ -247,11 +236,6 @@ macro_rules! impl_wide_mask {
             }
             #[cfg_attr(dispatch, inline(always))]
             #[cfg_attr(not(dispatch), inline)]
-            fn popcount(&self) -> u32 {
-                simd::popcount::<X, $w>(&self.0)
-            }
-            #[cfg_attr(dispatch, inline(always))]
-            #[cfg_attr(not(dispatch), inline)]
             fn select(c: bool, a: Self, b: Self) -> Self {
                 Self::new(simd::select::<X, $w>(c, &a.0, &b.0))
             }
@@ -287,9 +271,6 @@ pub(super) trait WordMaps {
 
     /// The words that are not 0.
     fn nonzero<const W: usize>(w: &[u64; W]) -> u64;
-
-    /// Number of rows set.
-    fn popcount<const W: usize>(w: &[u64; W]) -> u32;
 }
 
 /// For each run of rows that starts or ends in a mask's word `x`, whose rows start at
@@ -327,10 +308,31 @@ pub(super) unsafe fn add_word_runs<S: RunSink + ?Sized>(
     }
 }
 
+/// Rows set in the words `w`. On AArch64, NEON's byte counts added across words before
+/// one sum (`neon::popcount`): `count_ones` there reduces each vector of counts on its
+/// own. Elsewhere `count_ones` per word, which LLVM lowers to the level's popcount:
+/// POPCNT per word, VPOPCNTQ with AVX-512's VPOPCNTDQ, or its own byte lookup on AVX2
+/// without it.
+#[expect(
+    clippy::inline_always,
+    reason = "add_wide_runs calls this per mask, and outlined it costs a call per mask"
+)]
+#[inline(always)]
+pub(super) fn count_rows<const W: usize>(w: &[u64; W]) -> u32 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        simd::popcount(w)
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        w.iter().map(|x| x.count_ones()).sum()
+    }
+}
+
 /// [`Mask::add_runs`] for the words `w` of a wide mask, with the word facts of `O`. A
-/// mask that is one run (its popcount equals the span from its first to its last row)
-/// writes it directly; otherwise each word from the first nonzero one to the last
-/// writes the runs that start or end in it (words of 0 between them write none).
+/// mask that is one run (as many rows set as its span from its first to its last row
+/// holds) writes it directly; otherwise each word from the first nonzero one to the
+/// last writes the runs that start or end in it (words of 0 between them write none).
 #[expect(
     clippy::inline_always,
     reason = "the leaf pass calls this twice per loop, and outlined it costs a call per entry"
@@ -355,7 +357,8 @@ pub(super) fn add_wide_runs<const W: usize, O: WordMaps, S: RunSink + ?Sized>(
     let lo = 64 * first + head.trailing_zeros() as usize;
     let hi = 64 * last + 64 - tail.leading_zeros() as usize;
     assert!(hi < sink.entries(), "a run ends past the sink");
-    if O::popcount(w) as usize == hi - lo {
+    // Every word's rows: the words outside the span are 0.
+    if count_rows(w) as usize == hi - lo {
         // SAFETY: lo < hi < sink.entries().
         unsafe {
             sink.add(lo, v);
