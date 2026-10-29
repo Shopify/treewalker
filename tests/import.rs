@@ -468,7 +468,8 @@ fn rejects_bad_json_nodes_and_topology() {
         4_294_967_296.0,
     ]
     .iter()
-    .flat_map(|&x| [x, x])
+    // Feature 1 is constant, so the same in every row of the group.
+    .flat_map(|&x| [x, 0.0])
     .collect();
     let (mut out, mut reference) = (vec![0.0; 4], vec![0.0; 4]);
     forest.predictor().predict_group(&rows, &mut out);
@@ -647,6 +648,40 @@ fn binary_truncation_lengths_extensions_metadata_and_nodes() {
     }
 }
 
+/// Both formats validate only the node statistic they take as the training weight,
+/// the data count if present, else the hessian sum, with the same error; gain is
+/// not read.
+#[test]
+fn only_the_statistic_taken_as_the_weight_is_validated() {
+    let forest_json = || simd_json::to_owned_value(&mut bytes("random_forest.json")).unwrap();
+    let mut bin = bytes("random_forest.bin");
+    let fields = binary_fields(&bin);
+    let mut write = |field: &str, value: f64| {
+        bin[fields[field]..][..8].copy_from_slice(&value.to_le_bytes());
+    };
+    // Gain, and a hessian sum beside a data count, are not taken.
+    let mut v = forest_json();
+    let root = v["trees"][0]["nodes"][0].as_object_mut().unwrap();
+    root.insert("gain".into(), "not a number".into());
+    root.insert("sum_hess".into(), (-1.0).into());
+    assert!(parse_json(&v).is_ok());
+    write("gain", f64::NAN);
+    write("sum_hess", -1.0);
+    assert!(binary_result(&bin).is_ok());
+    // Without the data count, the hessian sum is.
+    v["trees"][0]["nodes"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("data_count");
+    bin[fields["data_count_present"]] = 0;
+    let json = parse_json(&v).unwrap_err();
+    assert!(matches!(json, LoadError::MalformedModel(_)), "{json}");
+    assert_eq!(
+        json.to_string(),
+        binary_result(&bin).unwrap_err().to_string()
+    );
+}
+
 #[test]
 fn real_unsupported_exports_return_capability_errors() {
     for name in [
@@ -823,4 +858,15 @@ fn input_caps_are_options() {
     };
     let c = WalkerConfig::from_json_with(config.as_bytes(), &raised).unwrap();
     assert!(c.is_varying(19_999) && !c.is_varying(20_000));
+    // A configuration nested past its cap is a Limit, as a model is.
+    let config = br#"{"n_features":2,"max_group_width":4,"varying_features":[0],"mono_inc_features":[],"mono_dec_features":[]}"#;
+    let flat = LoadOptions {
+        max_json_nesting: 1,
+        ..defaults
+    };
+    assert!(WalkerConfig::from_json_with(config, &defaults).is_ok());
+    match WalkerConfig::from_json_with(config, &flat) {
+        Err(LoadError::Limit(msg)) => assert!(msg.starts_with("JSON nesting exceeds 1"), "{msg}"),
+        other => panic!("{other:?}"),
+    }
 }

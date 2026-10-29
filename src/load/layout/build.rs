@@ -609,6 +609,12 @@ fn encode_trees(
             }
         }
     }
+    // Predicates by node are taken in the order varying_predicates numbered them,
+    // the trees' in tree order and each tree's in heavy-first preorder: all of them.
+    debug_assert!(
+        !matches!(predicates, PredicateIds::ByNode(ids) if ids.len() != next_predicate),
+        "the nodes take every predicate assigned by node"
+    );
     debug_assert_eq!(nodes.len(), dummy as usize);
     // The decoders leave room for it.
     debug_assert!(nodes.capacity() > nodes.len());

@@ -151,6 +151,29 @@ fn mismatched_lengths_are_rejected() {
     );
 }
 
+/// Debug builds check the constant-feature contract on the features that constant
+/// splits read, the fixture's feature 1, missing values (NaN) equal to each other.
+#[cfg(debug_assertions)]
+#[test]
+fn constant_features_that_differ_within_a_group_are_rejected_in_debug_builds() {
+    let mut data = rows(8);
+    data[2 * 7 + 1] = 0.5;
+    let message = "constant feature 1 differs within a group: 0.25 in its first row, 0.5 in row 7";
+    rejects(message, 8, |p, out| p.predict_fixed(&data, 4, out));
+    rejects(message, 8, |p, out| {
+        p.predict_groups(&data, &[0, 3, 8], out);
+    });
+    // Row 7 begins a group of its own.
+    let mut out = vec![0.0; 8];
+    forest(32)
+        .predictor()
+        .predict_groups(&data, &[0, 7, 8], &mut out);
+    for r in 0..8 {
+        data[2 * r + 1] = f64::NAN;
+    }
+    forest(32).predictor().predict_group(&data, &mut out);
+}
+
 #[test]
 fn bounds_near_usize_max_do_not_overflow() {
     // Fixed groups wider than the input: the last group's end is clamped to the row

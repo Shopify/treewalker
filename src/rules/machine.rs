@@ -463,13 +463,37 @@ pub(crate) struct Latency {
 }
 
 impl Latency {
-    fn of(ns: f64, l1: f64) -> Self {
-        let ratio = ns / l1;
+    /// The latency of `ns` nanoseconds against L1's `l1`, or `assumed` L1 latencies
+    /// when their ratio is not finite and positive ([`usable`]).
+    fn of(ns: f64, l1: f64, assumed: f64) -> Self {
+        let ratio = usable(ns / l1, assumed);
         Self {
             ns,
             ratio,
             l1s: quantize(ratio),
         }
+    }
+}
+
+/// A ratio to L1's latency the rules can use, or `assumed`, an entry of
+/// [`ASSUMED_LATENCY`], when it is not finite and positive: an L1 probe of 0 ns, as a
+/// clock too coarse to time it measures, makes every ratio infinite, and the prefetch
+/// distance would overflow.
+fn usable(ratio: f64, assumed: f64) -> f64 {
+    if ratio.is_finite() && ratio > 0.0 {
+        ratio
+    } else {
+        assumed
+    }
+}
+
+/// [`ASSUMED_LATENCY`]'s entry for cache level index `i` of `n` levels, or for
+/// memory at `i == n`.
+fn assumed(i: usize, n: usize) -> f64 {
+    if i == n {
+        ASSUMED_LATENCY[2]
+    } else {
+        ASSUMED_LATENCY[usize::from(i > 0)]
     }
 }
 
@@ -494,7 +518,7 @@ pub(crate) fn latency(level: u8, nodes: &[LayoutNode], cache: &OnceLock<Latency>
         .position(|c| c.level >= level)
         .unwrap_or(n);
     if let Some(over) = overridden(n) {
-        let ratio = over[i] / over[0];
+        let ratio = usable(over[i] / over[0], assumed(i, n));
         return Latency {
             ns: over[i],
             ratio,
@@ -502,11 +526,7 @@ pub(crate) fn latency(level: u8, nodes: &[LayoutNode], cache: &OnceLock<Latency>
         };
     }
     if cfg!(miri) || (i == n && nodes.is_empty()) {
-        let l1s = if i == n {
-            ASSUMED_LATENCY[2]
-        } else {
-            ASSUMED_LATENCY[usize::from(i > 0)]
-        };
+        let l1s = assumed(i, n);
         return Latency {
             ns: l1s,
             ratio: l1s,
@@ -526,7 +546,7 @@ pub(crate) fn latency(level: u8, nodes: &[LayoutNode], cache: &OnceLock<Latency>
             let [l1, pool] = interleaved(&mut [&mut l1, &mut walk])[..] else {
                 unreachable!("two probes")
             };
-            Latency::of(pool, l1)
+            Latency::of(pool, l1, assumed(n, n))
         });
     }
     LEVELS.get_or_init(|| {
@@ -547,7 +567,10 @@ pub(crate) fn latency(level: u8, nodes: &[LayoutNode], cache: &OnceLock<Latency>
         let mut probes: Vec<&mut dyn Probe> =
             chases.iter_mut().map(|c| c as &mut dyn Probe).collect();
         let ns = interleaved(&mut probes);
-        ns.iter().map(|&ns_i| Latency::of(ns_i, ns[0])).collect()
+        ns.iter()
+            .enumerate()
+            .map(|(level, &ns_i)| Latency::of(ns_i, ns[0], assumed(level, n)))
+            .collect()
     })[i]
 }
 
@@ -566,8 +589,8 @@ fn overridden(levels: usize) -> Option<&'static [f64]> {
         .as_deref()
 }
 
-/// A latency ratio `x` rounded to the nearest power of two in log space, and at
-/// least 1.
+/// A latency ratio `x`, finite and positive ([`usable`]), rounded to the nearest
+/// power of two in log space, and at least 1.
 ///
 /// The rules turn latencies into powers of two (prefetch distances), so a power of
 /// two is all the precision a ratio needs, and rounding in log space keeps the error
@@ -579,11 +602,7 @@ fn overridden(levels: usize) -> Option<&'static [f64]> {
 /// latencies, across the boundary at 128, so that processes read 128 or 256; its
 /// nearest boundaries are now 90.5 and 181.
 fn quantize(x: f64) -> f64 {
-    if x.is_finite() && x > 0.0 {
-        2f64.powi(x.log2().round() as i32).max(1.0)
-    } else {
-        x
-    }
+    2f64.powi(x.log2().round() as i32).max(1.0)
 }
 
 /// A dependent load the probe times, run after run.
@@ -761,6 +780,22 @@ mod tests {
         assert_eq!(quantize(125.0), 128.0);
         assert_eq!(quantize(180.0), 128.0);
         assert_eq!(quantize(182.0), 256.0);
+    }
+
+    /// Probe results whose ratio to L1's latency is not finite and positive, as from
+    /// an L1 probe of 0 ns, take the assumed latency.
+    #[test]
+    fn unusable_ratios_take_the_assumed_latency() {
+        let assumed = ASSUMED_LATENCY[1];
+        for (ns, l1) in [(5.0, 0.0), (0.0, 0.0), (0.0, 2.0), (1e300, 1e-300)] {
+            let latency = Latency::of(ns, l1, assumed);
+            assert_eq!(
+                (latency.ns, latency.ratio, latency.l1s),
+                (ns, assumed, assumed)
+            );
+        }
+        let latency = Latency::of(5.0, 1.0, assumed);
+        assert_eq!((latency.ratio, latency.l1s), (5.0, 4.0));
     }
 
     #[test]

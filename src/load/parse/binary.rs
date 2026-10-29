@@ -966,6 +966,19 @@ fn decode_fast(
     if !ok {
         return Ok(false);
     }
+    // What the fast path accepts, decode_node accepts too and decodes alike. Checked
+    // on the nodes decoded here; decode_node would intern a categorical split's list.
+    #[cfg(debug_assertions)]
+    for (i, fast) in temp.iter().enumerate() {
+        if f.node_type[i] != 2 {
+            let slow = decode_node(i, n, ctx, f).expect("decode_node accepts the node");
+            let bits = |t: &TempNode| (t.value.to_bits(), t.left, t.right, t.feature, t.flags);
+            debug_assert!(
+                bits(fast) == bits(&slow) && fast.weight.to_bits() == slow.weight.to_bits(),
+                "node {i} decodes as decode_node decodes it"
+            );
+        }
+    }
     for &i in categorical.iter() {
         let i = i as usize;
         temp[i] = decode_node(i, n, ctx, f).map_err(|e| e.at(&format!("node {i}")))?;
@@ -985,18 +998,13 @@ fn decode_node(
     if !(0..=2).contains(&kind) {
         return Err(LoadError::Unsupported(format!("node_type={kind}")));
     }
-    let weight = if b.data_present.get(i) == Some(&1) {
+    let weight = validation::weight(if b.data_present.get(i) == Some(&1) {
         u64::from_le_bytes(b.data_count[i]) as f64
     } else if b.hess_present.get(i) == Some(&1) {
         f64::from_le_bytes(b.sum_hess[i])
     } else {
         1.0
-    };
-    if !weight.is_finite() || weight < 0.0 {
-        return Err(LoadError::MalformedModel(format!(
-            "invalid node statistic {weight}"
-        )));
-    }
+    })?;
     let (begin, end) = (
         u64::from_le_bytes(b.cat_begin[i]),
         u64::from_le_bytes(b.cat_end[i]),
@@ -1088,6 +1096,124 @@ mod tests {
         }
         assert!(out.len() >= 10);
         out
+    }
+
+    /// An array of a checkpoint: its length, then its entries.
+    fn array<const N: usize>(out: &mut Vec<u8>, entries: impl IntoIterator<Item = [u8; N]>) {
+        let at = out.len();
+        out.extend_from_slice(&[0; 8]);
+        let mut len = 0u64;
+        for entry in entries {
+            out.extend_from_slice(&entry);
+            len += 1;
+        }
+        out[at..at + 8].copy_from_slice(&len.to_le_bytes());
+    }
+
+    /// A float64 regression checkpoint of two features with `trees`.
+    fn checkpoint(trees: &[Vec<u8>]) -> Vec<u8> {
+        let n = trees.len();
+        // Versions, types, num_tree, num_feature, task_type, average_tree_output and
+        // num_target.
+        let mut out = [4, 0, 0].map(i32::to_le_bytes).concat();
+        out.extend_from_slice(&[3, 3]);
+        out.extend_from_slice(&(n as u64).to_le_bytes());
+        out.extend_from_slice(&[2, 0, 0, 0, 1, 0, 1, 0, 0, 0]);
+        array(&mut out, [1i32.to_le_bytes()]);
+        array(&mut out, [1i32.to_le_bytes(); 2]);
+        // target_id and class_id.
+        for _ in 0..2 {
+            array(&mut out, (0..n).map(|_| [0; 4]));
+        }
+        array(&mut out, b"identity".map(|c| [c]));
+        // sigmoid_alpha and ratio_c, base_scores, attributes and the extension count.
+        out.extend_from_slice(&[1f32.to_le_bytes(), 1f32.to_le_bytes()].concat());
+        array(&mut out, [0f64.to_le_bytes()]);
+        array(&mut out, b"{}".map(|c| [c]));
+        out.extend_from_slice(&[0; 4]);
+        out.extend(trees.iter().flatten());
+        out
+    }
+
+    /// A tree of `n` nodes in breadth-first order, splits on feature 0 then leaves,
+    /// with the data counts `counts`, one per node or none.
+    fn tree(n: usize, counts: &[u64]) -> Vec<u8> {
+        let nodes = || 0..n;
+        let split = |i: usize| i < n / 2;
+        let child = |i: usize, k: usize| if split(i) { (2 * i + k) as i32 } else { -1 };
+        let mut out = (n as i32).to_le_bytes().to_vec();
+        out.push(0);
+        array(&mut out, nodes().map(|i| [u8::from(split(i))]));
+        array(&mut out, nodes().map(|i| child(i, 1).to_le_bytes()));
+        array(&mut out, nodes().map(|i| child(i, 2).to_le_bytes()));
+        array(
+            &mut out,
+            nodes().map(|i| (-i32::from(!split(i))).to_le_bytes()),
+        );
+        array(&mut out, nodes().map(|_| [1]));
+        array(&mut out, nodes().map(|i| (i as f64).to_le_bytes()));
+        array(&mut out, nodes().map(|i| (i as f64 + 0.5).to_le_bytes()));
+        array(&mut out, nodes().map(|i| [3 * u8::from(split(i))]));
+        array(&mut out, nodes().map(|_| [0]));
+        // The leaf vector, its offsets and the category list, empty, then the lists'
+        // offsets.
+        for _ in 0..3 {
+            array::<8>(&mut out, []);
+        }
+        array::<4>(&mut out, []);
+        for _ in 0..2 {
+            array(&mut out, nodes().map(|_| [0; 8]));
+        }
+        array(&mut out, counts.iter().map(|c| c.to_le_bytes()));
+        array(&mut out, counts.iter().map(|_| [1]));
+        // No hessian sums or gains, and the two extension counts.
+        for _ in 0..2 {
+            array::<8>(&mut out, []);
+            array::<1>(&mut out, []);
+        }
+        out.extend_from_slice(&[0; 8]);
+        out
+    }
+
+    /// The node count is a guess, which a crafted checkpoint can make wrong while it
+    /// decodes: a wrong count costs a copy of the nodes in every build.
+    #[test]
+    fn a_wrong_node_count_costs_a_copy() {
+        // Tree a has no data counts and tree b has, so the guess reads b as if it had
+        // none and the third tree's header 81 bytes before b's end, in its counts.
+        // There, a header of 10 nodes, whose guessed lengths end where c does.
+        let (a, mut b, c) = (tree(1, &[]), tree(9, &[1; 9]), tree(7, &[1; 7]));
+        let none = Lengths {
+            leaf_vector: 0,
+            categories: 0,
+            data_count: 0,
+            sum_hess: 0,
+            gain: 0,
+        };
+        let at = b.len() - 81;
+        assert_eq!(none.bytes(9, 8), Some(at as u64));
+        assert_eq!(none.bytes(10, 8), Some(81 + c.len() as u64));
+        let header = [&10i32.to_le_bytes()[..], &[0], &10u64.to_le_bytes()].concat();
+        b[at..at + 13].copy_from_slice(&header);
+        let bytes = checkpoint(&[a, b, c]);
+        assert_eq!(count_nodes(bytes.as_slice(), u64::MAX), Some(1 + 9 + 10));
+        assert_eq!(
+            count_trees(bytes.as_slice(), u64::MAX, false),
+            Some(1 + 9 + 7)
+        );
+        let config = WalkerConfig::builder(2)
+            .max_group_width(16)
+            .varying([0])
+            .build()
+            .unwrap();
+        let parsed = parse_bytes(
+            &bytes,
+            &config,
+            &LoadOptions::default(),
+            &Choices::default(),
+        );
+        let trees = parsed.unwrap().decoded.trees;
+        assert_eq!(trees.iter().map(|t| t.count).sum::<u32>(), 17);
     }
 
     /// The node count from the trees' headers is the decoder's, from the bytes and

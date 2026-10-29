@@ -54,7 +54,7 @@ impl TempNode {
 /// model-level configuration.
 pub struct ParseContext<'a> {
     pub decoded: &'a mut Decoded,
-    pub list_intern: Option<&'a mut HashMap<Vec<u32>, usize>>,
+    pub list_intern: Option<&'a mut HashMap<Vec<u32>, u32>>,
     pub config: &'a WalkerConfig,
     pub threshold_type: ThresholdType,
     /// A split's categories, sorted and distinct.
@@ -106,8 +106,9 @@ pub const fn build_flags(default_left: bool, is_cat: bool, inline: bool, varying
 /// 32, otherwise as a list in `ctx.categories`, its length then its categories,
 /// sorted and distinct. Lists are interned unless `disable_bitset_intern`.
 ///
-/// Returns `(value, is_inline)`: the word, or the list's offset, as f64 (exact
-/// below 2^53). The list pool grows with the input's entries only.
+/// Returns `(value, is_inline)`: the word, or the list's offset, as f64. The list
+/// pool grows with the input's entries only, up to `u32::MAX` entries, which its
+/// 32-bit offsets address; past them, a [`LoadError::Limit`].
 pub fn encode_categories(
     categories: impl IntoIterator<Item = u32>,
     ctx: &mut ParseContext<'_>,
@@ -129,7 +130,7 @@ pub fn encode_categories(
         offset
     } else {
         let categories = &mut ctx.decoded.categories;
-        let offset = categories.len();
+        let offset = crate::load::u32_extent(categories.len(), list.len() + 1, "category lists")?;
         LoadError::reserve(categories.try_reserve(list.len() + 1))?;
         categories.push(list.len() as u32);
         categories.extend_from_slice(list);
@@ -138,7 +139,7 @@ pub fn encode_categories(
         }
         offset
     };
-    Ok((offset as f64, false))
+    Ok((f64::from(offset), false))
 }
 
 // ---------------------------------------------------------------------------
@@ -329,8 +330,17 @@ fn search_positions(temp: &[TempNode], root_idx: usize, s: &mut OrderScratch) {
 
 /// The heavy child's share of its parent's training weight, `heavy / (heavy +
 /// light)`, in 1/65535ths; one half when neither child has weight.
+///
+/// The weights are finite and not negative, but their sum can overflow, when each is
+/// at least 2^970, half the last unit of `f64::MAX`; then both are halved, exactly at
+/// that size, so that the share stays near what it is rather than 0. A finite sum is
+/// divided as it is.
 fn heavy_share(heavy: f64, light: f64) -> u16 {
-    let total = heavy + light;
+    let (mut heavy, mut total) = (heavy, heavy + light);
+    if total.is_infinite() {
+        let (half, light) = (heavy * 0.5, light * 0.5);
+        (heavy, total) = (half, half + light);
+    }
     let share = if total > 0.0 { heavy / total } else { 0.5 };
     (share.clamp(0.0, 1.0) * f64::from(u16::MAX)).round() as u16
 }
@@ -407,6 +417,17 @@ fn validate_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Weights whose sum overflows keep their share; finite sums round as before.
+    #[test]
+    fn heavy_shares_of_weights_near_f64_max() {
+        assert_eq!(heavy_share(f64::MAX, f64::MAX), 32_768);
+        assert_eq!(heavy_share(f64::MAX, f64::MAX / 2.0), 43_690);
+        assert_eq!(heavy_share(f64::MAX, 2f64.powi(970)), u16::MAX);
+        assert_eq!(heavy_share(f64::MAX, 0.0), u16::MAX);
+        assert_eq!(heavy_share(3.0, 1.0), 49_151);
+        assert_eq!(heavy_share(0.0, 0.0), 32_768);
+    }
 
     /// The node total's bound, without building 4 billion nodes.
     #[test]

@@ -246,6 +246,9 @@ JSON. Declared lengths are checked before allocation or multiplication. Both
 readers validate tree topology iteratively before layout: unique node IDs,
 valid children, reachability, cycles and shared-child rejection. Optional
 statistics may be absent; present field arrays must have consistent lengths.
+Of a node's statistics, both readers take only the training weight that orders its
+children heavy first, the data count if present, else the hessian sum, and reject it
+if it is negative or not finite; the other statistics, gain among them, are not read.
 
 ## Load time and memory
 

@@ -155,3 +155,37 @@ impl Forest {
         })
     }
 }
+
+/// The index of `len` entries appended to a table of `start` entries that 32-bit
+/// indices address, the category pool or the codebooks: past `u32::MAX` entries in
+/// all, a [`LoadError::Limit`], so that every index into the table, and its length,
+/// fits in 32 bits.
+pub(crate) fn u32_extent(start: usize, len: usize, table: &str) -> Result<u32, LoadError> {
+    match start.checked_add(len).map(u32::try_from) {
+        Some(Ok(_)) => Ok(start as u32),
+        _ => Err(LoadError::Limit(format!(
+            "{table} exceed {} entries: their indices are 32-bit",
+            u32::MAX
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bound of the category pool and the codebooks, without 2^32 entries.
+    #[test]
+    fn u32_tables_end_at_u32_max() {
+        let max = u32::MAX as usize;
+        assert_eq!(u32_extent(0, 0, "lists").unwrap(), 0);
+        assert_eq!(u32_extent(max - 10, 10, "lists").unwrap(), u32::MAX - 10);
+        assert_eq!(u32_extent(max, 0, "lists").unwrap(), u32::MAX);
+        for (start, len) in [(max - 10, 11), (max, 1), (1, max), (usize::MAX, 1)] {
+            assert!(matches!(
+                u32_extent(start, len, "lists"),
+                Err(LoadError::Limit(_))
+            ));
+        }
+    }
+}

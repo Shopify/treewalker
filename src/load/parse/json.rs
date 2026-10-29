@@ -280,7 +280,6 @@ struct NodeFields<'t, 'i> {
     category_list_right_child: Option<Value<'t, 'i>>,
     data_count: Option<Value<'t, 'i>>,
     sum_hess: Option<Value<'t, 'i>>,
-    gain: Option<Value<'t, 'i>>,
     unknown: Option<&'i str>,
     not_leaf: Option<&'i str>,
 }
@@ -304,7 +303,8 @@ impl<'t, 'i> NodeFields<'t, 'i> {
                 "category_list_right_child" => (&mut f.category_list_right_child, false),
                 "data_count" => (&mut f.data_count, true),
                 "sum_hess" => (&mut f.sum_hess, true),
-                "gain" => (&mut f.gain, true),
+                // A statistic the loader does not read.
+                "gain" => continue,
                 _ => {
                     f.unknown = f.unknown.or(Some(k));
                     f.not_leaf = f.not_leaf.or(Some(k));
@@ -352,22 +352,13 @@ fn decode_node(
     if let Some(k) = node.unknown {
         return Err(LoadError::Unsupported(format!("unknown JSON field {k:?}")));
     }
-    let mut weight = 1.0;
-    for (name, value) in [
-        ("gain", node.gain),
-        ("sum_hess", node.sum_hess),
-        ("data_count", node.data_count),
-    ] {
-        if value.is_some() {
-            let v = NodeFields::number(value, name)?;
-            if !v.is_finite() || (name != "gain" && v < 0.0) {
-                return Err(malformed(name));
-            }
-            if name != "gain" {
-                weight = v;
-            }
-        }
-    }
+    // The training weight: the data count if present, else the hessian sum, else 1,
+    // as the binary decoder takes it. The other statistics are not read.
+    let weight = match (node.data_count, node.sum_hess) {
+        (Some(count), _) => validation::weight(NodeFields::number(Some(count), "data_count")?)?,
+        (None, Some(hess)) => validation::weight(NodeFields::number(Some(hess), "sum_hess")?)?,
+        (None, None) => 1.0,
+    };
     if let Some(value) = node.leaf_value {
         if let Some(k) = node.not_leaf {
             return Err(LoadError::Unsupported(format!("unknown JSON field {k:?}")));

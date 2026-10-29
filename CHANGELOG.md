@@ -22,6 +22,46 @@ than calling the platform's libm.
   platform; 3.0's last bits came from the platform's libm. Against 3.0 with Apple's
   libm, 99.92% of outputs are unchanged and the rest move by at most 4 ulp; both are
   within 2 ulp of the correctly rounded sigmoid for `|m| <= 40`.
+- Debug builds check the predictor's contract that a group's constant features are
+  equal in every row, on the features that constant splits read, and panic naming
+  the feature and the row; a missing value equals a missing one. Release builds do
+  not check it, as before.
+
+### Fixes
+
+- A `WalkerConfig` takes memory in proportion to the features it declares. 3.0 kept
+  each role as a bitset up to its largest index, so a 120-byte configuration that
+  declared feature 2,147,483,646 varying took about 768 MiB while it was built and
+  256 MiB after.
+- `WalkerConfig::from_json` and `from_file`, and their `_with` forms, return
+  `LoadError::Limit` for a configuration nested deeper than
+  `LoadOptions::max_json_nesting`, as they do for one past `max_config_bytes` and as
+  the model loaders do for nesting. 3.0 returned `MalformedConfig`, with the limit's
+  message inside its own.
+- A model whose category lists take more than `u32::MAX` entries in all, or whose
+  categorical features' codebooks do, fails to load with `LoadError::Limit`, as one
+  past the other 32-bit index tables does. 3.0 converted the offsets past them to 32
+  bits without a check, and so read the wrong lists. Only a model loaded with
+  `LoadOptions` caps raised far past their defaults can have that many: the lists
+  take at least 4 bytes of a binary model per entry.
+- The JSON reader validates a node's statistics as the binary reader does: only the
+  one it takes as the training weight, the data count if present, else the hessian
+  sum, which must be finite and not negative, with the binary reader's error; `gain`
+  is not read. 3.0 rejected a JSON model with any invalid `gain`, `sum_hess` or
+  `data_count`, which the same model in binary loaded with.
+- When the latency probe times L1 at 0 ns, as a clock too coarse to time it can, or
+  `TREEWALKER_LATENCY_NS` gives latencies whose ratios overflow, the prefetch rule
+  takes the assumed latency ratios. In 3.0 the infinite ratio overflowed the
+  restart prefetch distance in `Forest::predictor`: a panic in builds with overflow
+  checks, and no restart prefetch in others.
+- A split whose children's training weights are finite but sum past `f64::MAX`
+  gives its heavy child the share of their weight it has, which the research API's
+  `Node::heavy` reports, rather than 0. The share guides layout choices only, so
+  outputs are unchanged.
+- Debug builds load a binary checkpoint whose node count, guessed from its trees'
+  headers before decoding, is wrong, as release builds do, by copying the nodes.
+  Only a crafted checkpoint can make the guess wrong and still decode; 3.0's debug
+  builds panicked on it.
 
 ## 3.0.0
 
