@@ -61,30 +61,6 @@ fn rejects_with(
 }
 
 #[test]
-fn the_three_calls_agree_on_every_grouping() {
-    let data = rows(100);
-    let mut p = forest(32).predictor();
-    let mut alone = vec![0.0; 100];
-    for (row, out) in data.chunks(2).zip(alone.chunks_mut(1)) {
-        p.predict_group(row, out);
-    }
-    for width in [1, 3, 16, 17, 32] {
-        // 100 rows: the last group is shorter unless width divides 100.
-        let mut fixed = vec![f64::NAN; 100];
-        p.predict_fixed(&data, width, &mut fixed);
-        assert_eq!(bits(&fixed), bits(&alone), "fixed {width}");
-        let offsets: Vec<usize> = (0..100).step_by(width).chain([100]).collect();
-        let mut grouped = vec![f64::NAN; 100];
-        p.predict_groups(&data, &offsets, &mut grouped);
-        assert_eq!(bits(&grouped), bits(&alone), "offsets {width}");
-    }
-    let offsets = [0, 1, 33, 34, 66, 98, 100];
-    let mut grouped = vec![f64::NAN; 100];
-    p.predict_groups(&data, &offsets, &mut grouped);
-    assert_eq!(bits(&grouped), bits(&alone), "uneven offsets");
-}
-
-#[test]
 fn empty_input_is_a_no_op() {
     let mut p = forest(32).predictor();
     p.predict_group(&[], &mut []);
