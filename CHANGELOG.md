@@ -152,6 +152,16 @@ on Milan.
   and a what-if on Altra.
 - Against 2.x, one cell was slower at both alignments: Altra's Expedia LightGBM
   sessions of 1,000 trees of depth 16, 1.057 / 1.060.
+- A model whose categorical splits take many distinct heavy sets that seldom nest,
+  some 100,000 or more on one feature, can fail to load at the default limits, and
+  loads slowly with them raised. The chain cover (`src/load/layout/chains.rs`)
+  matches over the sets' inclusion graph, which grows faster than the sets, and the
+  rank tables take a slot per chain. The `categorical-scale` cell
+  (`docs/categorical-scale.md`) reproduces it on public data: on Genoa
+  (c3d-standard-90) its model, 600 LightGBM trees of 4,096 leaves on Expedia
+  searches with 265,406 distinct sets on `srch_destination_id`, fails with
+  `LoadError::Limit` on the inclusion graph in 1.3 s, and with the cap raised its
+  190,335 chains load in 4.7 s at a peak of 1.5 GB.
 
 ## 3.0.0
 
