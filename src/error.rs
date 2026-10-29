@@ -1,4 +1,5 @@
 //! Errors returned by the import APIs.
+
 use std::io;
 
 /// Failure to read, validate, or represent a model or grouping configuration.
@@ -23,6 +24,8 @@ pub enum LoadError {
 }
 
 impl LoadError {
+    /// The error with `context`, such as the node it concerns, before its message;
+    /// I/O and configuration errors are returned as they are.
     pub(crate) fn at(self, context: &str) -> Self {
         match self {
             Self::MalformedModel(s) => Self::MalformedModel(format!("{context}: {s}")),

@@ -7,11 +7,13 @@
 //! to be model-agnostic — it works for any grouped prediction task (hazard,
 //! ranking, CTR), not just a specific feature set.
 //!
-//! # Why bitmasks?
+//! # Feature sets
 //!
-//! Feature classification is stored as u128 bitmasks for O(1) lookup on the hot path.
-//! A single `AND` + compare replaces what would otherwise be an array lookup or hash
-//! check on every split node. Supports up to 64 features (validated at load time).
+//! Each role is a bitset over feature indices, up to the highest index declared
+//! for it, or "every feature" for [`WalkerConfigBuilder::all_varying`]. A lookup is
+//! one bounds check and one bit test, and the sets take memory in proportion to the
+//! declarations, not to `n_features`. A model has at most `i32::MAX` features, the
+//! range of Treelite's `num_feature`.
 
 use crate::LoadError;
 use serde::Deserialize;
@@ -28,39 +30,76 @@ struct WalkerConfigFile {
     mono_dec_features: Vec<usize>,
 }
 
-/// Load-time options: optimizations baked into the model's layout, and how its leaves
-/// are summed.
+/// Load-time options: the caps on untrusted input.
 ///
-/// Every option defaults to the optimized layout with exact sums. The `disable_*`
-/// options and `prefix_depth = 0` exist to measure what each optimization
-/// contributes, and `exact_sums = false` to predict with per-row `f64` sums; changing
-/// one means loading the model again.
+/// The caps bound what a hostile file can make the loader read, allocate and decode
+/// before it is rejected with [`LoadError::Limit`]. Raise them to load larger trusted
+/// inputs. Nothing else in the model's representation has a fixed limit: trees,
+/// nodes, depth, features, predicates and category IDs are bounded by the input, by
+/// memory, and by the widths documented in `docs/treelite-loading.md`. The layout's
+/// choices (tree order, interning, prefix groups, predicate sharing) are the
+/// library's; the `research` feature can turn each off to measure it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LoadOptions {
-    /// Keep the trees in the model's order instead of sorting trees with similar
-    /// early splits next to each other.
+    /// Bytes a binary model may take in all; default 4 GiB.
+    pub max_binary_bytes: u64,
+    /// Bytes one array field of a binary model may take; default 64 MiB. It also
+    /// bounds the trees (4 bytes each in `target_id`) and the nodes and category
+    /// entries of each tree.
+    pub max_binary_array_bytes: u64,
+    /// Bytes of a JSON model; default 64 MiB. Large models should use binary.
+    pub max_json_bytes: u64,
+    /// Bytes of a model's `attributes` string; default 16 MiB.
+    pub max_attributes_bytes: u64,
+    /// Nesting of arrays and objects in JSON models, attributes and configurations;
+    /// default 64.
+    pub max_json_nesting: usize,
+    /// Bytes of a configuration file; default 64 KiB.
+    pub max_config_bytes: u64,
+    /// Bytes of the categorical rank tables built at load; default 256 MiB. A
+    /// categorical feature with C categories whose splits' sets need W chains takes
+    /// 4 × (W + C + 3) bytes, and 8 more per exception, a code's rank in a chain
+    /// where it differs from an unlisted category's: at most one per listed category
+    /// (or missing sent left) of each distinct heavy set. A categorical feature the
+    /// walker configuration declares varying also takes, for the masks its rows
+    /// flip, 4 × (C + 3) bytes and at most 8 per exception in a chain that its splits
+    /// test. The cap also bounds, per feature, what is
+    /// built on the way: 4 bytes per listed category of each split's heavy side, and
+    /// the inclusions between distinct heavy sets, which a small hostile file could
+    /// otherwise make quadratic in its splits: 8 bytes per inclusion between two
+    /// listed sets or two complements, and a bit for each pair of a listed set and a
+    /// complement.
+    pub max_rank_table_bytes: u64,
+    /// Until the research module's load ablations replace them: keep the trees in the
+    /// model's order instead of sorting trees with similar early splits next to each
+    /// other.
     pub disable_tree_ordering: bool,
-    /// Store every categorical bitset, even when an identical one is already pooled.
+    /// Until the research module's load ablations replace it: store every categorical
+    /// bitset, even when an identical one is already pooled.
     pub disable_bitset_intern: bool,
-    /// Constant-prefix depth K: trees sharing their first K heavy-path constant splits
-    /// evaluate them once per group instead of once per tree. 0 disables it; the
-    /// default is 2.
+    /// Until the research module's load ablations replace it: the constant-prefix
+    /// depth, 0 to disable prefix groups; the default is 2.
     pub prefix_depth: usize,
-    /// Give every varying node its own predicate instead of sharing one between
-    /// identical splits. This multiplies the precompute work, and large models can
-    /// exceed the 65,535 predicate limit.
+    /// Until the research module's load ablations replace it: give every varying node
+    /// its own predicate instead of sharing one between identical splits.
     pub disable_predicate_dedup: bool,
-    /// Sum each row's leaf values exactly and round once, when the model's leaves
-    /// allow it (the default). False adds them per row in `f64`, in the loaded tree
-    /// order, as the full walk does; [`Forest::exact_sums`](crate::Forest::exact_sums)
-    /// then reports false. Predictions can differ from the exact sums in the last
-    /// bits, and with tree ordering on they depend on the order it chooses.
+    /// Until every model sums exactly: sum each row's leaf values exactly and round
+    /// once, when the model's leaves allow it (the default). False adds them per row
+    /// in `f64`, in the loaded tree order, as the full walk does;
+    /// [`Forest::exact_sums`](crate::Forest::exact_sums) then reports false.
     pub exact_sums: bool,
 }
 
 impl Default for LoadOptions {
     fn default() -> Self {
         Self {
+            max_binary_bytes: 4 << 30,
+            max_binary_array_bytes: 64 << 20,
+            max_json_bytes: 64 << 20,
+            max_attributes_bytes: 16 << 20,
+            max_json_nesting: 64,
+            max_config_bytes: 64 << 10,
+            max_rank_table_bytes: 256 << 20,
             disable_tree_ordering: false,
             disable_bitset_intern: false,
             prefix_depth: 2,
@@ -70,34 +109,134 @@ impl Default for LoadOptions {
     }
 }
 
+/// A set of feature indices: every feature, or the set bits of `words`, which has
+/// no trailing zero word. Canonical, so equal sets compare equal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FeatureSet {
+    all: bool,
+    words: Vec<u64>,
+}
+
+impl FeatureSet {
+    const ALL: Self = Self {
+        all: true,
+        words: Vec::new(),
+    };
+
+    /// Whether `feature` is in the set, for a feature below the set's `n_features`.
+    #[inline]
+    const fn contains(&self, feature: usize) -> bool {
+        let words = self.words.as_slice();
+        self.all || (feature / 64 < words.len() && (words[feature / 64] >> (feature % 64)) & 1 != 0)
+    }
+
+    /// The set of `indices`, each below `n_features` and listed once.
+    fn of(indices: &[usize], n_features: usize, label: &str) -> Result<Self, LoadError> {
+        let mut words = Vec::new();
+        for &i in indices {
+            if i >= n_features {
+                return Err(LoadError::MalformedConfig(format!(
+                    "{label}: index {i} >= n_features {n_features}"
+                )));
+            }
+            if words.len() <= i / 64 {
+                words.resize(i / 64 + 1, 0);
+            }
+            let bit = 1u64 << (i % 64);
+            if words[i / 64] & bit != 0 {
+                return Err(LoadError::MalformedConfig(format!(
+                    "{label}: duplicate index {i}"
+                )));
+            }
+            words[i / 64] |= bit;
+        }
+        Ok(Self { all: false, words }.canonical(n_features))
+    }
+
+    /// The union of two sets over `n_features`.
+    fn union(&self, other: &Self, n_features: usize) -> Self {
+        if self.all || other.all {
+            return Self::ALL;
+        }
+        let (long, short) = if self.words.len() >= other.words.len() {
+            (self, other)
+        } else {
+            (other, self)
+        };
+        let mut words = long.words.clone();
+        for (w, s) in words.iter_mut().zip(&short.words) {
+            *w |= s;
+        }
+        Self { all: false, words }.canonical(n_features)
+    }
+
+    /// The lowest index in both sets, if any.
+    fn first_common(&self, other: &Self, n_features: usize) -> Option<usize> {
+        match (self.all, other.all) {
+            (true, true) => Some(0),
+            (true, false) => other.first(),
+            (false, true) => self.first(),
+            (false, false) => self
+                .words
+                .iter()
+                .zip(&other.words)
+                .position(|(a, b)| a & b != 0)
+                .map(|i| 64 * i + (self.words[i] & other.words[i]).trailing_zeros() as usize),
+        }
+        .filter(|&f| f < n_features)
+    }
+
+    fn first(&self) -> Option<usize> {
+        let i = self.words.iter().position(|&w| w != 0)?;
+        Some(64 * i + self.words[i].trailing_zeros() as usize)
+    }
+
+    /// Every feature as `ALL`, and no trailing zero word.
+    fn canonical(mut self, n_features: usize) -> Self {
+        let count: usize = self.words.iter().map(|w| w.count_ones() as usize).sum();
+        if self.all || count == n_features {
+            return Self::ALL;
+        }
+        while self.words.last() == Some(&0) {
+            self.words.pop();
+        }
+        self
+    }
+}
+
 /// Feature classification for partial evaluation.
 ///
 /// A feature is exactly one of:
 /// - **Constant**: identical across all rows of a group. Its splits are evaluated
 ///   once per tree (the constant walk).
-/// - **Varying, monotonic increasing**: values ascend across the group's rows, so a
-///   split partitions them with a prefix scan.
-/// - **Varying, monotonic decreasing**: values descend; a suffix scan.
-/// - **Varying, non-monotonic**: each row is evaluated on its own.
+/// - **Varying, monotonic increasing**: values ascend across the group's rows.
+/// - **Varying, monotonic decreasing**: values descend.
+/// - **Varying, non-monotonic**: no order.
+///
+/// Prediction sorts each varying feature's rows to build its splits' row masks,
+/// whatever the declared order; rows that arrive sorted take the sort one pass. Only
+/// the research API's event scans (`disable_varying_precompute`) use the declared
+/// order, to stop comparing at the first row past a threshold.
 ///
 /// Build one with [`WalkerConfig::builder`], or read the training pipeline's
-/// `walker_config.json` with [`WalkerConfig::from_file`]. The equality and
-/// monotonicity of each group's values are caller contracts, not checked.
+/// `walker_config.json` with [`WalkerConfig::from_file`]. The equality of each
+/// group's constant values is a caller contract, not checked; production's outputs
+/// do not depend on monotonicity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WalkerConfig {
     n_features: usize,
     max_group_width: usize,
-    /// Bit `i` is set if feature `i` is varying across rows.
-    varying_mask: u128,
-    /// Bit `i` is set if feature `i` is monotonic increasing across the group.
-    mono_inc_mask: u128,
-    /// Bit `i` is set if feature `i` is monotonic decreasing across the group.
-    mono_dec_mask: u128,
+    /// The features that vary across rows, monotonic or not.
+    varying: FeatureSet,
+    /// The features that increase across a group's rows.
+    increasing: FeatureSet,
+    /// The features that decrease across a group's rows.
+    decreasing: FeatureSet,
 }
 
 impl WalkerConfig {
-    /// Start a configuration for `n_features` features, 1 to 64, in the model's
-    /// trained column order.
+    /// Start a configuration for `n_features` features, 1 to `i32::MAX`, in the
+    /// model's trained column order.
     ///
     /// ```
     /// use treewalker_gbdt::WalkerConfig;
@@ -121,22 +260,41 @@ impl WalkerConfig {
         }
     }
 
-    /// Read and validate the five-field grouping JSON schema from a file.
+    /// Read and validate the five-field grouping JSON schema from a file, within the
+    /// default [`LoadOptions`] caps.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, LoadError> {
+        Self::from_file_with(path, &LoadOptions::default())
+    }
+
+    /// As [`Self::from_file`], within the caps of `options`:
+    /// [`LoadOptions::max_config_bytes`] and [`LoadOptions::max_json_nesting`].
+    pub fn from_file_with(
+        path: impl AsRef<Path>,
+        options: &LoadOptions,
+    ) -> Result<Self, LoadError> {
         use std::io::Read;
         let mut bytes = Vec::new();
         std::fs::File::open(path)?
-            .take(65_537)
+            .take(options.max_config_bytes.saturating_add(1))
             .read_to_end(&mut bytes)?;
-        Self::from_json(&bytes)
+        Self::from_json_with(&bytes, options)
     }
 
     /// Parse and validate grouping JSON, bounded to 64 KiB: `n_features`,
     /// `max_group_width`, `varying_features`, `mono_inc_features` and
     /// `mono_dec_features`, validated as the builder validates them.
     pub fn from_json(bytes: &[u8]) -> Result<Self, LoadError> {
-        if bytes.len() > 65_536 {
-            return Err(LoadError::Limit("configuration exceeds 64 KiB".into()));
+        Self::from_json_with(bytes, &LoadOptions::default())
+    }
+
+    /// As [`Self::from_json`], within the caps of `options`:
+    /// [`LoadOptions::max_config_bytes`] and [`LoadOptions::max_json_nesting`].
+    pub fn from_json_with(bytes: &[u8], options: &LoadOptions) -> Result<Self, LoadError> {
+        if bytes.len() as u64 > options.max_config_bytes {
+            return Err(LoadError::Limit(format!(
+                "configuration exceeds {} bytes (LoadOptions::max_config_bytes)",
+                options.max_config_bytes
+            )));
         }
         crate::legacy::parser::validate_json_depth(bytes)
             .map_err(|e| LoadError::MalformedConfig(e.to_string()))?;
@@ -158,8 +316,8 @@ impl WalkerConfig {
         self.n_features
     }
 
-    /// Maximum rows per group. It selects the row-mask width; groups wider than
-    /// 1,024 rows run in pieces of 1,024.
+    /// Maximum rows per group. A predictor's scratch grows linearly with it (see
+    /// [`crate::Forest::predictor`]), so it bounds memory, not only the calls.
     #[inline]
     #[must_use]
     pub const fn max_group_width(&self) -> usize {
@@ -170,21 +328,21 @@ impl WalkerConfig {
     #[inline]
     #[must_use]
     pub const fn is_varying(&self, feature: usize) -> bool {
-        feature < self.n_features && self.varying_mask & (1u128 << feature) != 0
+        feature < self.n_features && self.varying.contains(feature)
     }
 
     /// Whether `feature` ascends across a group's rows.
     #[inline]
     #[must_use]
     pub const fn is_increasing(&self, feature: usize) -> bool {
-        feature < self.n_features && self.mono_inc_mask & (1u128 << feature) != 0
+        feature < self.n_features && self.increasing.contains(feature)
     }
 
     /// Whether `feature` descends across a group's rows.
     #[inline]
     #[must_use]
     pub const fn is_decreasing(&self, feature: usize) -> bool {
-        feature < self.n_features && self.mono_dec_mask & (1u128 << feature) != 0
+        feature < self.n_features && self.decreasing.contains(feature)
     }
 }
 
@@ -212,7 +370,8 @@ enum Varying {
 }
 
 impl WalkerConfigBuilder {
-    /// The widest group a predictor will accept, at least 1.
+    /// The widest group a predictor will accept, at least 1. Each predictor's
+    /// scratch grows linearly with it; see [`crate::Forest::predictor`].
     pub const fn max_group_width(mut self, rows: usize) -> Self {
         self.max_group_width = Some(rows);
         self
@@ -245,15 +404,17 @@ impl WalkerConfigBuilder {
 
     /// Validate the declarations.
     ///
-    /// Fails with [`LoadError::MalformedConfig`] if `n_features` is not 1 to 64,
+    /// Fails with [`LoadError::MalformedConfig`] if `n_features` is not 1 to
+    /// `i32::MAX` (Treelite's `num_feature` is a 32-bit signed integer),
     /// `max_group_width` is missing or 0, the varying features were not declared, an
     /// index is out of range or listed twice, or a feature is both increasing and
     /// decreasing.
     pub fn build(self) -> Result<WalkerConfig, LoadError> {
         let n_features = self.n_features;
-        if !(1..=64).contains(&n_features) {
+        if !(1..=i32::MAX as usize).contains(&n_features) {
             return Err(LoadError::MalformedConfig(format!(
-                "n_features must be 1..=64, got {n_features}"
+                "n_features must be 1..={}, got {n_features}",
+                i32::MAX
             )));
         }
         let max_group_width = match self.max_group_width {
@@ -269,27 +430,11 @@ impl WalkerConfigBuilder {
                 ));
             }
         };
-        let to_mask = |indices: &[usize], label: &str| -> Result<u128, LoadError> {
-            let mut mask = 0;
-            for &i in indices {
-                if i >= n_features {
-                    return Err(LoadError::MalformedConfig(format!(
-                        "{label}: index {i} >= n_features {n_features}"
-                    )));
-                }
-                let bit = 1u128 << i;
-                if mask & bit != 0 {
-                    return Err(LoadError::MalformedConfig(format!(
-                        "{label}: duplicate index {i}"
-                    )));
-                }
-                mask |= bit;
+        let varying = match &self.varying {
+            Some(Varying::All) => FeatureSet::ALL,
+            Some(Varying::Only(features)) => {
+                FeatureSet::of(features, n_features, "varying features")?
             }
-            Ok(mask)
-        };
-        let varying_mask = match &self.varying {
-            Some(Varying::All) => (1u128 << n_features) - 1,
-            Some(Varying::Only(features)) => to_mask(features, "varying features")?,
             None => {
                 return Err(LoadError::MalformedConfig(
                     "declare the varying features with varying(..) or all_varying(); \
@@ -298,21 +443,21 @@ impl WalkerConfigBuilder {
                 ));
             }
         };
-        let mono_inc_mask = to_mask(&self.increasing, "increasing features")?;
-        let mono_dec_mask = to_mask(&self.decreasing, "decreasing features")?;
-        let both = mono_inc_mask & mono_dec_mask;
-        if both != 0 {
+        let increasing = FeatureSet::of(&self.increasing, n_features, "increasing features")?;
+        let decreasing = FeatureSet::of(&self.decreasing, n_features, "decreasing features")?;
+        if let Some(f) = increasing.first_common(&decreasing, n_features) {
             return Err(LoadError::MalformedConfig(format!(
-                "feature {} is both increasing and decreasing",
-                both.trailing_zeros()
+                "feature {f} is both increasing and decreasing"
             )));
         }
         Ok(WalkerConfig {
             n_features,
             max_group_width,
-            varying_mask: varying_mask | mono_inc_mask | mono_dec_mask,
-            mono_inc_mask,
-            mono_dec_mask,
+            varying: varying
+                .union(&increasing, n_features)
+                .union(&decreasing, n_features),
+            increasing,
+            decreasing,
         })
     }
 }
