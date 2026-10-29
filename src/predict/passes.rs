@@ -1,8 +1,13 @@
-//! How a group's passes run their walks ([`Walks`]): the lanes and prefetch distance
-//! each walk is compiled for.
+//! One chunk's walk and resolve passes ([`Pass`]), and how a group's passes run their
+//! walks ([`Walks`]): the lanes and prefetch distance each walk is compiled for.
 
+use super::counters::{Clock, Stats};
 use super::kernel::Options;
-use super::walk::{lanes_of, pad};
+use super::mask::Mask;
+use super::resolve::{Carrier, Resolve, Splits};
+use super::scan::Scan;
+use super::scratch::Queues;
+use super::walk::{self, Item, Pools, Steps, lanes_of, pad};
 use crate::rules::{Distance, pass_distance};
 
 /// How a group's passes run their walks: with the rule's lanes for each walk, or a
@@ -103,3 +108,164 @@ macro_rules! walk_with {
 }
 
 pub(super) use walk_with;
+
+/// One chunk's walk and resolve passes.
+pub(super) struct Pass<'a, M> {
+    pub(super) p: &'a Pools,
+    pub(super) roots: &'a [u32],
+    /// The group's rows.
+    pub(super) n: usize,
+    /// Units of `M` per mask ([`Carrier`]).
+    pub(super) units: usize,
+    pub(super) masks: &'a [M],
+    /// A mask's room for scanned sides.
+    pub(super) scratch: *mut M,
+    pub(super) stats: &'a mut Stats,
+}
+
+impl<M: Mask> Pass<'_, M> {
+    /// Every walk and resolve pass of the chunk; returns the number of leaf entries in
+    /// `q.leaves` and how many of them, first, the first pass wrote. With `SCAN`,
+    /// varying events scan their rows with `scan` instead of reading the precomputed
+    /// masks; with `EMPTY`, they pass on sides without rows.
+    ///
+    /// # Safety
+    ///
+    /// The scratch holds the chunk as [`Model::masked_group`](crate::model::Model::masked_group) asserts, `masks` the all-rows
+    /// mask and every predicate's left and right masks, `scratch` a mask, and `p` is
+    /// valid for [`walk::walk`].
+    #[inline(never)]
+    pub(super) unsafe fn run<
+        C: Carrier<M>,
+        const STATS: bool,
+        const ABLATE: bool,
+        const SCAN: bool,
+        const EMPTY: bool,
+    >(
+        &mut self,
+        walks: Walks,
+        arena: &mut [M],
+        queues: &mut Queues<C>,
+        stops: &mut [u32],
+        words: &mut [u64],
+        scan: &mut impl Scan<M>,
+    ) -> (usize, usize) {
+        let (p, u) = (self.p, self.units);
+        // SAFETY: the caller sizes the arena for the chunk's slots, slot 0 included.
+        let root = unsafe { C::root(arena.as_mut_ptr(), self.n, u) };
+        for (item, &node) in queues.items.iter_mut().zip(self.roots) {
+            // SAFETY: `item` is a live item.
+            unsafe { put(item, node, root) };
+        }
+        let (mut items, mut next) = (queues.items.as_mut_ptr(), queues.next.as_mut_ptr());
+        let (stops, words) = (stops.as_mut_ptr(), words.as_mut_ptr());
+        let mut res = Resolve {
+            stops: stops.cast_const(),
+            words: words.cast_const(),
+            masks: self.masks.as_ptr(),
+            arena: arena.as_mut_ptr(),
+            scratch: self.scratch,
+            units: u,
+            next_slot: C::slot_units(u),
+            items,
+            out: next,
+            leaves: queues.leaves.as_mut_ptr(),
+            n_leaves: 0,
+            listed: queues.listed.as_mut_ptr(),
+        };
+        // Leaf entries of the first pass carry all rows.
+        let mut first_pass = None;
+        let mut n = self.roots.len();
+        let dummy = Item {
+            node: p.dummy,
+            carry: C::NONE,
+        };
+        let (mut steps, mut seen) = (Steps::default(), Splits::default());
+        let mut clock = Clock::<STATS>::start();
+        while n > 0 {
+            let (walks, pad) = walks.for_pass::<ABLATE>(n, true);
+            // SAFETY: the caller sizes both queues for a pass's items plus the most
+            // padding, the stops likewise, and the arena for the chunk's splits.
+            unsafe {
+                for k in 0..pad {
+                    put(items.add(n + k), dummy.node, dummy.carry);
+                }
+                // The walk with varying stops prefetches every round
+                // (`rules::RATES`): a rate of 1 here leaves one walk per distance.
+                let walks = Walks { rate: 1, ..walks };
+                walk_with!(ABLATE, walks, |K, D, R| walk::walk::<
+                    Item<C>,
+                    K,
+                    true,
+                    D,
+                    R,
+                    STATS,
+                >(
+                    p, items, stops, words, &mut steps
+                ));
+                clock = clock.lap(&mut self.stats.phases.walk);
+                res.items = items;
+                res.out = next;
+                let leaves_before = res.n_leaves;
+                let items_in_pass = n;
+                n = super::resolve::resolve::<M, C, SCAN, EMPTY, STATS>(
+                    &mut res,
+                    items_in_pass,
+                    scan,
+                    &mut seen,
+                );
+                clock = clock.lap(&mut self.stats.phases.resolve);
+                first_pass.get_or_insert(res.n_leaves);
+                if STATS {
+                    let c = &mut self.stats.counters;
+                    let leaf_events = (res.n_leaves - leaves_before) as u64;
+                    c.passes += 1;
+                    c.leaf_events += leaf_events;
+                    c.varying_events += items_in_pass as u64 - leaf_events;
+                }
+            }
+            std::mem::swap(&mut items, &mut next);
+        }
+        if STATS {
+            let c = &mut self.stats.counters;
+            c.walk_steps += steps.nodes;
+            c.lane_slots += steps.slots;
+            c.splits += seen.splits;
+            c.empty_sides += seen.empty_sides;
+            if C::ARENA {
+                c.arena_slots += (res.next_slot / C::slot_units(u) - 1) as u64;
+            }
+        }
+        (res.n_leaves, first_pass.unwrap_or(0))
+    }
+}
+
+/// `*to = Item { node, carry }`, on x86-64 as one 8-byte store for a 4-byte carrier:
+/// LLVM otherwise writes the node and the (constant) carry with two 4-byte stores
+/// there. AArch64 already pairs them (`stp`, or vector zips), which the 8-byte value
+/// would undo.
+///
+/// # Safety
+///
+/// `to` is valid for writes, and a 4-byte `C` has no padding (every carrier).
+#[inline(always)]
+unsafe fn put<C: Copy>(to: *mut Item<C>, node: u32, carry: C) {
+    if cfg!(target_arch = "x86_64") && size_of::<C>() == 4 {
+        // SAFETY: the caller guarantees `to` and that `C` has no padding (the 4-byte
+        // carriers are `u32` and its newtypes `Handle` and `Slot`), so `Item<C>`
+        // (`repr(C)`) is the node's 4 bytes then the carry's.
+        unsafe {
+            let carry = u64::from(std::mem::transmute_copy::<C, u32>(&carry));
+            let node = u64::from(node);
+            let bits = if cfg!(target_endian = "little") {
+                node | carry << 32
+            } else {
+                node << 32 | carry
+            };
+            to.cast::<u64>().write_unaligned(bits);
+        }
+    } else {
+        // SAFETY: the caller guarantees `to`.
+        unsafe { to.write(Item { node, carry }) };
+    }
+}

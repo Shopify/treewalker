@@ -5,6 +5,7 @@
 use super::mask::rows::{self, Unit};
 use super::mask::{Mask, Wide};
 use super::precompute::SWEEP_TURNS;
+use super::resolve::{Carrier, Handle, Slot};
 use super::walk::{Item, MAX_PAD};
 use crate::exact::{self, Plan, WIDE_SUMS};
 use crate::load::layout::Need;
@@ -144,6 +145,31 @@ pub(super) struct Chunk {
     pub(super) slots: usize,
 }
 
+/// The queues of one carrier type.
+pub(super) struct Queues<C> {
+    pub(super) items: Vec<Item<C>>,
+    pub(super) next: Vec<Item<C>>,
+    pub(super) leaves: Vec<Item<C>>,
+    /// The positions of a pass's varying stops, which resolve lists for fixed-width
+    /// handles (empty for other carriers).
+    pub(super) listed: Vec<u32>,
+}
+
+impl<C: Copy> Queues<C> {
+    fn new(none: C, items: usize, leaves: usize, listed: usize) -> Self {
+        let item = Item {
+            node: 0,
+            carry: none,
+        };
+        Self {
+            items: vec![item; items],
+            next: vec![item; items],
+            leaves: vec![item; leaves],
+            listed: vec![0; listed],
+        }
+    }
+}
+
 /// Exact-sum buffers for a group: two difference arrays, which alternate leaf
 /// entries, so an entry's adds never wait on the previous entry's stores to the same
 /// row. Entries that share a run boundary would otherwise chain through
@@ -201,6 +227,10 @@ pub(super) struct Common {
 /// The kernel's scratch, sized for the model and its configuration.
 pub(super) struct Scratch {
     pub(super) common: Common,
+    pub(super) q32: Queues<u32>,
+    pub(super) q64: Queues<u64>,
+    pub(super) handles: Queues<Handle>,
+    pub(super) slots: Queues<Slot>,
 }
 
 impl Scratch {
@@ -244,7 +274,10 @@ impl Scratch {
         } else {
             Vec::new()
         };
+        let leaves_of = |w: Width| most(&|x| x == w, |c| c.leaves);
         let max_leaves = most(&|_| true, |c| c.leaves).max(constant_leaves);
+        let handle_leaves = most(&|w| w.handles() && !w.runtime(), |c| c.leaves);
+        let slot_leaves = most(&Width::runtime, |c| c.leaves);
         let arena_bytes = widths
             .iter()
             .zip(&chunks)
@@ -268,6 +301,13 @@ impl Scratch {
                 sums: vec![0; WIDE_SUMS * wide.limbs()],
             },
         };
+        let queues = |leaves: usize| (leaves + MAX_PAD + 1, leaves + 1);
+        let ((i32s, l32s), (i64s, l64s), (ihs, lhs), (iss, lss)) = (
+            queues(leaves_of(Width::W32)),
+            queues(leaves_of(Width::W64)),
+            queues(handle_leaves),
+            queues(slot_leaves),
+        );
         let scratch = Self {
             common: Common {
                 bins: layout.bins.new_bins(),
@@ -297,6 +337,10 @@ impl Scratch {
                 sums,
                 tuning,
             },
+            q32: Queues::new(0, i32s, l32s, 0),
+            q64: Queues::new(0, i64s, l64s, 0),
+            handles: Queues::new(<Handle as Carrier<Wide<2>>>::NONE, ihs, lhs, lhs),
+            slots: Queues::new(<Slot as Carrier<Unit>>::NONE, iss, lss, 0),
         };
         // Checked once the buffers are reserved: a width past it needs over 13 TiB of
         // them, which the allocator refuses first.
