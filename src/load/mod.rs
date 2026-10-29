@@ -28,6 +28,11 @@
 //!    categorical ones by chain, and per code the masks its rows flip, which the
 //!    precompute reads.
 
+// Hand-written Treelite JSON, for the layout's and the precompute's tests.
+#[cfg(test)]
+#[allow(dead_code, reason = "these tests use a part")]
+#[path = "../../tests/common/json.rs"]
+pub(crate) mod json;
 pub(crate) mod layout;
 mod order;
 pub(crate) mod parse;

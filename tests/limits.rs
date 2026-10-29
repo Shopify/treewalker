@@ -12,6 +12,7 @@
 
 mod common;
 
+use common::bits::same;
 use common::model::{Model, Node, Op, Precision, Task, Tree};
 use common::rng::Rng;
 use treewalker_gbdt::research::LoadAblation;
@@ -82,12 +83,9 @@ fn check(m: &Model, config: WalkerConfig, ablation: &LoadAblation, rows: &[f64])
     forest.predictor().predict_group(rows, &mut group);
     let mut single = vec![f64::NAN; n];
     forest.predictor().predict_fixed(rows, 1, &mut single);
-    for r in 0..n {
-        let e = expected[r].to_bits();
-        assert_eq!(full[r].to_bits(), e, "full walk, row {r}");
-        assert_eq!(group[r].to_bits(), e, "group, row {r}");
-        assert_eq!(single[r].to_bits(), e, "single row {r}");
-    }
+    same(&full, &expected, "full walk");
+    same(&group, &expected, "group");
+    same(&single, &expected, "single rows");
     forest
 }
 

@@ -3,31 +3,30 @@
 //! precompute's masks against the float predicates. The kernel against the exact oracle
 //! is the property tests' (`tests/property.rs`).
 
-// The property tests' generator, with the exact module's copy of their oracle.
+// The property tests' generator, groups and comparisons, with the exact module's copy
+// of their oracle.
+#[allow(dead_code, reason = "these tests use a part")]
+#[path = "../../tests/common/bits.rs"]
+mod bits;
+#[allow(dead_code, reason = "these tests use a part")]
+#[path = "../../tests/common/groups.rs"]
+mod groups;
 #[expect(clippy::float_cmp, reason = "exact expectations")]
 #[allow(dead_code, reason = "these tests use a part")]
 #[path = "../../tests/common/model.rs"]
 mod model;
-#[allow(dead_code, reason = "these tests use a part")]
-#[path = "../../tests/common/rng.rs"]
-mod rng;
 
 use crate::exact::oracle;
-use model::{Feature, Precision, Settings};
+use crate::rng;
+use bits::same;
+use groups::{Role, config, group, offsets};
+use model::{Precision, Settings};
 use rng::Rng;
 
 use super::{Groups, Options, Predictor, Workspace};
 use crate::config::Choices;
 use crate::rules::{Prefix, Tuning};
 use crate::{Forest, LoadOptions, ModelFormat, WalkerConfig};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Role {
-    Constant,
-    Varying,
-    Increasing,
-    Decreasing,
-}
 
 struct Case {
     forest: Forest,
@@ -73,15 +72,7 @@ fn case(seed: u64) -> Case {
         sizes.push(*rng.pick(if MIRI { &SIZES[..9] } else { &SIZES }));
     }
     let widest = *sizes.iter().max().expect("a group");
-    let roles_ref = &roles;
-    let with = |role| (0..m.n_features).filter(move |&f| roles_ref[f] == role);
-    let config = WalkerConfig::builder(m.n_features)
-        .max_group_width(widest.max(*rng.pick(&[1, 64, 2048])))
-        .varying(with(Role::Varying))
-        .increasing(with(Role::Increasing))
-        .decreasing(with(Role::Decreasing))
-        .build()
-        .expect("a valid configuration");
+    let config = config(m.n_features, widest.max(*rng.pick(&[1, 64, 2048])), &roles);
     let choices = Choices {
         tree_ordering: !rng.chance(0.3),
         bitset_intern: !rng.chance(0.3),
@@ -103,52 +94,13 @@ fn case(seed: u64) -> Case {
     .expect("load");
     let data: Vec<f64> = sizes
         .iter()
-        .flat_map(|&n| group(&mut rng, &features, &roles, m.precision, n))
-        .collect();
-    let offsets = std::iter::once(0)
-        .chain(sizes.iter().scan(0, |end, &n| {
-            *end += n;
-            Some(*end)
-        }))
+        .flat_map(|&n| group(&mut rng, &features, &roles, m.precision, n, f64::total_cmp))
         .collect();
     Case {
         forest,
         data,
-        offsets,
+        offsets: offsets(&sizes),
     }
-}
-
-/// One group's rows: constant features equal in every row, monotonic ones ordered.
-fn group(
-    rng: &mut Rng,
-    features: &[Feature],
-    roles: &[Role],
-    precision: Precision,
-    n: usize,
-) -> Vec<f64> {
-    let columns: Vec<Vec<f64>> = features
-        .iter()
-        .zip(roles)
-        .map(|(f, &role)| match role {
-            Role::Constant => vec![model::input(rng, f, precision, true); n],
-            Role::Varying => (0..n)
-                .map(|_| model::input(rng, f, precision, true))
-                .collect(),
-            Role::Increasing | Role::Decreasing => {
-                let mut column: Vec<f64> = (0..n)
-                    .map(|_| model::input(rng, f, precision, false))
-                    .collect();
-                column.sort_by(f64::total_cmp);
-                if role == Role::Decreasing {
-                    column.reverse();
-                }
-                column
-            }
-        })
-        .collect();
-    (0..n)
-        .flat_map(|r| columns.iter().map(move |c| c[r]))
-        .collect()
 }
 
 /// A predictor whose chunks take `chunk_bytes`, or the rule's budget.
@@ -173,12 +125,6 @@ fn kernel(c: &Case, chunk_bytes: Option<usize>, options: Options) -> Vec<f64> {
     p.check(&c.data, out.len(), groups);
     p.kernel::<false, true>(&c.data, &mut out, groups, options, None, true);
     out
-}
-
-fn same(actual: &[f64], expected: &[f64], what: &str) {
-    for (r, (a, e)) in actual.iter().zip(expected).enumerate() {
-        assert_eq!(a.to_bits(), e.to_bits(), "{what}: row {r}: {a:e} != {e:e}");
-    }
 }
 
 #[test]
@@ -525,16 +471,10 @@ fn stumps() -> (Case, model::Model) {
             (0..n).flat_map(move |r| [(r % 6) as f64 - 2.0, constant])
         })
         .collect();
-    let offsets = std::iter::once(0)
-        .chain(sizes.iter().scan(0, |end, &n| {
-            *end += n;
-            Some(*end)
-        }))
-        .collect();
     let case = Case {
         forest,
         data,
-        offsets,
+        offsets: offsets(&sizes),
     };
     (case, m)
 }

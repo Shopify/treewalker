@@ -1,25 +1,16 @@
 //! Public import contract, independent Treelite/GTIL fixtures, and malformed input guards.
 #![expect(clippy::float_cmp, reason = "exact hand-computable expectations")]
+
+mod common;
+
+use common::bits::same;
+use common::fixtures::{self, bytes, values};
 use serde::Deserialize;
 use simd_json::{OwnedValue as Value, prelude::*};
-use std::{io::Cursor, path::PathBuf};
+use std::io::Cursor;
 use treewalker_gbdt::research::Ablation;
 use treewalker_gbdt::{Forest, LoadError, LoadOptions, ModelFormat, WalkerConfig};
 
-fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/import")
-        .join(name)
-}
-fn bytes(name: &str) -> Vec<u8> {
-    std::fs::read(fixture(name)).unwrap()
-}
-fn raw(name: &str) -> Vec<f64> {
-    bytes(name)[16..]
-        .chunks_exact(8)
-        .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
-        .collect()
-}
 fn config(width: usize) -> WalkerConfig {
     WalkerConfig::builder(2)
         .max_group_width(width)
@@ -86,10 +77,10 @@ struct Case {
 #[test]
 fn independent_oracles_all_formats_paths_and_workspace_widths() {
     let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
-    let data = raw("data.bin");
+    let data = values("data.bin");
     let rows = data.len() / 2;
     for case in manifest.models {
-        let expected = raw(&format!("{}_reference.bin", case.name));
+        let expected = values(&format!("{}_reference.bin", case.name));
         for (extension, format) in [
             ("bin", ModelFormat::TreeliteBinaryV4),
             ("json", ModelFormat::TreeliteJson),
@@ -148,22 +139,20 @@ fn leaves_past_the_126_bit_rule_sum_exactly() {
     // digits, 16 bytes, as an i128 leaf takes.
     let leaves = forest.nodes().iter().filter(|n| n.is_leaf()).count();
     assert_eq!(forest.layout_stats().leaf_bytes, 16 * leaves);
-    let data = raw("data.bin");
+    let data = values("data.bin");
     let rows = data.len() / 2;
     let (mut partial, mut full) = (vec![0.0; rows], vec![0.0; rows]);
     forest.predictor().predict_fixed(&data, 128, &mut partial);
     forest.predict_full_walk(&data, &mut full);
     assert!(partial.iter().any(|&v| v == 1e300));
-    for r in 0..rows {
-        assert_eq!(partial[r].to_bits(), full[r].to_bits(), "row {r}");
-    }
+    same(&partial, &full, "prediction against the full walk");
 }
 
 #[test]
 fn native_random_forest_and_hand_computable_aggregation() {
     let forest = load("random_forest.bin", ModelFormat::TreeliteBinaryV4, 128).unwrap();
-    let data = raw("rf_native_data.bin");
-    let expected = raw("rf_native_reference.bin");
+    let data = values("rf_native_data.bin");
+    let expected = values("rf_native_reference.bin");
     let mut actual = vec![0.0; expected.len()];
     forest.predict_full_walk(&data, &mut actual);
     check(&actual, &expected, 1e-14, 1e-14, "sklearn");
@@ -175,8 +164,8 @@ fn native_random_forest_and_hand_computable_aggregation() {
 
 #[test]
 fn file_reader_and_memory_loaders() {
-    let cfg = fixture("walker_config.json");
-    let a = Forest::load(fixture("sigmoid_f64.bin"), &cfg).unwrap();
+    let cfg = fixtures::path("walker_config.json");
+    let a = Forest::load(fixtures::path("sigmoid_f64.bin"), &cfg).unwrap();
     let b = Forest::from_reader(
         Cursor::new(bytes("sigmoid_f64.bin")),
         ModelFormat::TreeliteBinaryV4,
@@ -184,10 +173,15 @@ fn file_reader_and_memory_loaders() {
         &LoadOptions::default(),
     )
     .unwrap();
-    let c = Forest::load(fixture("sigmoid_f64.json"), &cfg).unwrap();
-    let d = Forest::load_with(fixture("sigmoid_f64.bin"), &cfg, &LoadOptions::default()).unwrap();
-    let input = raw("data.bin");
-    let expected = raw("sigmoid_f64_reference.bin");
+    let c = Forest::load(fixtures::path("sigmoid_f64.json"), &cfg).unwrap();
+    let d = Forest::load_with(
+        fixtures::path("sigmoid_f64.bin"),
+        &cfg,
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let input = values("data.bin");
+    let expected = values("sigmoid_f64_reference.bin");
     for f in [a, b, c, d] {
         let mut output = vec![0.0; expected.len()];
         f.predict_full_walk(&input, &mut output);

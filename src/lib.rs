@@ -110,6 +110,12 @@ mod predictor;
 pub mod research;
 mod rules;
 
+// The tests' seeded generator, shared with the integration tests.
+#[cfg(test)]
+#[allow(dead_code, reason = "the unit tests use a part")]
+#[path = "../tests/common/rng.rs"]
+mod rng;
+
 pub use config::{LoadOptions, WalkerConfig, WalkerConfigBuilder};
 pub use error::LoadError;
 pub use forest::Forest;

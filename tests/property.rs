@@ -15,11 +15,12 @@
 
 mod common;
 
+use common::groups::{Role, config, offsets};
 use common::model::{self, Feature, Model, Precision, Settings};
 use common::rng::{Rng, mix};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use treewalker_gbdt::research::{Ablation, LoadAblation};
-use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
+use treewalker_gbdt::{Forest, LoadOptions, ModelFormat};
 
 const DEFAULT_SEED: u64 = 0x7EE5_A1C3_2026_1008;
 
@@ -73,14 +74,6 @@ struct Coverage {
     rank_tables: usize,
     chained: usize,
     long_chains: usize,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Role {
-    Constant,
-    Varying,
-    Increasing,
-    Decreasing,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -208,12 +201,7 @@ fn check(profile: &Profile, case: usize, seed: u64, coverage: &mut Coverage) {
         predictor.predict_group(g, &mut out[start..start + rows]);
         start += rows;
     }
-    let offsets: Vec<usize> = std::iter::once(0)
-        .chain(sizes.iter().scan(0, |end, &n| {
-            *end += n;
-            Some(*end)
-        }))
-        .collect();
+    let offsets = offsets(&sizes);
     let mut batch = vec![f64::NAN; n_rows];
     forest
         .predictor()
@@ -350,17 +338,6 @@ fn roles(rng: &mut Rng, n_features: usize) -> Vec<Role> {
             Role::Constant
         })
         .collect()
-}
-
-fn config(n_features: usize, max_width: usize, roles: &[Role]) -> WalkerConfig {
-    let with = |role| (0..n_features).filter(move |&f| roles[f] == role);
-    WalkerConfig::builder(n_features)
-        .max_group_width(max_width)
-        .varying(with(Role::Varying))
-        .increasing(with(Role::Increasing))
-        .decreasing(with(Role::Decreasing))
-        .build()
-        .expect("a valid configuration")
 }
 
 fn group_size(rng: &mut Rng, profile: &Profile) -> usize {

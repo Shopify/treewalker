@@ -638,6 +638,7 @@ mod tests {
     //! [`MaskPlan`]. Each case checks the sweep, the brute force and each
     //! predicate's float evaluation against hand-written masks.
 
+    use crate::load::json;
     use crate::model::{Model, Threshold, ThresholdType, VaryingPredicate};
     use crate::predict::mask::{Mask, Wide};
     use crate::{Forest, LoadOptions, ModelFormat, WalkerConfig};
@@ -669,21 +670,11 @@ mod tests {
 
     /// [`forest`] for groups of up to `rows` rows.
     fn forest_with(splits: &[(String, bool)], f32: bool, rows: usize) -> Forest {
-        let ty = if f32 { "float32" } else { "float64" };
         let trees: Vec<String> = splits
             .iter()
-            .map(|(test, default_left)| {
-                format!(
-                    r#"{{"num_nodes": 3, "has_categorical_split": {}, "nodes": [{{"node_id": 0, "split_feature_id": 0, "default_left": {default_left}, {test}, "left_child": 1, "right_child": 2}}, {{"node_id": 1, "leaf_value": 1.0, "data_count": 1}}, {{"node_id": 2, "leaf_value": 2.0, "data_count": 5}}]}}"#,
-                    test.contains("categorical")
-                )
-            })
+            .map(|(test, default_left)| json::stump(test, *default_left, (1, 5)))
             .collect();
-        let json = format!(
-            r#"{{"threshold_type": "{ty}", "leaf_output_type": "{ty}", "num_feature": 1, "task_type": "kRegressor", "average_tree_output": false, "num_target": 1, "num_class": [1], "leaf_vector_shape": [1, 1], "target_id": {ids}, "class_id": {ids}, "postprocessor": "identity", "sigmoid_alpha": 1.0, "ratio_c": 1.0, "base_scores": [0.0], "attributes": "", "trees": [{}]}}"#,
-            trees.join(", "),
-            ids = format!("{:?}", vec![0; splits.len()]),
-        );
+        let json = json::regressor(f32, 1, &trees);
         let config = WalkerConfig::builder(1)
             .max_group_width(rows)
             .varying([0])

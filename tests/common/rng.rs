@@ -21,6 +21,13 @@ impl Rng {
         ((u128::from(self.next_u64()) * n as u128) >> 64) as usize
     }
 
+    /// Nearly uniform in `0..n`, for `n > 0`, by the remainder of the next value: the
+    /// draws of the tests whose cases were generated that way.
+    pub fn below_mod(&mut self, n: usize) -> usize {
+        assert!(n > 0, "empty range");
+        (self.next_u64() % n as u64) as usize
+    }
+
     /// Uniform in `lo..=hi`.
     pub fn range(&mut self, lo: usize, hi: usize) -> usize {
         lo + self.below(hi - lo + 1)
@@ -38,6 +45,11 @@ impl Rng {
 
     pub fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
         &items[self.below(items.len())]
+    }
+
+    /// An item drawn by `below_mod`.
+    pub fn pick_mod<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[self.below_mod(items.len())]
     }
 
     pub fn shuffle<T>(&mut self, items: &mut [T]) {

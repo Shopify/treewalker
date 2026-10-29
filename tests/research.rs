@@ -2,25 +2,17 @@
 //! builds agree, the counters count the work each ablation changes, and the stages
 //! compose to production's output.
 #![expect(clippy::float_cmp, reason = "exact hand-computable expectations")]
+
+mod common;
+
+use common::bits::{bits, same};
+use common::fixtures::{bytes, values};
 use simd_json::{OwnedValue as Value, prelude::*};
 use treewalker_gbdt::research::{
     Ablation, COUNTERS_VERSION, LoadAblation, Phases, Stages, WorkCounters,
 };
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
-fn fixture(name: &str) -> Vec<u8> {
-    std::fs::read(format!(
-        "{}/tests/fixtures/import/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    ))
-    .unwrap()
-}
-fn raw(name: &str) -> Vec<f64> {
-    fixture(name)[16..]
-        .chunks_exact(8)
-        .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
-        .collect()
-}
 fn config() -> WalkerConfig {
     WalkerConfig::builder(2)
         .max_group_width(128)
@@ -29,23 +21,7 @@ fn config() -> WalkerConfig {
         .unwrap()
 }
 fn load(name: &str, parse: &LoadOptions) -> Forest {
-    Forest::from_bytes(
-        &fixture(name),
-        ModelFormat::TreeliteBinaryV4,
-        config(),
-        parse,
-    )
-    .unwrap()
-}
-fn bits(values: &[f64]) -> Vec<u64> {
-    values.iter().map(|v| v.to_bits()).collect()
-}
-/// Panic at the first row whose bits differ.
-fn same(actual: &[f64], expected: &[f64], what: &str) {
-    assert_eq!(actual.len(), expected.len(), "{what}");
-    for (r, (a, e)) in actual.iter().zip(expected).enumerate() {
-        assert_eq!(a.to_bits(), e.to_bits(), "{what}: row {r}: {a} != {e}");
-    }
+    Forest::from_bytes(&bytes(name), ModelFormat::TreeliteBinaryV4, config(), parse).unwrap()
 }
 /// Every combination of the seven runtime flags, each with a lane count drawn from
 /// its index.
@@ -73,7 +49,7 @@ const MODELS: [&str; 6] = [
 /// Three trees that send `x0 <= 1` to leaves `big`, 1 and `-big`, in that order. The
 /// exact sum is 1; adding in f64 in tree order loses the 1 and gives 0.
 fn cancellation(big: f64) -> Forest {
-    let mut model = simd_json::to_owned_value(&mut fixture("identity.json")).unwrap();
+    let mut model = simd_json::to_owned_value(&mut bytes("identity.json")).unwrap();
     let tree = model["trees"][0].clone();
     let trees: Vec<Value> = [big, 1.0, -big]
         .into_iter()
@@ -105,7 +81,7 @@ fn cancellation(big: f64) -> Forest {
 
 #[test]
 fn every_variant_matches_production_and_the_full_walk() {
-    let data = raw("data.bin");
+    let data = values("data.bin");
     let n = data.len() / 2;
     // The rows come in blocks of 128 that share their constant feature. Groups of 1
     // to 128 rows within the blocks give single rows and every width up to 128 bits.
@@ -204,7 +180,7 @@ fn counted(forest: &Forest, variant: Ablation, rows: &[f64]) -> WorkCounters {
 #[test]
 fn counters_count_the_work_of_a_group() {
     assert_eq!(COUNTERS_VERSION, 6);
-    let data = raw("data.bin");
+    let data = values("data.bin");
     let rows = &data[..64];
     let forest = load("sigmoid_f64.bin", &LoadOptions::default());
     let c = counted(&forest, Ablation::default(), rows);
@@ -248,7 +224,7 @@ fn forest_predicates(forest: &Forest) -> usize {
 
 #[test]
 fn counters_show_each_ablation() {
-    let data = raw("data.bin");
+    let data = values("data.bin");
     let rows = &data[..64];
     let forest = load("sigmoid_f64.bin", &LoadOptions::default());
     let base = counted(&forest, Ablation::default(), rows);
@@ -331,13 +307,13 @@ fn monotonic_scans_stop_comparing_early() {
         .build()
         .unwrap();
     let forest = Forest::from_bytes(
-        &fixture("sigmoid_f64.bin"),
+        &bytes("sigmoid_f64.bin"),
         ModelFormat::TreeliteBinaryV4,
         config,
         &LoadOptions::default(),
     )
     .unwrap();
-    let mut rows: Vec<[f64; 2]> = raw("data.bin")
+    let mut rows: Vec<[f64; 2]> = values("data.bin")
         .chunks_exact(2)
         .take(64)
         .map(|r| [r[0], 0.25])
@@ -386,14 +362,14 @@ fn monotonic_promises_do_not_change_outputs() {
             builder
         };
         Forest::from_bytes(
-            &fixture("sigmoid_f64.bin"),
+            &bytes("sigmoid_f64.bin"),
             ModelFormat::TreeliteBinaryV4,
             builder.build().unwrap(),
             &LoadOptions::default(),
         )
         .unwrap()
     };
-    let mut rows: Vec<[f64; 2]> = raw("data.bin")
+    let mut rows: Vec<[f64; 2]> = values("data.bin")
         .chunks_exact(2)
         .take(64)
         .map(|r| [r[0], 0.25])
@@ -470,7 +446,7 @@ fn the_full_walk_sums_exactly_past_the_126_bit_rule() {
 
 #[test]
 fn stages_compose_to_the_output() {
-    let data = raw("data.bin");
+    let data = values("data.bin");
     for name in MODELS {
         let forest = load(name, &LoadOptions::default());
         let mut production = vec![0.0; 128];
@@ -504,7 +480,7 @@ fn stages_compose_to_the_output() {
 
 #[test]
 fn predicate_masks_from_the_sweep_match_the_brute_force() {
-    let data = raw("data.bin");
+    let data = values("data.bin");
     for name in MODELS {
         let forest = load(name, &LoadOptions::default());
         for rows in [1, 7, 32] {
