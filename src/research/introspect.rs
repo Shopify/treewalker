@@ -120,6 +120,7 @@ impl Forest {
         let caches = machine::caches();
         let tuning = Tuning::new(model);
         let level = tuning.varying.level;
+        let latency = machine::latency(level, &layout.nodes, &model.rules.pool_latency);
         LayoutStats {
             varying_share: layout.varying_share,
             lanes: rules::lanes(true),
@@ -152,9 +153,8 @@ impl Forest {
             distance: tuning.varying.items,
             rate_constant: usize::from(tuning.constant.rate),
             pool_latency_l1s: tuning.varying.latency,
-            pool_latency_ns: machine::latency(level, &layout.nodes, &model.rules.pool_latency).ns,
-            pool_latency_ratio: machine::latency(level, &layout.nodes, &model.rules.pool_latency)
-                .ratio,
+            pool_latency_ns: latency.ns,
+            pool_latency_ratio: latency.ratio,
             prefix_groups: model.prefix.groups,
             prefix_trees: model.prefix.trees,
             prefix_max_depth: model.prefix.max_depth,

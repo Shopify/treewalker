@@ -129,7 +129,9 @@ pub(super) fn threshold_type(threshold: &str, leaf: &str) -> Result<ThresholdTyp
 }
 
 /// A split's threshold as the kernel compares it: float64 `<` becomes `<=` the next
-/// float down, float32 thresholds are rounded to float32.
+/// float down (`v < t` exactly when `v <= t.next_down()`, for every `v` and every `t`
+/// but NaN and negative infinity, which are rejected), float32 thresholds are rounded
+/// to float32.
 pub(super) fn threshold(value: f64, op: &str, kind: ThresholdType) -> Result<f64, LoadError> {
     if value.is_nan() || (kind == ThresholdType::F64 && op == "<" && value == f64::NEG_INFINITY) {
         return Err(LoadError::Unsupported(format!(
@@ -137,7 +139,7 @@ pub(super) fn threshold(value: f64, op: &str, kind: ThresholdType) -> Result<f64
         )));
     }
     match (op, kind) {
-        ("<", ThresholdType::F64) => Ok(super::tree::next_down(value)),
+        ("<", ThresholdType::F64) => Ok(value.next_down()),
         ("<=", ThresholdType::F64) => Ok(value),
         ("<", ThresholdType::F32) => {
             let rounded = f64::from(value as f32);

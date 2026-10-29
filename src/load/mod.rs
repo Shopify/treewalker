@@ -83,12 +83,11 @@ impl Forest {
         };
         let (prefix_groups, prefix) =
             crate::rules::prefix_groups(&paths, &tree_starts, choices.prefix);
-        let plan = Plan::of(decoded.extent, trees.len());
-        let mut prefix_depths = vec![0u32; trees.len()];
+        let plan = Plan::of(decoded.extent, tree_starts.len());
+        let mut prefix_depths = vec![0u32; tree_starts.len()];
         for g in &prefix_groups {
             prefix_depths[g.first as usize..g.end as usize].fill(g.depth);
         }
-        let decoded_nodes = decoded.take_nodes();
         let layout::Built {
             layout,
             steps,
@@ -99,7 +98,6 @@ impl Forest {
             nodes,
         } = layout::Layout::build(
             &layout::Input {
-                decoded: &decoded,
                 order: &order,
                 starts: &tree_starts,
                 categories: &categories,
@@ -111,10 +109,9 @@ impl Forest {
                 max_rank_bytes: options.max_rank_table_bytes,
                 prefix_depths: &prefix_depths,
             },
-            decoded_nodes,
+            decoded.into_layout_source(),
         )?;
         drop(predicate_ids);
-        drop(decoded);
         let bounds = crate::predict::sweep_bounds(&varying_predicates, threshold_type);
         let masks = layout::MaskPlan::build(
             &layout.bins,

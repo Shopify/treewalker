@@ -83,31 +83,6 @@ pub struct OrderScratch {
 }
 
 // ---------------------------------------------------------------------------
-// Threshold normalization
-// ---------------------------------------------------------------------------
-
-/// Largest IEEE 754 float strictly less than `x`.
-///
-/// Used to normalize LightGBM's `<` comparisons to `<=`:
-/// for all finite IEEE 754 floats, `val < threshold` ⟺ `val <= next_down(threshold)`.
-/// This lets the runtime use a single `<=` comparison for all F64 models.
-/// Not applied to F32 models — XGBoost's `<` is handled directly via `(val as f32) < (thr as f32)`.
-pub fn next_down(x: f64) -> f64 {
-    if x.is_nan() || x == f64::NEG_INFINITY {
-        return x;
-    }
-    if x == 0.0 {
-        return -f64::from_bits(1); // smallest negative subnormal
-    }
-    let bits = x.to_bits();
-    if x > 0.0 {
-        f64::from_bits(bits - 1)
-    } else {
-        f64::from_bits(bits + 1)
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Feature classification
 // ---------------------------------------------------------------------------
 
@@ -155,9 +130,7 @@ pub fn encode_categories(
     } else {
         let categories = &mut ctx.decoded.categories;
         let offset = categories.len();
-        categories
-            .try_reserve(list.len() + 1)
-            .map_err(|e| LoadError::Limit(e.to_string()))?;
+        LoadError::reserve(categories.try_reserve(list.len() + 1))?;
         categories.push(list.len() as u32);
         categories.extend_from_slice(list);
         if let Some(intern) = ctx.list_intern.as_mut() {

@@ -332,12 +332,8 @@ unsafe fn put<C: Copy>(to: *mut Item<C>, node: u32, carry: C) {
         unsafe {
             let carry = u64::from(std::mem::transmute_copy::<C, u32>(&carry));
             let node = u64::from(node);
-            let bits = if cfg!(target_endian = "little") {
-                node | carry << 32
-            } else {
-                node << 32 | carry
-            };
-            to.cast::<u64>().write_unaligned(bits);
+            // x86-64 is little-endian: the node is the low half.
+            to.cast::<u64>().write_unaligned(node | carry << 32);
         }
     } else {
         // SAFETY: the caller guarantees `to`.

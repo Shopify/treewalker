@@ -11,29 +11,18 @@ use crate::rules::{PathNode, Paths, Token, compare_paths};
 /// ties compare the rest of the paths from the decoded nodes.
 const ORDER_PATH_DEPTH: usize = 8;
 
-/// A heavy-path node's key for tree ordering: its split's identity (feature, flags
-/// and threshold bits), so that trees with the same splits at the same depths sort
-/// next to each other.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct TreePathToken {
-    feature: u32,
-    flags: u8,
-    /// The threshold's bits (or the category word's or list's), which with the
-    /// feature and flags identify the split.
-    threshold_bits: u64,
-}
-
-const EMPTY_PATH_TOKEN: TreePathToken = TreePathToken {
-    feature: u32::MAX,
-    flags: u8::MAX,
-    threshold_bits: u64::MAX,
-};
+/// The token of a path shorter than [`ORDER_PATH_DEPTH`] past its end: above every
+/// split's, as no split has feature `u32::MAX`.
+const EMPTY_PATH_TOKEN: Token = (u32::MAX, u8::MAX, u64::MAX);
 
 /// A tree's first [`ORDER_PATH_DEPTH`] heavy-path nodes, ordered lexicographically
 /// from the root.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct TreePathSummary {
-    tokens: [TreePathToken; ORDER_PATH_DEPTH],
+    /// Each node's split identity (feature, flags and threshold bits, or the category
+    /// word's or list's), so that trees with the same splits at the same depths sort
+    /// next to each other.
+    tokens: [Token; ORDER_PATH_DEPTH],
     len: u8,
 }
 
@@ -74,12 +63,7 @@ fn tree_path_summary(decoded: &Decoded, t: usize) -> TreePathSummary {
         if node.is_leaf() {
             break;
         }
-        let (feature, flags, threshold_bits) = token(decoded, node);
-        tokens[len] = TreePathToken {
-            feature,
-            flags,
-            threshold_bits,
-        };
+        tokens[len] = token(decoded, node);
         len += 1; // heavy child is always idx + 1
     }
     TreePathSummary {
@@ -118,12 +102,12 @@ impl Paths for HeavyPaths<'_> {
         Some(if node.is_leaf() {
             PathNode {
                 token: None,
-                heavy: 0.0,
+                heavy: 0,
             }
         } else {
             PathNode {
                 token: (!self.decoded.split(node).is_varying()).then(|| token(self.decoded, node)),
-                heavy: node.heavy_probability(),
+                heavy: node.heavy(),
             }
         })
     }

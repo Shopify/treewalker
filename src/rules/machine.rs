@@ -180,7 +180,12 @@ impl Caches {
     }
 
     /// The caches of `levels`, sorted and checked: L1 and L2 present, sizes positive
-    /// and sharing at least 1. `None` if they are not.
+    /// and sharing at least 1. `None` if they are not. For the readers of the OS's and
+    /// the CPU's reports, which Miri and other platforms do without.
+    #[cfg(all(
+        any(target_vendor = "apple", target_os = "linux", target_arch = "x86_64"),
+        not(miri)
+    ))]
     fn of(line: usize, mut levels: Vec<Cache>, source: Source) -> Option<Self> {
         levels.retain(|c| c.bytes > 0);
         levels.sort_by_key(|c| c.level);

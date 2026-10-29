@@ -246,7 +246,7 @@ impl Scratch {
         let chunk_bytes = tuning.chunk_bytes;
 
         let mut roots = model.tree_starts.clone();
-        roots.resize(model.trees.len() + MAX_PAD, dummy);
+        roots.resize(model.tree_starts.len() + MAX_PAD, dummy);
 
         let needs = &model.needs;
         // Chunks of consecutive trees within the budget at each width class, less the
@@ -260,26 +260,26 @@ impl Scratch {
                 chunk_trees(needs, w, tree_budget(chunk_bytes, shared))
             })
             .collect();
-        let most = |of: &dyn Fn(Width) -> bool, field: fn(&Chunk) -> usize| {
+        let most = |of: &dyn Fn(Width) -> bool| {
             widths
                 .iter()
                 .zip(&chunks)
                 .filter(|(w, _)| of(**w))
-                .flat_map(|(_, c)| c.iter().map(field))
+                .flat_map(|(_, c)| c.iter().map(|c| c.leaves))
                 .max()
                 .unwrap_or(0)
         };
-        let constant = constant_chunks(model.trees.len(), chunk_bytes);
+        let constant = constant_chunks(model.tree_starts.len(), chunk_bytes);
         let constant_leaves = constant.iter().map(|c| c.leaves).max().unwrap_or(0);
         let constant_roots = if constant.len() > 1 {
             vec![dummy; constant_leaves + MAX_PAD]
         } else {
             Vec::new()
         };
-        let leaves_of = |w: Width| most(&|x| x == w, |c| c.leaves);
-        let max_leaves = most(&|_| true, |c| c.leaves).max(constant_leaves);
-        let handle_leaves = most(&|w| w.handles() && !w.runtime(), |c| c.leaves);
-        let slot_leaves = most(&Width::runtime, |c| c.leaves);
+        let leaves_of = |w: Width| most(&|x| x == w);
+        let max_leaves = most(&|_| true).max(constant_leaves);
+        let handle_leaves = most(&|w| w.handles() && !w.runtime());
+        let slot_leaves = most(&Width::runtime);
         let arena_bytes = widths
             .iter()
             .zip(&chunks)
@@ -378,17 +378,10 @@ fn row_scratch_bytes(model: &Model, rows: usize, n_masks: usize) -> usize {
             .checked_mul(2)?
             .checked_mul(sum_bytes?)?;
         let order = rows.checked_mul(2 * size_of::<[u64; 2]>() + size_of::<u32>())?;
-        let mask = if rows > WIDE_ROWS {
-            units.checked_mul(size_of::<Unit>())?
-        } else {
-            Width::of(rows).bytes()
-        };
+        // A unit per 128 rows, of 16 bytes: no overflow.
+        let mask = mask_bytes(rows);
         let masks = n_masks.checked_mul(mask)?;
-        let runtime = if rows > WIDE_ROWS {
-            units.checked_mul(size_of::<Unit>())?
-        } else {
-            0
-        };
+        let runtime = if rows > WIDE_ROWS { mask } else { 0 };
         let bits = sweep_units(rows, units).checked_mul(size_of::<Unit>())?;
         let total = sums
             .checked_add(order)?
