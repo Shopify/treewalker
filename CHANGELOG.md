@@ -2,10 +2,14 @@
 
 ## 3.1.0
 
-In 3.1, default x86-64 builds run the kernel at the CPU's instruction-set level. The
-API is unchanged, and outputs are the same at every level. Outputs are bit-identical
-to 3.0 except for models with a sigmoid link, which now computes its own `e^-m` rather
-than calling the platform's libm.
+In 3.1, default x86-64 builds run the kernel at the CPU's instruction-set level, and
+predictions take less time than 3.0's on every machine measured: 0.894 to 0.921 of
+3.0's time on five x86-64 families and 0.950 to 0.970 on two Arm ones, geometric means
+over 90 cells, with the large panels at 0.72 to 0.83. The serving API is unchanged,
+and the research API adds `ResearchPredictor::isa()` and `research::sigmoid`. Outputs
+are the same at every level, and bit-identical to 3.0 except for models with a
+sigmoid link, which now computes its own `e^-m` rather than calling the platform's
+libm.
 
 ### Changes
 
@@ -71,8 +75,83 @@ than calling the platform's libm.
   Only a crafted checkpoint can make the guess wrong and still decode; 3.0's debug
   builds panicked on it.
 
+### Performance
+
+Measured on seven Google Cloud machine types on 2026-10-23, one per CPU family
+(Ubuntu 26.04, SMT off, rustc 1.97.1, fat LTO): serving time per row on 90 cells, the
+four datasets' models (SUPPORT, FLCHAIN, credit and Expedia) as single rows, panels,
+sessions, what-ifs and what-if grids. Each comparison timed its two builds in
+alternation (A, B, B, A), 3 rounds, at the default function alignment and at 64
+bytes. A value is the geometric mean over the cells of 3.1's time over the other
+build's, at the default alignment / at 64 bytes. Native builds take
+`-C target-cpu=native`. Default builds take the targets' default CPUs, `x86-64`, where
+3.0 ran SSE2 code and 3.1 runs the CPU's level, and AArch64's `generic`. 2.x ran
+natively, with its production defaults.
+
+| Family | Machine type, CPU | Against 3.0, native | Against 3.0, default builds | Against 2.x, native |
+|---|---|---:|---:|---:|
+| Emerald Rapids | c4-standard-32, Xeon Platinum 8581C | 0.903 / 0.901 | 0.891 / 0.892 | 0.439 / 0.441 |
+| Ice Lake | n2-standard-32, Xeon at 2.60 GHz | 0.904 / 0.894 | 0.886 / 0.885 | 0.497 / 0.500 |
+| Milan | c2d-standard-32, EPYC 7B13 | 0.918 / 0.921 | 0.897 / 0.901 | 0.550 / 0.551 |
+| Genoa | c3d-standard-30, EPYC 9B14 | 0.914 / 0.910 | 0.899 / 0.901 | 0.545 / 0.547 |
+| Turin | c4d-standard-32, EPYC 9B45 | 0.896 / 0.919 | 0.906 / 0.914 | 0.475 / 0.481 |
+| Axion | c4a-highmem-16, Neoverse V2 | 0.970 / 0.959 | 0.958 / 0.962 | 0.543 / 0.543 |
+| Altra | t2a-standard-32, Neoverse N1 | 0.959 / 0.950 | 0.953 / 0.960 | 0.692 / 0.692 |
+
+Against 3.0, 83 to 89 of the 90 cells were faster at both alignments on each x86-64
+family natively, and 83 to 90 in default builds; on Axion and Altra, 34 to 45.
+Against 2.x, every cell was faster at both on six families, and 86 on Altra.
+
+Against 3.0 natively, by cell group, over both alignments:
+
+| Family | Single rows (12) | Panels of 1-row groups (2) | 4 to 64 rows (46) | 104 to 1,008 rows (12) | What-ifs and grids (14) | Sessions (4) |
+|---|---:|---:|---:|---:|---:|---:|
+| Emerald Rapids | 0.927 | 0.966 | 0.940 | 0.719 | 0.913 | 0.941 |
+| Ice Lake | 0.893 | 0.968 | 0.906 | 0.832 | 0.929 | 0.913 |
+| Milan | 0.979 | 0.994 | 0.939 | 0.771 | 0.923 | 0.966 |
+| Genoa | 0.950 | 0.978 | 0.936 | 0.750 | 0.933 | 0.958 |
+| Turin | 0.934 | 0.959 | 0.930 | 0.757 | 0.935 | 0.956 |
+| Axion | 0.982 | 0.989 | 1.000 | 0.804 | 0.976 | 1.004 |
+| Altra | 0.980 | 0.990 | 0.988 | 0.799 | 0.960 | 0.979 |
+
+The large panels, where the precompute took most of 3.0's time, gain the most: 0.72
+to 0.83, and FLCHAIN's XGBoost panel of 1,008-row groups 0.54 to 0.66. On x86-64 the
+single rows and the smaller panels, where the walks took the largest share of 3.0's
+time, take 0.89 to 0.98 and 0.91 to 0.94. Most of that gain, and about half on Ice
+Lake's smaller panels, is the walks' byte offsets and one-flag split test; on
+AArch64, which keeps node indices, those groups stay within 2% of 3.0. Default builds
+gain about as much against 3.0's default builds, whose x86-64 kernel had only SSE2.
+
+A default build against a native one of 3.1: 1.007 / 1.006 on Emerald Rapids, 0.975 /
+0.977 on Ice Lake, 1.020 / 1.023 on Milan, 1.020 / 1.022 on Genoa, 1.019 / 1.035 on
+Turin, 1.009 / 1.006 on Axion and 0.990 / 0.992 on Altra. The default build runs V4
+on Emerald Rapids, Genoa and Turin and V3 on Ice Lake, whose AVX-512 lacks BF16, and
+on Milan.
+
 ### Known gaps
 
+- Default builds on Milan, Genoa and Turin take 1.9 to 3.5% longer than native ones,
+  single rows 4.3% on Genoa and 3.4% on Turin. The dispatched V3 and V4 code has the
+  level's features but LLVM's generic tuning, which orders the same instructions and
+  assigns their registers differently: tuned for `znver3` or `znver4`, the dispatched
+  walk loops are instruction for instruction the native ones. Which property of the
+  Zen cores the generic order costs on is not established; on Emerald Rapids the same
+  V4 code is within 1% of native. The CPU a build tunes for is a setting of the whole
+  build, which a library cannot choose for its own functions, so on AMD build with
+  `-C target-cpu=native` for the best speed (see the README).
+- Natively, 5 cells were slower than 3.0 at both alignments, all on Arm, by 0.3 to
+  2.7%. On Axion: credit's 500-tree depth-8 LightGBM what-if grid of 4,096-row
+  groups, 1.018 / 1.012, and SUPPORT's 500-tree depth-8 panels of 16-row groups with
+  extra features declared varying, LightGBM's with 55% and 60% of splits on varying
+  features, 1.009 / 1.005 and 1.014 / 1.008, and XGBoost's with 50%, 1.008 / 1.003.
+  On Altra, FLCHAIN's 500-tree depth-8 XGBoost panel of 4-row groups, 1.027 / 1.013.
+  Three of the Axion cells were slower at both in an earlier survey too, which
+  measured these changes before the x86-64 walk change, with the same AArch64 kernel;
+  no mechanism is established. In default builds 4 cells were slower than 3.0's at
+  both, by 0.6 to 1.5%: those two LightGBM panels on Axion, a single-row cell on Genoa
+  and a what-if on Altra.
+- Against 2.x, one cell was slower at both alignments: Altra's Expedia LightGBM
+  sessions of 1,000 trees of depth 16, 1.057 / 1.060.
 - A model whose categorical splits take many distinct heavy sets, some 100,000 or
   more on one feature, can fail to load at the default limits: its chain cover's
   inclusion graph passes `LoadOptions::max_rank_table_bytes`. With the cap raised it
