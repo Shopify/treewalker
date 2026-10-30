@@ -291,9 +291,10 @@ fn empty_thresholds_are_filled_in_a_copy() {
     assert_eq!(empty_thresholds(&path), 2);
 }
 
-/// The JSON dump predicts bit for bit as the binary export. Treelite writes empty
-/// thresholds for nonfinite values; such dumps are rejected, not repaired, and
-/// skipped with a message (docs/treelite-loading.md).
+/// The JSON dump, loaded with the cell's load options as the binary export is,
+/// predicts bit for bit as the export. Treelite writes empty thresholds for
+/// nonfinite values; such dumps are rejected, not repaired, and skipped with a
+/// message (docs/treelite-loading.md).
 fn json_matches_binary(c: &Cell, f: &Forest) -> Result<(), String> {
     let Some(json) = c.model_json() else {
         return Ok(());
@@ -301,7 +302,8 @@ fn json_matches_binary(c: &Cell, f: &Forest) -> Result<(), String> {
     if std::fs::metadata(&json).map_or(0, |m| m.len()) > JSON_MAX_BYTES {
         return Ok(());
     }
-    let load = |path: &Path| Forest::load(path, &c.walker_config);
+    let options = c.load_options().map_err(|e| format!("{e:#}"))?;
+    let load = |path: &Path| Forest::load_with(path, &c.walker_config, &options);
     let g = match load(&json) {
         Ok(g) => g,
         Err(e) => {

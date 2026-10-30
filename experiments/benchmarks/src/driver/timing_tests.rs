@@ -412,6 +412,45 @@ fn fixture_cell(sizes: &[usize], tag: &str) -> (Cell, PathBuf) {
     (c, dir)
 }
 
+/// A cell's recorded `max_rank_table_bytes` reaches every load of its model: a cap
+/// below the categorical fixture's rank tables rejects it through `forest`, an
+/// ablated `forest` and `forest_at_width`, and without the override all three load.
+#[test]
+fn recorded_load_options_reach_every_load() {
+    let (mut cell, _dir) = fixture_cell(&[2, 3], "load-options");
+    cell.model_treelite = PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/import/categories_left.bin"
+    ));
+    let ablated = LoadAblation {
+        disable_tree_ordering: true,
+        ..LoadAblation::default()
+    };
+    for (doc, loads) in [
+        (json!({}), true),
+        (json!({"load_options": {"max_rank_table_bytes": 1}}), false),
+    ] {
+        cell.doc = doc;
+        let results = [
+            cell.forest(&LoadAblation::default()).err(),
+            cell.forest(&ablated).err(),
+            cell.forest_at_width(4).err(),
+        ];
+        for (what, err) in ["forest", "ablated forest", "forest at width 4"]
+            .into_iter()
+            .zip(results)
+        {
+            match err {
+                None => assert!(loads, "{what} loaded under a 1-byte cap"),
+                Some(e) => assert!(
+                    !loads && format!("{e:#}").contains("max_rank_table_bytes"),
+                    "{what}: {e:#}"
+                ),
+            }
+        }
+    }
+}
+
 #[test]
 fn the_oracle_rows_stages_are_written_in_the_oracles_order() {
     let (mut cell, dir) = fixture_cell(&[3, 5, 2], "stages");

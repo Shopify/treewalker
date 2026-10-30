@@ -35,7 +35,7 @@ class TrainData:
 
 
 # Datasets built from the Expedia split, one session per group.
-RANKING = ("expedia", "expedia-filled")
+RANKING = ("expedia", "expedia-filled", "expedia-cat")
 
 
 class Context:
@@ -52,6 +52,7 @@ class Context:
         self._survival: dict[str, ds.SurvivalSplit] = {}
         self._train: dict[tuple, TrainData] = {}
         self._ranking: ds.RankingSplit | None = None
+        self._categorical: ds.RankingSplit | None = None
         self._fills: tuple[np.ndarray, dict[str, Any]] | None = None
         self._sessions: dict[str, wl.Workload] = {}
         self._credit: ds.CreditSplit | None = None
@@ -64,7 +65,13 @@ class Context:
             self._survival[name] = ds.split_survival(self.paths, name, self.seed, self.test_frac)
         return self._survival[name]
 
-    def ranking(self) -> ds.RankingSplit:
+    def ranking(self, dataset: str = "expedia") -> ds.RankingSplit:
+        if dataset == "expedia-cat":
+            if self._categorical is None:
+                self._categorical = ds.split_expedia(
+                    self.paths, self.seed, 0.2, 0, source_order=True
+                )
+            return self._categorical
         if self._ranking is None:
             self._ranking = ds.split_expedia(
                 self.paths, self.seed, self.test_frac, self.max_sessions
@@ -105,6 +112,8 @@ class Context:
         if dataset not in self._sessions:
             if dataset == "expedia":
                 w = wl.ranking_sessions(self.ranking())
+            elif dataset == "expedia-cat":
+                w = wl.ranking_sessions(self.ranking(dataset), categorical=True)
             elif dataset == "expedia-filled":
                 base = self.sessions("expedia")
                 fills, record = self.expedia_fills()
@@ -152,19 +161,23 @@ class Context:
             horizon = {"requested": model.horizon, "realized": len(edges) - 1}
             extra = {"edges": edges, "train_cov": cov}
         elif model.dataset in RANKING:
-            r = self.ranking()
-            X = r.train_df.select(ds.EXPEDIA_FEATURES).to_numpy().astype(np.float64)
+            r = self.ranking(model.dataset)
+            names = list(
+                ds.EXPEDIA_CAT_FEATURES if model.dataset == "expedia-cat" else ds.EXPEDIA_FEATURES
+            )
+            X = r.train_df.select(names).to_numpy().astype(np.float64)
             if model.dataset == "expedia-filled":
                 fills, identity["missing_values"] = self.expedia_fills()
                 X = ds.fill_missing(X, fills)
             y = r.train_df[ds.EXPEDIA_LABEL].to_numpy().astype(np.float64)
-            names, cat = list(ds.EXPEDIA_FEATURES), []
+            cat = list(range(len(ds.EXPEDIA_CAT))) if model.dataset == "expedia-cat" else []
             split_rec = {
                 "seed": r.seed,
                 "test_frac": r.test_frac,
                 "max_sessions": r.max_sessions,
                 "unit": "session",
                 "search_level_features": list(ds.EXPEDIA_SESSION),
+                **({"candidate_order": "source-file"} if model.dataset == "expedia-cat" else {}),
             }
             source = {
                 "file": "experiments/data/expedia.parquet",
@@ -191,7 +204,7 @@ class Context:
         if model.dataset in SURVIVAL:
             return ds.train_patients(td.extra["train_cov"], td.extra["edges"])
         if model.dataset in RANKING:
-            return self.ranking().train_df["srch_id"].to_numpy().astype(np.int64)
+            return self.ranking(model.dataset).train_df["srch_id"].to_numpy().astype(np.int64)
         return np.arange(len(td.X), dtype=np.int64)
 
     def replicate_data(self, model: Model) -> TrainData:

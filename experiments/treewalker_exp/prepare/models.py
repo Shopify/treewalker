@@ -56,8 +56,11 @@ def model_identity(model: Model, fw: str, td: TrainData) -> dict[str, Any]:
         "split": td.split,
         "n_trees": model.n_trees,
         "max_depth": model.max_depth,
+        **({"num_leaves": model.num_leaves} if model.num_leaves is not None else {}),
         "horizon": td.horizon,
-        "train": tr.params(fw, model.n_trees, model.max_depth),
+        "train": tr.params(
+            fw, model.n_trees, model.max_depth, dataset=model.dataset, num_leaves=model.num_leaves
+        ),
         "categorical_features": [td.names[i] for i in td.cat],
         "feature_order": td.names,
         "libraries": tr.library_versions(fw),
@@ -90,7 +93,18 @@ def ensure_model(ctx: Context, model: Model, fw: str, td: TrainData, force: bool
     native = fw_dir / tr.NATIVE_NAME[fw]
     log(f"  {model.id}/{fw}: training on {td.X.shape[0]:,} rows")
     t0 = time.perf_counter()
-    tr.train(fw, td.X, td.y, td.names, td.cat, model.n_trees, model.max_depth, native)
+    tr.train(
+        fw,
+        td.X,
+        td.y,
+        td.names,
+        td.cat,
+        model.n_trees,
+        model.max_depth,
+        native,
+        dataset=model.dataset,
+        num_leaves=model.num_leaves,
+    )
     t1 = time.perf_counter()
     tl, json_bytes = tr.export_treelite(
         fw, native, fw_dir / "model_treelite.json", fw_dir / "model_treelite.bin", json
