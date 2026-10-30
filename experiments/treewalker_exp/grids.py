@@ -66,12 +66,15 @@ class Model:
     replicate_fraction: float = 0.0
     # A model derived from the trained one (DERIVED), or "" for the trained model.
     derive: str = ""
+    num_leaves: int | None = None  # leaf-limited LightGBM recipes; depth still bounds them
 
     @property
     def name(self) -> str:
         if self.fixture is not None:
             return self.fixture
         base = f"nt{self.n_trees}_md{self.max_depth}"
+        if self.num_leaves is not None:
+            base += f"_nl{self.num_leaves}"
         base = base if self.horizon is None else f"{base}_h{self.horizon}"
         base = f"{base}_r{self.replicate}" if self.replicate else base
         return f"{base}_{DERIVED[self.derive]}" if self.derive else base
@@ -124,7 +127,8 @@ class Cell:
             case "ranking-sessions-v2":
                 return "sessions"
             case "ranking-cohort-v2":
-                return f"cohort{p['min_candidates']}-n{p['size']}"
+                base = f"cohort{p['min_candidates']}-n{p['size']}"
+                return f"{base}-g{p['max_groups']}" if "max_groups" in p else base
             case "fixture-v1":
                 return "import"
             case "rows-v1":
@@ -250,8 +254,16 @@ def _workload_cells(name: str, w: dict[str, Any], defaults: dict[str, Any]) -> l
     derived = _derived(name, w)
     shares = _shares(name, w) if "varying_share" in w else None
     out = []
-    for dataset, nt, md, r, d in product(
-        w["datasets"], w["n_trees"], w["max_depth"], replicates, derived
+    leaves = w.get("num_leaves", [None])
+    if "num_leaves" in w and (
+        frameworks != ["lightgbm"]
+        or not leaves
+        or any(type(n) is not int or n < 2 for n in leaves)
+        or len(set(leaves)) != len(leaves)
+    ):
+        raise ValueError(f"workload {name}: num_leaves needs distinct integers >= 2, LightGBM only")
+    for dataset, nt, md, r, d, nl in product(
+        w["datasets"], w["n_trees"], w["max_depth"], replicates, derived, leaves
     ):
         horizons: list[int | None] = [None]
         if dataset in SURVIVAL:
@@ -259,7 +271,15 @@ def _workload_cells(name: str, w: dict[str, Any], defaults: dict[str, Any]) -> l
         for h in horizons:
             layout = "scenario-v1" if gen == "whatif-v1" else "standard"
             model = Model(
-                dataset, nt, md, h, layout, replicate=r, replicate_fraction=fraction, derive=d
+                dataset,
+                nt,
+                md,
+                h,
+                layout,
+                replicate=r,
+                replicate_fraction=fraction,
+                derive=d,
+                num_leaves=nl,
             )
             params: list[tuple[tuple[str, Any], ...]]
             if gen.startswith("whatif"):
@@ -268,6 +288,10 @@ def _workload_cells(name: str, w: dict[str, Any], defaults: dict[str, Any]) -> l
                 params = [
                     (("min_candidates", w["min_candidates"]), ("size", n)) for n in w["sizes"]
                 ]
+                if "max_groups" in w:
+                    if type(w["max_groups"]) is not int or w["max_groups"] < 1:
+                        raise ValueError(f"workload {name}: max_groups must be a positive integer")
+                    params = [(*p, ("max_groups", w["max_groups"])) for p in params]
             elif gen == "rows-v1":
                 params = [(("row_order", o), ("rows", w["rows"])) for o in _row_orders(name, w)]
             elif shares is not None:
