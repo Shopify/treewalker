@@ -71,6 +71,21 @@ than calling the platform's libm.
   Only a crafted checkpoint can make the guess wrong and still decode; 3.0's debug
   builds panicked on it.
 
+### Known gaps
+
+- A model whose categorical splits take many distinct heavy sets, some 100,000 or
+  more on one feature, can fail to load at the default limits: its chain cover's
+  inclusion graph passes `LoadOptions::max_rank_table_bytes`. With the cap raised it
+  loads slowly. 3.0 has the gap too: the chain cover (`src/load/layout/chains.rs`)
+  and `max_rank_table_bytes` shipped in it. The graph keeps a bit per pair of a
+  listed and a complemented set and 8 bytes per inclusion between sets of one kind,
+  so it grows faster than the sets. The `categorical-scale` cell
+  (`docs/categorical-scale.md`) reproduces it on public data: on Genoa
+  (c3d-standard-90) its model, 600 LightGBM trees of 4,096 leaves on Expedia
+  searches with 265,406 distinct sets on `srch_destination_id`, fails with
+  `LoadError::Limit` in 1.3 s, and with the cap raised its 190,335 chains load in
+  4.7 s at a peak of 1.5 GB.
+
 ## 3.0.0
 
 3.0 replaces the prediction kernel. The new one walks several trees at once on
