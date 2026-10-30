@@ -52,7 +52,7 @@ BASELINES = {
 }
 # The released scenario model (grids.toml's whatif-v1 workload: 500 trees, depth 8).
 SCENARIO_MODEL = (500, 8)
-_MODEL = re.compile(r"nt(\d+)_md(\d+)(?:_h(\d+))?(?:_r(\d+))?")
+_MODEL = re.compile(r"nt(\d+)_md(\d+)(?:_nl\d+)?(?:_h(\d+))?(?:_r(\d+))?")
 
 
 _DESIGN_SCHEMA = {
@@ -148,7 +148,10 @@ def design(cell: str) -> dict[str, Any]:
     elif workload == "sessions":
         family, g = "sessions", None
     elif workload.startswith("cohort"):
-        family, g = "cohort", int(workload.rsplit("-n", 1)[1])
+        cohort = re.fullmatch(r"cohort\d+-n(\d+)(?:-g\d+)?", workload)
+        if cohort is None:
+            raise ValueError(f"unknown workload in {cell}")
+        family, g = "cohort", int(cohort[1])
     elif workload.startswith("whatif"):
         k = int(re.search(r"-k(\d+)-", workload)[1])  # type: ignore[index]
         family, g = "whatif", int(workload.rsplit("-G", 1)[1])
