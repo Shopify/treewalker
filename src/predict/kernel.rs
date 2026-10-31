@@ -103,6 +103,7 @@ impl Model {
         const F32: bool,
         const STATS: bool,
         const ABLATE: bool,
+        const BITS: bool,
     >(
         &self,
         data: &[f64],
@@ -114,14 +115,14 @@ impl Model {
         finalize: bool,
     ) {
         if X::NATIVE {
-            return self.kernel_groups::<X, F32, STATS, ABLATE>(
+            return self.kernel_groups::<X, F32, STATS, ABLATE, BITS>(
                 data, out, groups, s, options, stats, finalize,
             );
         }
         X::with8(
             #[inline(always)]
             |m: &Self, data, out, groups, s, options, stats, finalize| {
-                m.kernel_groups::<X, F32, STATS, ABLATE>(
+                m.kernel_groups::<X, F32, STATS, ABLATE, BITS>(
                     data, out, groups, s, options, stats, finalize,
                 );
             },
@@ -139,13 +140,20 @@ impl Model {
     /// Tree sums, or with `finalize` outputs, of every group of a call, through the
     /// kernel; `finalize` turns the whole call's sums into outputs at once, after its
     /// groups. With `STATS`, the work and phase times are added to `stats`; with
-    /// `ABLATE`, `options` apply, otherwise the defaults do. The input must have
-    /// passed [`super::Predictor::check`].
+    /// `ABLATE`, `options` apply, otherwise the defaults do. `BITS` is whether the
+    /// model has bit splits, whose bins the fill copies and the walks shift. The input
+    /// must have passed [`super::Predictor::check`].
     #[expect(
         clippy::too_many_arguments,
         reason = "the call, its scratch and its variant"
     )]
-    fn kernel_groups<X: Isa, const F32: bool, const STATS: bool, const ABLATE: bool>(
+    fn kernel_groups<
+        X: Isa,
+        const F32: bool,
+        const STATS: bool,
+        const ABLATE: bool,
+        const BITS: bool,
+    >(
         &self,
         data: &[f64],
         out: &mut [f64],
@@ -155,6 +163,7 @@ impl Model {
         stats: &mut Stats,
         finalize: bool,
     ) {
+        debug_assert_eq!(BITS, self.layout.bins.has_bits(), "the kernel's BITS");
         let options = if ABLATE { options } else { Options::default() };
         let nf = self.config.n_features();
         let n_rows = out.len();
@@ -167,9 +176,9 @@ impl Model {
             let t = Clock::<STATS>::start();
             self.layout
                 .bins
-                .fill_with::<F32>(&rows[..nf], &mut c.bins, constant);
+                .fill_with::<F32, BITS>(&rows[..nf], &mut c.bins, constant);
             let t = t.lap(&mut stats.phases.bins);
-            self.prefix_starts_at::<X, STATS, ABLATE>(c, &mut stats.counters);
+            self.prefix_starts_at::<X, STATS, ABLATE, BITS>(c, &mut stats.counters);
             t.lap(&mut stats.phases.prefix);
             if STATS {
                 stats.counters.groups += 1;
@@ -184,7 +193,7 @@ impl Model {
             let c = &mut s.common;
             macro_rules! group {
                 ($m:ty, $c:ty, $q:expr, $u:expr) => {
-                    self.masked_group_at::<X, F32, $m, $c, STATS, ABLATE>(
+                    self.masked_group_at::<X, F32, $m, $c, STATS, ABLATE, BITS>(
                         rows, results, c, $q, $u, options, stats,
                     )
                 };
@@ -192,7 +201,7 @@ impl Model {
             match Width::of(held) {
                 _ if held > WIDE_ROWS => group!(Unit<X>, Slot, &mut s.slots, rows::units(held)),
                 Width::W32 if constant => {
-                    self.constant_group_at::<X, STATS, ABLATE>(results, c, options, stats);
+                    self.constant_group_at::<X, STATS, ABLATE, BITS>(results, c, options, stats);
                 }
                 Width::W32 => group!(u32, u32, &mut s.q32, 1),
                 Width::W64 => group!(u64, u64, &mut s.q64, 1),
@@ -215,17 +224,17 @@ impl Model {
     /// [`Self::prefix_starts`] at level `X` ([`Isa`]): where the build dispatches, out of line,
     /// with the body compiled inside the level's trampoline; elsewhere inlined.
     #[cfg_attr(not(dispatch), inline(always))]
-    fn prefix_starts_at<X: Isa, const STATS: bool, const ABLATE: bool>(
+    fn prefix_starts_at<X: Isa, const STATS: bool, const ABLATE: bool, const BITS: bool>(
         &self,
         c: &mut Common,
         counters: &mut WorkCounters,
     ) {
         if X::NATIVE {
-            return self.prefix_starts::<STATS, ABLATE>(c, counters);
+            return self.prefix_starts::<STATS, ABLATE, BITS>(c, counters);
         }
         X::with3(
             #[inline(always)]
-            |m: &Self, c, counters| m.prefix_starts::<STATS, ABLATE>(c, counters),
+            |m: &Self, c, counters| m.prefix_starts::<STATS, ABLATE, BITS>(c, counters),
             self,
             c,
             counters,
@@ -238,7 +247,7 @@ impl Model {
     /// `ABLATE` only keeps the research builds' instantiation apart from
     /// production's, so that compiling `research` in cannot change production code.
     #[cfg_attr(dispatch, inline(always))]
-    fn prefix_starts<const STATS: bool, const ABLATE: bool>(
+    fn prefix_starts<const STATS: bool, const ABLATE: bool, const BITS: bool>(
         &self,
         c: &mut Common,
         counters: &mut WorkCounters,
@@ -248,7 +257,7 @@ impl Model {
             let (base, k) = (group.node_base as usize, group.depth as usize);
             let bail = layout.nodes[base..base + k]
                 .iter()
-                .position(|n| !n.goes_heavy(&c.bins))
+                .position(|n| !n.goes_heavy::<BITS>(&c.bins))
                 .unwrap_or(k);
             if STATS {
                 counters.prefix_steps += (bail + 1).min(k) as u64;
@@ -287,7 +296,15 @@ impl Model {
         clippy::too_many_arguments,
         reason = "the group, its scratch and its variant"
     )]
-    fn masked_group_at<X: Isa, const F32: bool, M, C, const STATS: bool, const ABLATE: bool>(
+    fn masked_group_at<
+        X: Isa,
+        const F32: bool,
+        M,
+        C,
+        const STATS: bool,
+        const ABLATE: bool,
+        const BITS: bool,
+    >(
         &self,
         rows: &[f64],
         results: &mut [f64],
@@ -301,7 +318,7 @@ impl Model {
         C: Carrier<M>,
     {
         if X::NATIVE {
-            return self.masked_group::<X, F32, M, C, STATS, ABLATE>(
+            return self.masked_group::<X, F32, M, C, STATS, ABLATE, BITS>(
                 rows,
                 results,
                 c,
@@ -314,7 +331,7 @@ impl Model {
         X::with8(
             #[inline(always)]
             |m: &Self, rows, results, c, queues, u, options, stats| {
-                m.masked_group::<X, F32, M, C, STATS, ABLATE>(
+                m.masked_group::<X, F32, M, C, STATS, ABLATE, BITS>(
                     rows, results, c, queues, u, options, stats,
                 );
             },
@@ -338,7 +355,15 @@ impl Model {
         clippy::too_many_arguments,
         reason = "the group, its scratch and its variant"
     )]
-    fn masked_group<X: Isa, const F32: bool, M, C, const STATS: bool, const ABLATE: bool>(
+    fn masked_group<
+        X: Isa,
+        const F32: bool,
+        M,
+        C,
+        const STATS: bool,
+        const ABLATE: bool,
+        const BITS: bool,
+    >(
         &self,
         rows: &[f64],
         results: &mut [f64],
@@ -478,16 +503,16 @@ impl Model {
             macro_rules! passes {
                 ($scan:expr) => {
                     match (options.precompute, options.unsplit) {
-                        (true, true) => pass.run_at::<X, C, STATS, ABLATE, false, false>(
+                        (true, true) => pass.run_at::<X, C, STATS, ABLATE, false, false, BITS>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (true, false) => pass.run_at::<X, C, STATS, ABLATE, false, true>(
+                        (true, false) => pass.run_at::<X, C, STATS, ABLATE, false, true, BITS>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (false, true) => pass.run_at::<X, C, STATS, ABLATE, true, false>(
+                        (false, true) => pass.run_at::<X, C, STATS, ABLATE, true, false, BITS>(
                             walks, arena, queues, stops, words, $scan,
                         ),
-                        (false, false) => pass.run_at::<X, C, STATS, ABLATE, true, true>(
+                        (false, false) => pass.run_at::<X, C, STATS, ABLATE, true, true, BITS>(
                             walks, arena, queues, stops, words, $scan,
                         ),
                     }
@@ -501,7 +526,7 @@ impl Model {
                 if ABLATE {
                     passes!(&mut scan)
                 } else {
-                    pass.run_at::<X, C, STATS, ABLATE, false, false>(
+                    pass.run_at::<X, C, STATS, ABLATE, false, false, BITS>(
                         walks,
                         arena,
                         queues,
@@ -565,7 +590,7 @@ impl Model {
     /// with the body compiled inside the level's trampoline; elsewhere inlined.
     #[cfg_attr(not(dispatch), inline(always))]
     #[cfg_attr(dispatch, inline(never))]
-    fn constant_group_at<X: Isa, const STATS: bool, const ABLATE: bool>(
+    fn constant_group_at<X: Isa, const STATS: bool, const ABLATE: bool, const BITS: bool>(
         &self,
         results: &mut [f64],
         c: &mut Common,
@@ -573,12 +598,12 @@ impl Model {
         stats: &mut Stats,
     ) {
         if X::NATIVE {
-            return self.constant_group::<X, STATS, ABLATE>(results, c, options, stats);
+            return self.constant_group::<X, STATS, ABLATE, BITS>(results, c, options, stats);
         }
         X::with5(
             #[inline(always)]
             |m: &Self, results, c, options, stats| {
-                m.constant_group::<X, STATS, ABLATE>(results, c, options, stats);
+                m.constant_group::<X, STATS, ABLATE, BITS>(results, c, options, stats);
             },
             self,
             results,
@@ -597,7 +622,7 @@ impl Model {
     /// research's instantiation apart, as in [`Self::prefix_starts`].
     #[cfg_attr(dispatch, inline(always))]
     #[cfg_attr(not(dispatch), inline(never))]
-    fn constant_group<X: Isa, const STATS: bool, const ABLATE: bool>(
+    fn constant_group<X: Isa, const STATS: bool, const ABLATE: bool, const BITS: bool>(
         &self,
         results: &mut [f64],
         c: &mut Common,
@@ -611,7 +636,7 @@ impl Model {
         if let Sums::Wide { acc, .. } = &mut c.sums {
             acc.fill(0);
         }
-        let fixed = self.constant_chunks::<X, STATS, ABLATE>(c, options, stats, &mut clock);
+        let fixed = self.constant_chunks::<X, STATS, ABLATE, BITS>(c, options, stats, &mut clock);
         let sum = match (&mut c.sums, self.plan) {
             (Sums::Fixed(_), Plan::Fixed(e)) => exact::to_f64(fixed, e),
             (Sums::Wide { wide, acc, .. }, _) => {
@@ -630,7 +655,7 @@ impl Model {
     /// The chunks of [`Self::constant_group`]: returns the `i128` sum, or adds a wide
     /// model's to its accumulators.
     #[inline(always)]
-    fn constant_chunks<X: Isa, const STATS: bool, const ABLATE: bool>(
+    fn constant_chunks<X: Isa, const STATS: bool, const ABLATE: bool, const BITS: bool>(
         &self,
         c: &mut Common,
         options: Options,
@@ -643,7 +668,7 @@ impl Model {
         let mut fixed = 0i128;
         for chunk in &c.constant {
             let n = chunk.trees.1 - chunk.trees.0;
-            let (walks, pad) = walks.for_pass::<ABLATE>(n, false);
+            let (walks, pad) = walks.for_pass::<ABLATE, BITS>(n, false);
             // The last chunk's roots are followed by the dummies; others are copied.
             let roots: &[u32] = if chunk.trees.1 == n_trees {
                 &c.roots[chunk.trees.0..]
@@ -675,6 +700,7 @@ impl Model {
                     D,
                     R,
                     STATS,
+                    BITS,
                 >(
                     &p, roots, stops, words, &mut steps
                 ));

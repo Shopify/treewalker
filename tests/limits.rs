@@ -1,12 +1,12 @@
 //! Models past the representation limits of earlier versions, which now have none
 //! but the input caps of `LoadOptions`, 32-bit node indices and memory: more than
-//! 65,535 varying predicates, more than 1,000,000 trees, and malformed category
-//! segments. Trees of more than 32,767 nodes, deeper than 256, with more than 64
+//! 65,535 varying predicates, more than 1,000,000 trees, more than 100,000 distinct
+//! heavy sets on a categorical feature, and malformed category segments. Trees of more than 32,767 nodes, deeper than 256, with more than 64
 //! features and with any `u32` category run in the property tests. Each model is
 //! checked against the oracle and the exact full walk.
 //!
 //! Not run at full scale: 32,000,000 nodes and more (a 512 MB layout), 2^29 varying
-//! predicates and 2^30 bin slots, the layout's field widths; unit tests check those
+//! predicates and 2^27 bin slots, the layout's field widths; unit tests check those
 //! bounds' logic on their counts instead.
 #![expect(clippy::float_cmp, reason = "the generator's exact category test")]
 
@@ -166,6 +166,111 @@ fn more_than_a_million_trees() {
         .build()
         .unwrap();
     check(&m, config, &LoadAblation::default(), &rows);
+}
+
+/// 100,001 trees, each a split on constant feature 0 listing the categories of
+/// t + 1's bits among 17: as many distinct heavy sets, past the threshold for bits,
+/// over 19 codes, so 3,126 slots of bits, 237,576 bytes. Every third is heavy-right,
+/// a complement, and every other sends missing left.
+fn heavy_sets() -> Model {
+    let trees = (0..100_001usize)
+        .map(|t| {
+            let categories = (0..17).filter(|&c| (t + 1) >> c & 1 != 0).collect();
+            let (light, heavy) = (Some(1), Some(2));
+            let (left, right) = if t % 3 == 0 {
+                (light, heavy)
+            } else {
+                (heavy, light)
+            };
+            Tree {
+                nodes: vec![
+                    Node::Categorical {
+                        feature: 0,
+                        categories,
+                        right_child: false,
+                        default_left: t % 2 == 0,
+                        left: 1,
+                        right: 2,
+                        count: Some(3),
+                    },
+                    Node::Leaf {
+                        value: (t % 11) as f64 / 8.0,
+                        count: left,
+                    },
+                    Node::Leaf {
+                        value: -((t % 13) as f64) / 16.0,
+                        count: right,
+                    },
+                ],
+            }
+        })
+        .collect();
+    model(trees, 1)
+}
+
+#[test]
+fn more_than_100000_heavy_sets_take_bits() {
+    let m = heavy_sets();
+    let rows: Vec<f64> = (0..64)
+        .map(|r| match r % 22 {
+            c @ 0..=16 => f64::from(c),
+            17 => 17.0,
+            18 => f64::NAN,
+            19 => -1.0,
+            20 => 3.5,
+            _ => 1e9,
+        })
+        .collect();
+    let config = WalkerConfig::builder(1)
+        .max_group_width(3)
+        .varying([])
+        .build()
+        .unwrap();
+    let bytes = m.to_binary(&mut Rng::new(1));
+    let forest = Forest::from_bytes(
+        &bytes,
+        ModelFormat::TreeliteBinaryV4,
+        config,
+        &LoadOptions::default(),
+    )
+    .unwrap_or_else(|e| panic!("load: {e}"));
+    // Single rows, and groups of three equal rows: the feature is constant.
+    let expected: Vec<f64> = rows.iter().map(|&x| m.predict(&[x])).collect();
+    let mut full = vec![f64::NAN; rows.len()];
+    forest.predict_full_walk(&rows, &mut full);
+    same(&full, &expected, "full walk");
+    let mut single = vec![f64::NAN; rows.len()];
+    forest.predictor().predict_fixed(&rows, 1, &mut single);
+    same(&single, &expected, "single rows");
+    let tripled: Vec<f64> = rows.iter().flat_map(|&x| [x; 3]).collect();
+    let mut groups = vec![f64::NAN; tripled.len()];
+    forest.predictor().predict_fixed(&tripled, 3, &mut groups);
+    let expected: Vec<f64> = expected.iter().flat_map(|&y| [y; 3]).collect();
+    same(&groups, &expected, "groups");
+    let s = forest.layout_stats();
+    assert_eq!(
+        (s.bit_sets, s.bit_slots, s.chain_slots, s.rank_table_bytes),
+        (100_001, 3_126, 0, 237_576)
+    );
+    // In chains, as before bits, the sets' inclusion graph passes the default cap.
+    let chains = LoadAblation {
+        category_bits_above: Some(usize::MAX),
+        ..LoadAblation::default()
+    };
+    let config = WalkerConfig::builder(1)
+        .max_group_width(3)
+        .varying([])
+        .build()
+        .unwrap();
+    let err = Forest::from_bytes_ablated(
+        &bytes,
+        ModelFormat::TreeliteBinaryV4,
+        config,
+        &LoadOptions::default(),
+        &chains,
+    )
+    .err();
+    assert!(matches!(err, Some(LoadError::Limit(m)) if m.contains("inclusion graph")));
 }
 
 #[test]

@@ -264,7 +264,10 @@ uses to measure the kernel. Serving needs none of it.
   `LoadAblation`, the load-time choices turned off or forced:
   `disable_tree_ordering`, `disable_bitset_intern`, `disable_predicate_dedup` and
   `prefix_depth` (every run of trees sharing that many constant splits, instead of
-  the rule's groups; 0 for none).
+  the rule's groups; 0 for none) and `category_bits_above` (bits rather than chains
+  for constant categorical features of more distinct heavy sets than that, instead
+  of 100,000, and beside them for those whose bits take no more bytes than their
+  chains can; 0 for every one, as far as the cap allows).
 - `predict_group` and `predict_groups` are the timed build; `predict_group_counted`
   returns `WorkCounters` (`COUNTERS_VERSION` 6: groups, single rows, bins, precompute,
   event scans, prefix and walk steps, lane slots, passes, events, splits, runs and
@@ -277,8 +280,8 @@ uses to measure the kernel. Serving needs none of it.
   budget, the expected walk steps per tree, the cache level holding the nodes with
   its probed latency and the prefetch distances, the prefix groups with the steps
   they save and cost, and the bytes of the node pool, leaf table, categorical
-  rank tables (with the chain slots and the heavy sets they cover) and the varying
-  categorical features' flip lists.
+  rank tables (with the chain slots and the heavy sets they cover, and the bit slots
+  and theirs) and the varying categorical features' flip lists.
 - `forest.predict_full_walk(rows, out)` walks every tree for every row and sums
   exactly: an independent reference that production matches bit for bit.
 - `nodes()`, `trees()`, `tree_nodes()`, `bitset_bytes()`, `threshold_type()` and
@@ -305,8 +308,8 @@ run `treewalker-exp fetch-expedia --train-csv data.zip`; extracting the zip need
 `experiments/data/expedia.parquet` and checks its content fingerprint
 against the file the paper used.
 
-The separate `categorical-scale` suite prepares a public-data model whose
-categorical features fail to load at the default limits,
+The separate `categorical-scale` suite prepares a public-data model with very
+large categorical features, which 3.0 and 3.1 fail to load at the default limits,
 `expedia-cat/nt600_md32_nl4096/lightgbm/cohort16-n16-g40000`.
 It does not change the paper's numeric Expedia cells or enter their factorial.
 See [the recipe, load-cap expectation and reproduction commands](docs/categorical-scale.md).

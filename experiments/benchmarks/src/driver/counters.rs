@@ -56,6 +56,8 @@ pub fn layout_stats(forest: &Forest) -> Value {
         "flip_table_bytes": s.flip_table_bytes,
         "chain_slots": s.chain_slots,
         "chain_sets": s.chain_sets,
+        "bit_slots": s.bit_slots,
+        "bit_sets": s.bit_sets,
         "line_bytes": s.line_bytes,
         "l1_bytes": s.l1_bytes,
         "l2_share_bytes": s.l2_share_bytes,

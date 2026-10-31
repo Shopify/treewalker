@@ -135,13 +135,13 @@ impl MaskPlan {
                 tests.extend(range.cat.clone().map(|p| {
                     let t = points[p as usize];
                     debug_assert!(
-                        t.slot as usize >= c.slot && (t.slot as usize) < c.slot + c.chains
+                        t.slot as usize >= c.slot && (t.slot as usize) < c.slot + c.slots()
                     );
                     (t.slot - c.slot as u32, t.k, p, t.invert)
                 }));
                 tests.sort_unstable();
                 of_chain.clear();
-                of_chain.resize(c.chains, NO_CHAIN);
+                of_chain.resize(c.slots(), NO_CHAIN);
                 ranks.clear();
                 firsts.clear();
                 for run in tests.chunk_by(|a, b| a.0 == b.0) {
