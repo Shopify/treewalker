@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- A tree counts at most its group's width class's rows of leaves when trees are
+  chunked, so that trees of more leaves than that can share chunks. The scratch
+  budgeted an item for every leaf of a tree, while a walk, which drops sides without
+  rows, holds in a tree at most one item or leaf entry per row of the group: a tree
+  of thousands of leaves took a chunk alone, and its passes walked one or two items
+  in eight lanes, with the restart prefetch off. The cap is 32 for groups of up to
+  32 rows; arena slots, which runtime-width masks can take more of than the rows,
+  keep their count, and the research ablation `disable_unsplit`, which keeps sides
+  without rows, keeps chunks sized for every leaf. On Genoa (c3d-standard-90, SMT
+  on), groups of 16 rows took 0.34 of their time per group on the
+  `categorical-scale` cell's model, 600 LightGBM trees of 4,096 leaves on Expedia
+  searches, with `max_rank_table_bytes` raised to load it, and 0.61 on Expedia's
+  2,000-tree depth-16 LightGBM model. On the 1,190 serving cells of the factorial,
+  validation and kernel manifests, timed against 3.1.0 in alternation on the same
+  machine, the geometric mean is 0.949: 0.826 on the depth-16 models (Expedia's
+  LightGBM cohorts of 4 rows 0.45 to 0.50), 0.970 at depth 8, and 0.998 at depths 2
+  and 4, whose trees the cap cannot bind; 0.955 on the 86 batch cells. Trees of up
+  to 32 leaves chunk as before. Outputs are unchanged.
+
 ## 3.1.0
 
 In 3.1, default x86-64 builds run the kernel at the CPU's instruction-set level, and
