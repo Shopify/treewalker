@@ -169,9 +169,9 @@ fn more_than_a_million_trees() {
 }
 
 /// 100,001 trees, each a split on constant feature 0 listing the categories of
-/// t + 1's bits among 17: as many distinct heavy sets, past the threshold for bits,
-/// over 19 codes, so 3,126 slots of bits, 237,576 bytes. Every third is heavy-right,
-/// a complement, and every other sends missing left.
+/// t + 1's bits among 17: as many distinct heavy sets over 19 codes, which nest
+/// densely. Every third is heavy-right, a complement, and every other sends missing
+/// left.
 fn heavy_sets() -> Model {
     let trees = (0..100_001usize)
         .map(|t| {
@@ -209,7 +209,7 @@ fn heavy_sets() -> Model {
 }
 
 #[test]
-fn more_than_100000_heavy_sets_take_bits() {
+fn densely_nested_heavy_sets_pack() {
     let m = heavy_sets();
     let rows: Vec<f64> = (0..64)
         .map(|r| match r % 22 {
@@ -248,13 +248,14 @@ fn more_than_100000_heavy_sets_take_bits() {
     let expected: Vec<f64> = expected.iter().flat_map(|&y| [y; 3]).collect();
     same(&groups, &expected, "groups");
     let s = forest.layout_stats();
-    assert_eq!(
-        (s.bit_sets, s.bit_slots, s.chain_slots, s.rank_table_bytes),
-        (100_001, 3_126, 0, 237_576)
+    eprintln!(
+        "chain_sets {} chains {} slots {} packed {} bytes {}",
+        s.chain_sets, s.chains, s.chain_slots, s.packed, s.rank_table_bytes
     );
-    // In chains, as before bits, the sets' inclusion graph passes the default cap.
+    assert_eq!((s.chain_sets, s.packed), (100_001, true));
+    // Unpacked, a word per chain: the same predictions, from larger tables.
     let chains = LoadAblation {
-        category_bits_above: Some(usize::MAX),
+        pack_above: Some(usize::MAX),
         ..LoadAblation::default()
     };
     let config = WalkerConfig::builder(1)
@@ -262,15 +263,23 @@ fn more_than_100000_heavy_sets_take_bits() {
         .varying([])
         .build()
         .unwrap();
-    let err = Forest::from_bytes_ablated(
+    let unpacked = Forest::from_bytes_ablated(
         &bytes,
         ModelFormat::TreeliteBinaryV4,
         config,
         &LoadOptions::default(),
         &chains,
     )
-    .err();
-    assert!(matches!(err, Some(LoadError::Limit(m)) if m.contains("inclusion graph")));
+    .unwrap_or_else(|e| panic!("load unpacked: {e}"));
+    let u = unpacked.layout_stats();
+    assert_eq!(
+        (u.chains, u.chain_slots, u.packed),
+        (s.chains, s.chains, false)
+    );
+    assert!(u.rank_table_bytes > s.rank_table_bytes);
+    let mut out = vec![f64::NAN; tripled.len()];
+    unpacked.predictor().predict_fixed(&tripled, 3, &mut out);
+    same(&out, &expected, "unpacked groups");
 }
 
 #[test]

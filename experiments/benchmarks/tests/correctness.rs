@@ -215,7 +215,7 @@ fn load_options(c: &Cell, f: &Forest) -> Result<(), String> {
             ..Default::default()
         },
         LoadAblation {
-            category_bits_above: Some(0),
+            pack_above: Some(0),
             ..Default::default()
         },
         LoadAblation {
@@ -223,7 +223,7 @@ fn load_options(c: &Cell, f: &Forest) -> Result<(), String> {
             disable_bitset_intern: true,
             prefix_depth: Some(0),
             disable_predicate_dedup: true,
-            category_bits_above: Some(0),
+            pack_above: Some(0),
         },
     ] {
         let g = c.forest(&o).map_err(|e| format!("{o:?}: {e}"))?;

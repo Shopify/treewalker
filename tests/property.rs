@@ -145,7 +145,7 @@ fn check(profile: &Profile, case: usize, seed: u64, coverage: &mut Coverage) {
         disable_bitset_intern: rng.chance(0.3),
         prefix_depth: *rng.pick(&[Some(0), Some(1), None, Some(2), Some(3), Some(5)]),
         disable_predicate_dedup: rng.chance(0.1),
-        category_bits_above: None,
+        pack_above: None,
     };
     let groups: Vec<Vec<f64>> = sizes
         .iter()
@@ -262,16 +262,16 @@ fn check(profile: &Profile, case: usize, seed: u64, coverage: &mut Coverage) {
         &data,
         &model,
     );
-    // Every constant categorical feature in bits rather than chains: the walks that
-    // shift, on a group at a time and on the batch.
+    // Every categorical feature's rank fields packed: the walks that shift, on a
+    // group at a time and on the batch.
     let bits = LoadAblation {
-        category_bits_above: Some(0),
+        pack_above: Some(0),
         ..ablation
     };
     let forest_bits =
         Forest::from_bytes_ablated(&bytes, format, config, &LoadOptions::default(), &bits)
-            .unwrap_or_else(|e| panic!("load with bits: {e}; {}", describe(&model)));
-    let has_bits = forest_bits.layout_stats().bit_slots > 0;
+            .unwrap_or_else(|e| panic!("load packed: {e}; {}", describe(&model)));
+    let has_bits = forest_bits.layout_stats().packed;
     if has_bits {
         let mut predictor = forest_bits.predictor();
         let mut start = 0;
@@ -321,7 +321,8 @@ fn check(profile: &Profile, case: usize, seed: u64, coverage: &mut Coverage) {
     let stats = forest.layout_stats();
     coverage.rank_tables += usize::from(stats.rank_table_bytes > 0);
     coverage.chained += usize::from(stats.chain_sets > stats.chain_slots);
-    coverage.long_chains += usize::from(stats.chain_sets >= 5 * stats.chain_slots.max(1));
+    // The greedy cover's chains: 3 sets each on average is long for it.
+    coverage.long_chains += usize::from(stats.chain_sets >= 3 * stats.chains.max(1));
     coverage.bits += usize::from(has_bits);
 }
 

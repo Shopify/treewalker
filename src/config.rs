@@ -104,8 +104,8 @@ pub(crate) struct Choices {
     pub(crate) prefix: crate::rules::Prefix,
     /// Share one predicate between identical varying splits.
     pub(crate) predicate_dedup: bool,
-    /// Give constant categorical features of more distinct heavy sets bits.
-    pub(crate) category_bits_above: usize,
+    /// Pack the rank fields of a model whose chains take more slots.
+    pub(crate) pack_above: usize,
 }
 
 impl Default for Choices {
@@ -115,7 +115,7 @@ impl Default for Choices {
             bitset_intern: true,
             prefix: crate::rules::Prefix::Rule,
             predicate_dedup: true,
-            category_bits_above: crate::load::layout::CATEGORY_BITS_ABOVE,
+            pack_above: crate::load::layout::PACK_ABOVE,
         }
     }
 }

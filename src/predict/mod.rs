@@ -133,11 +133,11 @@ impl Predictor {
         let Workspace { kernel: s, idle } = &mut self.workspace;
         debug_assert!(STATS == stats.is_some(), "a counted call gives its stats");
         let stats = stats.unwrap_or(idle);
-        // Only a model with bit splits takes the kernel whose fill copies bits and whose
-        // walks shift; the others' is the kernel without them.
+        // Only a model with packed fields takes the kernel whose walks shift; the
+        // others' is the kernel without the shift.
         macro_rules! at {
             ($x:ty) => {
-                match (model.threshold_type, model.layout.bins.has_bits()) {
+                match (model.threshold_type, model.layout.bins.has_shifts()) {
                     (ThresholdType::F64, false) => model
                         .kernel_groups_at::<$x, false, STATS, ABLATE, false>(
                             data, out, groups, s, options, stats, finalize,

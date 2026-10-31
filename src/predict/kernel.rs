@@ -163,7 +163,7 @@ impl Model {
         stats: &mut Stats,
         finalize: bool,
     ) {
-        debug_assert_eq!(BITS, self.layout.bins.has_bits(), "the kernel's BITS");
+        debug_assert_eq!(BITS, self.layout.bins.has_shifts(), "the kernel's BITS");
         let options = if ABLATE { options } else { Options::default() };
         let nf = self.config.n_features();
         let n_rows = out.len();
@@ -176,7 +176,7 @@ impl Model {
             let t = Clock::<STATS>::start();
             self.layout
                 .bins
-                .fill_with::<F32, BITS>(&rows[..nf], &mut c.bins, constant);
+                .fill_with::<F32>(&rows[..nf], &mut c.bins, constant);
             let t = t.lap(&mut stats.phases.bins);
             self.prefix_starts_at::<X, STATS, ABLATE, BITS>(c, &mut stats.counters);
             t.lap(&mut stats.phases.prefix);

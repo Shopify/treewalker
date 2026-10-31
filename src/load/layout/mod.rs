@@ -4,9 +4,9 @@
 //! Every split is one test, `bin[slot] <= k`: heavy when it holds. A slot is a chain
 //! of nested sets over its feature's values, and a row's bin in it is its rank, the
 //! first set of the chain that holds the row's value; a split names a slot and the
-//! position k of its heavy set in the chain. A categorical feature of very many
-//! distinct heavy sets may hold their bits instead, 32 to a slot, and a split on one
-//! shifts its bit to the top first ("Category bits").
+//! position k of its heavy set in the chain. A model of many categorical chains packs
+//! their ranks as fields, several to a slot, and a split shifts its field to the top
+//! first ("Packed fields").
 //!
 //! # Nodes
 //!
@@ -99,9 +99,9 @@
 //!
 //! A split sends left its listed codes and, when its default is left, missing: its
 //! list. Its heavy set is the list or, by its heavy side, the complement. The
-//! feature's distinct heavy sets are covered by the fewest chains ([`chains`]),
-//! each a slot after the feature's numeric ones, and a split tests the position of
-//! its heavy set in its chain. Missing and unknown values are ordinary codes, so no
+//! feature's distinct heavy sets are covered by chains ([`chains`]), each a slot
+//! after the feature's numeric ones or a field of one ("Packed fields"), and a split
+//! tests the position of its heavy set in its chain. Missing and unknown values are ordinary codes, so no
 //! slot depends on a default direction.
 //!
 //! No category is in no list, so a chain's listed sets precede its complements,
@@ -115,53 +115,28 @@
 //! fill restores the held code's exceptions and writes the new code's. The tables
 //! take at most [`crate::LoadOptions::max_rank_table_bytes`] in all.
 //!
-//! # Category bits
+//! # Packed fields
 //!
-//! The cover matches over the heavy sets' inclusion graph, which grows faster than
-//! the sets, and needs more chains the less they nest. So a constant categorical
-//! feature whose splits have more than [`CATEGORY_BITS_ABOVE`] distinct heavy sets
-//! takes a bit per set instead, when its table fits the cap with the rank tables
-//! before it: heavy set j's bit is bit j % 32 of the feature's slot j / 32, set when
-//! the row's code is not in the set. A split on set j shifts its bin left by
-//! 31 - j % 32, which brings that bit to the top, and its k is 2^31 - 1: the shifted
-//! bin is at most k exactly when the bit is clear, the code heavy. Other nodes shift
-//! by 0, and the walks shift only for a model with bit splits.
+//! A chain of m sets has ranks 0 to m, a field of b = ⌈log2(m + 1)⌉ bits. A model
+//! whose chains take more than [`PACK_ABOVE`] slots packs each feature's fields into
+//! the fewest 32-bit words, first-fit decreasing, each at the lowest free bit p of the
+//! first word with room; a word left with one field takes it whole, as do all of a
+//! model below the bound, whose walks then don't shift. A split on a field shifts its
+//! word left by s = 32 - b - p, which brings the field to the top, and its k is
+//! ((k + 1) << (32 - b)) - 1: the shifted word is at most that exactly when the
+//! field is at most k, whatever the fields below it hold. A whole word's field has
+//! b = 32 and s = 0, today's chain, and a 1-bit field's k is 2^31 - 1.
 //!
-//! The table holds each code's row, a word per slot; no category's is the slots'
-//! default, and a fill copies its code's row when the code differs from the held
-//! one. For S sets over C codes it takes 4 × C × ⌈S / 32⌉ bytes, against at most
-//! 4 × (S + C + 1) + 8 × L for chains, where the sets list L codes: a slot and a
-//! default per set, a bound per code and one more, and an exception per listed code.
-//! So bits take no more than that bound when the codes are listed, on average, by
-//! about half as many sets as there are slots or more, and many more bytes than
-//! chains for short lists over a large codebook; chains take far fewer when the sets
-//! nest. Once a feature has more sets than the threshold, so that the walks will
-//! likely shift, every other constant categorical feature takes bits too when they
-//! take no more than that bound on its chains, not their actual bytes, and fit: its
-//! fill then copies a row where chains' writes exceptions. Varying features keep
-//! chains, whose ranks their masks' flips follow.
+//! A word's default packs its fields' defaults, and a code's exceptions are its
+//! words where they differ, so the tables take at most what unpacked chains' would,
+//! and at most twice 4 × C bytes per word. The fill restores and writes words as it
+//! did ranks. The cover is greedy ([`chains`]): a field rather than a slot per chain
+//! makes a minimum one matter little.
 //!
-//! The threshold bounds which models pay bits' bytes, not where bits start to pay
-//! off: on the `categorical-scale` cell's model cut to its first 5 to 600 trees, whose
-//! `srch_destination_id` splits take 4,886 to 265,406 distinct heavy sets, bits took
-//! 0.90 of chains' time per group at the fewest sets and 0.81 to 0.86 from 40,768 up,
-//! and loaded faster, but took 3 to 8 times their bytes, and take more over a larger
-//! codebook. At the default cap that model's chains stop fitting between 111,614 and
-//! 122,671 sets: 100,000 sits below, so it takes bits before its chains fail, and a
-//! model whose features all take fewer sets keeps its chains. A feature of fewer
-//! sets still fails to load at the default limits when its inclusion graph passes
-//! the cap: the graph keeps a bit per pair of a listed and a complemented set and 8
-//! bytes per inclusion between sets of one kind, so many sets of both kinds, or sets
-//! that nest densely, can pass it.
-//!
-//! Bits can leave too little of the cap to the features after theirs, or to the
-//! varying features' flips, which the layout bounds by 4 × (C + 1) and 8 per
-//! exception before the masks count them. Then the layout is built again with bits
-//! only past the threshold, if a feature took them beside, and with chains
-//! everywhere, as without bits, until one's tables and that bound fit; of those built,
-//! the one whose tables take the fewest bytes is kept, the one with more bits on
-//! ties. The flips are the same in every one, so a model that loads with any of them
-//! loads.
+//! Packing costs the walks a shift and, on Apple's AArch64, a lane of the walk with
+//! varying stops, which the grid's categorical models, whose chains take a few
+//! hundred slots at most, pay without gain; past the bound the smaller bins pay for
+//! it.
 
 mod build;
 mod chains;
@@ -260,13 +235,11 @@ pub(crate) const fn shifted(bin: u32, w0: u64) -> u32 {
     bin.wrapping_shl((w0 >> SHIFT_AT) as u32)
 }
 
-/// A bit split's k: a shifted bin is at most it exactly when its top bit is clear.
-const BIT_K: u32 = (1 << 31) - 1;
-
-/// Constant categorical features whose splits have more distinct heavy sets take
-/// bits, when their tables fit, and beside them those whose bits take no more bytes
-/// than their chains can ("Category bits", which says why 100,000).
-pub(crate) const CATEGORY_BITS_ABOVE: usize = 100_000;
+/// A model whose categorical chains take more slots packs their rank fields
+/// ("Packed fields"); below, each chain keeps a word and the walks don't shift.
+/// Packing lost on Genoa at 1,061 chains, as on the grid's categorical models, which
+/// take at most 1,080, and won from 2,060, on Genoa and on an M4 Pro.
+pub(crate) const PACK_ABOVE: usize = 2048;
 
 /// Word 0: the payload, a bit split's shift and the slot.
 pub(crate) const PAYLOAD_MASK: u64 = 0xFFFF_FFFF;
@@ -453,20 +426,16 @@ impl CategoryCodes {
 }
 
 /// A categorical feature's slots: how its values become codes, and where each code's
-/// ranks in its chains differ from no category's, its exceptions, or with bits each
-/// code's row.
+/// words of rank fields differ from no category's, its exceptions.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CategoryBins {
     pub(crate) codes: CategoryCodes,
-    /// Its first slot, and its slots ([`Self::slots`]): a chain each, or with bits 32
-    /// heavy sets each. The count is a `u32`, which [`MAX_SLOTS`] bounds, so that with
-    /// `bits` it takes no more room than a `usize`.
+    /// Its first slot, and its slots ([`Self::slots`]), each a word of rank fields.
+    /// The count is a `u32`, which [`MAX_SLOTS`] bounds.
     pub(crate) slot: usize,
     slots: u32,
-    pub(crate) bits: bool,
     /// Its codes' exception bounds, `domain + 1` entries from here in
-    /// [`BinMap::offsets`]; with bits, its codes' rows, `slots` words each from here
-    /// in [`BinMap::bits`].
+    /// [`BinMap::offsets`].
     pub(crate) offsets: usize,
     /// Its index among the categorical features: a bins buffer holds, at
     /// `n_slots + held`, the code whose exceptions its slots hold.
@@ -501,16 +470,16 @@ pub(crate) struct BinMap {
     thresholds: Vec<f64>,
     /// Every categorical feature's codebook.
     pub(crate) books: Vec<u32>,
-    /// Every slot's default bin: no category's ranks in the chain slots and its row
-    /// in the bit slots, `u32::MAX` in the dummy's and 0 in the numeric slots.
+    /// Every slot's default bin: no category's word of ranks in the categorical
+    /// slots, `u32::MAX` in the dummy's and 0 in the numeric slots.
     pub(crate) defaults: Vec<u32>,
-    /// Every chain feature's codes' exceptions, `(slot, rank)` in increasing slot
-    /// order, code `e`'s at `offsets[e]..offsets[e + 1]` from its feature's offsets.
+    /// Every categorical feature's codes' exceptions, `(slot, word)` in increasing
+    /// slot order, code `e`'s at `offsets[e]..offsets[e + 1]` from its feature's
+    /// offsets.
     pub(crate) offsets: Vec<u32>,
     pub(crate) exceptions: Vec<[u32; 2]>,
-    /// Every bit feature's codes' rows, code `e`'s at `e * slots` from its feature's
-    /// offset.
-    pub(crate) bits: Vec<u32>,
+    /// Whether some split shifts its word: a word holds two rank fields or more.
+    shifts: bool,
     /// The categorical features.
     n_categorical: usize,
     /// The constant and the varying features with splits, each in feature order.
@@ -529,95 +498,51 @@ impl BinMap {
     }
 
     /// A bins buffer: the defaults, and after the slots each categorical feature's
-    /// held code, no category, which has no exceptions and whose rows are the bit
-    /// slots' defaults.
+    /// held code, no category, which has no exceptions.
     pub(crate) fn new_bins(&self) -> Vec<u32> {
         let mut bins = self.defaults.clone();
         bins.resize(self.n_slots + self.n_categorical, NO_CATEGORY);
         bins
     }
 
-    /// Code `code`'s exceptions in the chains of `c`.
+    /// Code `code`'s exceptions in the words of `c`.
     #[inline]
     pub(crate) fn exceptions(&self, c: CategoryBins, code: u32) -> &[[u32; 2]] {
-        debug_assert!(!c.bits, "a chain feature");
         let at = c.offsets + code as usize;
         &self.exceptions[self.offsets[at] as usize..self.offsets[at + 1] as usize]
     }
 
-    /// Code `code`'s row in the bit slots of `c`.
+    /// Whether some split shifts its word, so that the walks shift.
     #[inline]
-    fn row(&self, c: CategoryBins, code: u32) -> &[u32] {
-        debug_assert!(c.bits, "a bit feature");
-        let at = c.offsets + code as usize * c.slots();
-        &self.bits[at..at + c.slots()]
+    pub(crate) const fn has_shifts(&self) -> bool {
+        self.shifts
     }
 
-    /// Whether some feature takes bits, so that its splits shift their bins.
-    #[inline]
-    pub(crate) const fn has_bits(&self) -> bool {
-        !self.bits.is_empty()
-    }
-
-    /// Bytes of the rank tables: the defaults of the chain slots, the codes'
-    /// exception bounds and the exceptions, and the bit features' rows.
+    /// Bytes of the rank tables: the categorical slots' defaults, the codes'
+    /// exception bounds and the exceptions.
     pub(crate) fn rank_table_bytes(&self) -> usize {
-        size_of::<u32>() * (self.chain_slots() + self.offsets.len() + self.bits.len())
+        size_of::<u32>() * (self.chain_slots() + self.offsets.len())
             + size_of_val(self.exceptions.as_slice())
     }
 
-    /// The most bytes the varying categorical features' mask flips take
-    /// ([`MaskPlan::flip_bounds`] and [`MaskPlan::flips`]): a bound per code and one
-    /// more, and two flips per exception. Varying features keep chains, so the bound
-    /// is the same whether or not the constant features take bits.
-    pub(crate) fn flip_bytes_bound(&self) -> u64 {
-        self.varying
-            .iter()
-            .filter_map(|b| b.categories)
-            .map(|c| {
-                let domain = c.codes.domain();
-                let exceptions = self.offsets[c.offsets + domain] - self.offsets[c.offsets];
-                4 * (domain as u64 + 1) + 8 * u64::from(exceptions)
-            })
-            .sum()
-    }
-
-    /// Code `code`'s bins in the slots of `c`: its ranks in the chains, or its row.
+    /// Code `code`'s words in the slots of `c`.
     #[cfg(test)]
     pub(crate) fn ranks_of(&self, c: CategoryBins, code: u32) -> Vec<u32> {
-        if c.bits {
-            return self.row(c, code).to_vec();
+        let mut words = self.defaults[c.slot..c.slot + c.slots()].to_vec();
+        for &[s, w] in self.exceptions(c, code) {
+            words[s as usize - c.slot] = w;
         }
-        let mut ranks = self.defaults[c.slot..c.slot + c.slots()].to_vec();
-        for &[s, r] in self.exceptions(c, code) {
-            ranks[s as usize - c.slot] = r;
-        }
-        ranks
+        words
     }
 
-    /// The categorical features' slots, of chains or (`bits`) of bits.
-    fn category_slots(&self, bits: bool) -> usize {
+    /// The categorical features' slots, words of rank fields.
+    pub(crate) fn chain_slots(&self) -> usize {
         self.constant
             .iter()
             .chain(&self.varying)
             .filter_map(|b| b.categories)
-            .filter(|c| c.bits == bits)
             .map(|c| c.slots())
             .sum()
-    }
-
-    /// The categorical features' chain slots.
-    pub(crate) fn chain_slots(&self) -> usize {
-        self.category_slots(false)
-    }
-
-    /// The bit features' slots.
-    #[cfg_attr(
-        not(any(test, feature = "research")),
-        expect(dead_code, reason = "for the research module's model statistics")
-    )]
-    pub(crate) fn bit_slots(&self) -> usize {
-        self.category_slots(true)
     }
 
     /// A feature's bins, if it has splits.
@@ -676,14 +601,13 @@ impl BinMap {
             .map(|b| b.slot)
     }
 
-    /// [`Self::fill_with`] at the model's precision, with bits when it has them.
+    /// [`Self::fill_with`] at the model's precision.
     #[cfg(test)]
     pub(crate) fn fill(&self, row: &[f64], bins: &mut [u32], all: bool) {
-        match (self.f32, self.has_bits()) {
-            (true, true) => self.fill_with::<true, true>(row, bins, all),
-            (true, false) => self.fill_with::<true, false>(row, bins, all),
-            (false, true) => self.fill_with::<false, true>(row, bins, all),
-            (false, false) => self.fill_with::<false, false>(row, bins, all),
+        if self.f32 {
+            self.fill_with::<true>(row, bins, all);
+        } else {
+            self.fill_with::<false>(row, bins, all);
         }
     }
 
@@ -692,18 +616,10 @@ impl BinMap {
     /// the varying features' too, as a single row needs. Slots of features without
     /// splits are left as they are. A categorical feature's chain slots hold the
     /// defaults but for its held code's exceptions, so it restores those and writes
-    /// its code's: work in the exceptions, not the chains. With `BITS`, which a model
-    /// with bit splits takes, its bit slots hold its held code's row, which it replaces
-    /// when its code differs.
+    /// its code's: work in the exceptions, not the words.
     #[inline]
-    pub(crate) fn fill_with<const F32: bool, const BITS: bool>(
-        &self,
-        row: &[f64],
-        bins: &mut [u32],
-        all: bool,
-    ) {
+    pub(crate) fn fill_with<const F32: bool>(&self, row: &[f64], bins: &mut [u32], all: bool) {
         debug_assert_eq!(F32, self.f32);
-        debug_assert_eq!(BITS, self.has_bits());
         assert!(row.len() >= self.n_features && bins.len() >= self.n_slots + self.n_categorical);
         let varying: &[FeatureBins] = if all { &self.varying } else { &[] };
         for b in self.constant.iter().chain(varying) {
@@ -725,17 +641,11 @@ impl BinMap {
             if let Some(c) = b.categories {
                 let code = c.codes.code::<F32>(&self.books, x);
                 let held = self.n_slots + c.held;
-                if BITS && c.bits {
-                    if bins[held] != code {
-                        bins[c.slot..c.slot + c.slots()].copy_from_slice(self.row(c, code));
-                    }
-                } else {
-                    for &[s, _] in self.exceptions(c, bins[held]) {
-                        bins[s as usize] = self.defaults[s as usize];
-                    }
-                    for &[s, rank] in self.exceptions(c, code) {
-                        bins[s as usize] = rank;
-                    }
+                for &[s, _] in self.exceptions(c, bins[held]) {
+                    bins[s as usize] = self.defaults[s as usize];
+                }
+                for &[s, word] in self.exceptions(c, code) {
+                    bins[s as usize] = word;
                 }
                 bins[held] = code;
             }
@@ -800,8 +710,7 @@ pub(crate) struct Layout {
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) varying_share: f64,
-    /// The categorical features' distinct heavy sets, which their chains hold, and
-    /// the bit features', which their bits do.
+    /// The categorical features' distinct heavy sets, and the chains that cover them.
     #[cfg_attr(
         not(any(test, feature = "research")),
         expect(dead_code, reason = "for the research module's model statistics")
@@ -811,7 +720,7 @@ pub(crate) struct Layout {
         not(any(test, feature = "research")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
-    pub(crate) bit_sets: usize,
+    pub(crate) chains: usize,
 }
 
 /// What a tree's passes need: an item per leaf and its arena slots, at most one
@@ -861,7 +770,7 @@ impl Layout {
                 defaults: vec![u32::MAX],
                 offsets: Vec::new(),
                 exceptions: Vec::new(),
-                bits: Vec::new(),
+                shifts: false,
                 n_categorical: 0,
                 constant: Vec::new(),
                 varying: Vec::new(),
@@ -869,7 +778,7 @@ impl Layout {
             leaves: LeafValues::Wide(Vec::new()),
             varying_share: 0.0,
             chain_sets: 0,
-            bit_sets: 0,
+            chains: 0,
         }
     }
 }

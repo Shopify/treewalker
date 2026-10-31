@@ -81,7 +81,7 @@ fn check_with(name: &str, sizes: &[usize], wide: bool, all_varying: bool, bits: 
     // No prefix groups, or the rule's.
     let ablation = LoadAblation {
         prefix_depth: *rng.pick(&[Some(0), None]),
-        category_bits_above: bits.then_some(0),
+        pack_above: bits.then_some(0),
         ..Default::default()
     };
     let forest = Forest::from_bytes_ablated(
@@ -92,7 +92,7 @@ fn check_with(name: &str, sizes: &[usize], wide: bool, all_varying: bool, bits: 
         &ablation,
     )
     .unwrap_or_else(|e| panic!("{name}: load: {e}"));
-    assert_eq!(forest.layout_stats().bit_slots > 0, bits, "{name}");
+    assert_eq!(forest.layout_stats().packed, bits, "{name}");
     let data: Vec<f64> = sizes
         .iter()
         .flat_map(|&n| group(&mut rng, &features, &roles, m.precision, n, f64::total_cmp))

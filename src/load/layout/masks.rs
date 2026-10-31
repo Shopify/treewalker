@@ -3,22 +3,26 @@
 //! Per varying feature, the range of its numeric predicates and its chains that
 //! categorical predicates test. A numeric predicate's mask comes from the feature's
 //! rows sorted by value, merged with the predicates in threshold order. A categorical
-//! predicate tests `rank <= k` on one of the feature's chain slots ([`super`]), so a
-//! chain is an ordinal feature too, with small integer values: its predicates' masks
-//! come from the rows counted by rank rather than sorted ([`MaskChain`]).
+//! predicate tests `rank <= k` on a field of one of the feature's slots ([`super`]),
+//! so a chain is an ordinal feature too, with small integer values: its predicates'
+//! masks come from the rows counted by rank rather than sorted ([`MaskChain`]).
 
 use std::ops::Range;
 
-use super::{BinMap, CategoryBins};
+use super::{BinMap, CategoryBins, takes_heavy};
 use crate::LoadError;
 use crate::model::FeatureRange;
 
-/// A varying categorical predicate's test: heavy when `rank[slot] <= k`, and its left
-/// rows are the heavy ones, or with `invert` the others.
+/// A varying categorical predicate's test, its node's: heavy when its slot's word,
+/// shifted left by `shift`, meets `bound`, its field's rank at most its k; and its
+/// left rows are the heavy ones, or with `invert` the others. A word's fields have
+/// distinct shifts, so the slot and the shift name the chain, and the bound orders
+/// its predicates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ChainPoint {
     pub(crate) slot: u32,
-    pub(crate) k: u32,
+    pub(crate) shift: u32,
+    pub(crate) bound: u32,
     pub(crate) invert: bool,
 }
 
@@ -26,9 +30,15 @@ impl ChainPoint {
     /// No test: a numeric predicate's entry.
     pub(crate) const NONE: Self = Self {
         slot: u32::MAX,
-        k: 0,
+        shift: 0,
+        bound: 0,
         invert: false,
     };
+}
+
+/// Whether a row whose slot holds `word` is heavy at a test of `shift` and `bound`.
+const fn heavy(word: u32, shift: u32, bound: u32) -> bool {
+    takes_heavy(word.wrapping_shl(shift), bound)
 }
 
 /// One varying feature's predicates.
@@ -87,9 +97,6 @@ pub(crate) struct MaskPlan {
     pub(crate) flips: Vec<u32>,
 }
 
-/// A chain without varying predicates, while the plan is built.
-const NO_CHAIN: u32 = u32::MAX;
-
 impl MaskPlan {
     /// The plan for the predicates indexed by `ranges` as the parser leaves them,
     /// with the categorical slots of `bins` and each categorical predicate's test in
@@ -112,13 +119,16 @@ impl MaskPlan {
                 .map_err(|_| LoadError::Limit("the categorical masks' plan exceeds u32".into()))
         };
         let rank_bytes = bins.rank_table_bytes() as u64;
-        let mut tests: Vec<(u32, u32, u32, bool)> = Vec::new();
-        // Per chain of the feature, its entry in `plan.chains` or NO_CHAIN, and its
-        // first predicate at or past each rank `0..=k_max`, then `len`, from `from`
-        // in `firsts`, with `past = k_max + 1`.
-        let mut of_chain: Vec<u32> = Vec::new();
-        let mut ranks: Vec<(usize, u32)> = Vec::new();
-        let mut firsts: Vec<u32> = Vec::new();
+        // (slot, shift, bound, predicate), in chain then k order; per chain of the
+        // feature, its first test there, and per slot its chains.
+        let mut tests: Vec<(u32, u32, u32, u32)> = Vec::new();
+        let mut first_test: Vec<u32> = Vec::new();
+        let mut of_slot: Vec<Range<u32>> = Vec::new();
+        // The first predicate of a chain's tests at which a word is heavy, the first
+        // at or past its rank.
+        let first_heavy = |run: &[(u32, u32, u32, u32)], word: u32| {
+            run.partition_point(|t| !heavy(word, t.1, t.2)) as u32
+        };
         for range in ranges {
             let f = range.feature as usize;
             let num = range.num.start as usize..range.num.end as usize;
@@ -130,59 +140,53 @@ impl MaskPlan {
                 bins.varying_categories(f)
             };
             if let Some(c) = categories {
-                // (chain, k, predicate, invert), in chain then k order.
                 tests.clear();
                 tests.extend(range.cat.clone().map(|p| {
                     let t = points[p as usize];
                     debug_assert!(
                         t.slot as usize >= c.slot && (t.slot as usize) < c.slot + c.slots()
                     );
-                    (t.slot - c.slot as u32, t.k, p, t.invert)
+                    (t.slot - c.slot as u32, t.shift, t.bound, p)
                 }));
                 tests.sort_unstable();
-                of_chain.clear();
-                of_chain.resize(c.slots(), NO_CHAIN);
-                ranks.clear();
-                firsts.clear();
-                for run in tests.chunk_by(|a, b| a.0 == b.0) {
+                first_test.clear();
+                of_slot.clear();
+                of_slot.resize(c.slots(), 0..0);
+                let mut from = 0;
+                for run in tests.chunk_by(|a, b| (a.0, a.1) == (b.0, b.1)) {
                     let at = plan.points.len();
-                    plan.points.extend(run.iter().map(|t| (t.2, t.3)));
-                    let from = firsts.len();
-                    let k_max = run.last().expect("a run").1;
-                    let mut j = 0;
-                    for rank in 0..=k_max {
-                        while run[j].1 < rank {
-                            j += 1;
-                        }
-                        firsts.push(j as u32);
+                    let local = index(plan.chains.len() - first)?;
+                    first_test.push(index(from)?);
+                    from += run.len();
+                    plan.points
+                        .extend(run.iter().map(|t| (t.3, points[t.3 as usize].invert)));
+                    let slot = run[0].0 as usize;
+                    if of_slot[slot].is_empty() {
+                        of_slot[slot] = local..local;
                     }
-                    firsts.push(run.len() as u32);
-                    let default = bins.defaults[c.slot + run[0].0 as usize].min(k_max + 1);
-                    of_chain[run[0].0 as usize] = index(ranks.len())?;
-                    ranks.push((from, k_max + 1));
+                    of_slot[slot].end = local + 1;
                     plan.chains.push(MaskChain {
-                        start: firsts[from + default as usize],
+                        start: first_heavy(run, bins.defaults[c.slot + slot]),
                         points: index(at)?,
                         len: index(run.len())?,
                     });
                 }
                 // Per code, its exceptions' moves: from each chain's start to the
-                // first predicate at or past its rank there.
+                // first predicate its word is heavy at, for the chains with
+                // predicates in each of its words.
                 let chains = &plan.chains[first..];
                 plan.flip_bounds.push(index(plan.flips.len())?);
                 for e in 0..c.codes.domain() {
-                    for &[slot, rank] in bins.exceptions(c, e as u32) {
-                        let m = of_chain[slot as usize - c.slot];
-                        if m == NO_CHAIN {
-                            continue;
-                        }
-                        let chain = chains[m as usize];
-                        let (from, past) = ranks[m as usize];
-                        let j = firsts[from + rank.min(past) as usize];
-                        if j != chain.start {
-                            for j in [chain.start, j] {
-                                if j < chain.len {
-                                    plan.flips.push(plan.points[(chain.points + j) as usize].0);
+                    for &[slot, word] in bins.exceptions(c, e as u32) {
+                        for m in of_slot[slot as usize - c.slot].clone() {
+                            let chain = chains[m as usize];
+                            let from = first_test[m as usize] as usize;
+                            let j = first_heavy(&tests[from..from + chain.len as usize], word);
+                            if j != chain.start {
+                                for j in [chain.start, j] {
+                                    if j < chain.len {
+                                        plan.flips.push(plan.points[(chain.points + j) as usize].0);
+                                    }
                                 }
                             }
                         }

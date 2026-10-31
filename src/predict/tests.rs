@@ -26,7 +26,7 @@ use rng::Rng;
 use super::sigmoid::sigmoid;
 use super::{Groups, Level, Options, Predictor, Stats, Workspace};
 use crate::config::Choices;
-use crate::load::layout::CATEGORY_BITS_ABOVE;
+use crate::load::layout::PACK_ABOVE;
 use crate::rules::{Prefix, Tuning};
 use crate::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
@@ -85,7 +85,7 @@ fn case(seed: u64) -> Case {
             Prefix::Depth(3),
         ]),
         predicate_dedup: !rng.chance(0.1),
-        category_bits_above: *rng.pick(&[0, CATEGORY_BITS_ABOVE]),
+        pack_above: *rng.pick(&[0, PACK_ABOVE]),
     };
     let forest = Forest::from_reader_with(
         std::io::Cursor::new(&bytes),
@@ -717,7 +717,7 @@ fn stumps(bits: bool) -> (Case, model::Model) {
         tree_ordering: true,
         bitset_intern: true,
         prefix: Prefix::Depth(0),
-        category_bits_above: if bits { 0 } else { usize::MAX },
+        pack_above: if bits { 0 } else { usize::MAX },
         ..Choices::default()
     };
     let forest = Forest::from_reader_with(
@@ -728,7 +728,7 @@ fn stumps(bits: bool) -> (Case, model::Model) {
         &choices,
     )
     .expect("load");
-    assert_eq!(forest.model.layout.bins.has_bits(), bits);
+    assert_eq!(forest.model.layout.bins.has_shifts(), bits);
     let data: Vec<f64> = sizes
         .iter()
         .enumerate()

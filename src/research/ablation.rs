@@ -176,16 +176,10 @@ pub struct LoadAblation {
     /// Give every varying node its own predicate instead of sharing one between
     /// identical splits. This multiplies the precompute work.
     pub disable_predicate_dedup: bool,
-    /// Give a constant categorical feature a bit per distinct heavy set, rather than
-    /// chains, when its splits have more than this many, instead of 100,000, and
-    /// beside it every constant categorical feature whose bits take no more bytes
-    /// than its chains can: 0 for every one, `usize::MAX` for none. Bits fit
-    /// [`crate::LoadOptions::max_rank_table_bytes`] with the tables before them or
-    /// the feature keeps chains; bits that leave too little to the features after
-    /// them or to the masks' flips give way to a layout built with bits only past this
-    /// threshold or with chains everywhere, the smallest kept. The cap's bound on the
-    /// heavy sets built first applies either way.
-    pub category_bits_above: Option<usize>,
+    /// Pack the categorical chains' rank fields when they take more than this many
+    /// slots, instead of the default bound: 0 for every model with chains,
+    /// `usize::MAX` for none.
+    pub pack_above: Option<usize>,
 }
 
 impl LoadAblation {
@@ -199,9 +193,9 @@ impl LoadAblation {
                 None => Prefix::Rule,
             },
             predicate_dedup: !self.disable_predicate_dedup,
-            category_bits_above: match self.category_bits_above {
+            pack_above: match self.pack_above {
                 Some(n) => n,
-                None => crate::load::layout::CATEGORY_BITS_ABOVE,
+                None => crate::load::layout::PACK_ABOVE,
             },
         }
     }
