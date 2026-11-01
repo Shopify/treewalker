@@ -107,6 +107,7 @@ impl Forest {
                 threshold_type,
                 plan,
                 max_rank_bytes: options.max_rank_table_bytes,
+                pack: choices.pack,
                 prefix_depths: &prefix_depths,
             },
             decoded.into_layout_source(),

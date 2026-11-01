@@ -8,11 +8,13 @@
 //! order of the tree starts, and so of the prefix groups and chunks, and of the leaf
 //! values.
 
-use super::chains::{self, Sets};
+use std::collections::BTreeSet;
+
+use super::chains::{self, Cover, Sets};
 use super::{
     BOUND_BIAS, BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, FIRST_CATEGORY,
     FLAG_LEAF, FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT, MAX_PREDICATES, MAX_SLOTS,
-    MISSING, Need, SLOT_SHIFT, node_link,
+    MISSING, Need, SHIFT_AT, SLOT_SHIFT, node_link,
 };
 use crate::LoadError;
 use crate::config::WalkerConfig;
@@ -21,7 +23,7 @@ use crate::load::parse::decoded::{LayoutSource, Packed, Split, TreeNodes};
 use crate::load::parse::tree::check_node_total;
 use crate::load::predicates::PredicateIds;
 use crate::model::{FLAG_CATEGORICAL, FLAG_VARYING, ThresholdType, category_list};
-use crate::rules::{ItemLengths, StepSums, Steps};
+use crate::rules::{GroupSums, ItemLengths, StepSums, Steps, lanes, pack};
 
 /// Both flags of a varying categorical split, tested at once: rarely true, where a
 /// branch on whether a split varies first would be unpredictable.
@@ -41,6 +43,9 @@ pub(crate) struct Input<'a> {
     pub(crate) plan: Plan,
     /// The cap on the rank tables' bytes.
     pub(crate) max_rank_bytes: u64,
+    /// Whether the model packs its rank fields, in research and the tests; else the
+    /// packing rule decides ([`crate::rules::pack`]).
+    pub(crate) pack: Option<bool>,
     /// Each tree's prefix depth, in tree order: its group's, or 0.
     pub(crate) prefix_depths: &'a [u32],
 }
@@ -72,7 +77,7 @@ fn split_categories(split: &Split, categories: &[u32], out: &mut Vec<u32>) {
     }
 }
 
-/// What [`chain_slots`] reads of one categorical feature.
+/// What [`category_slots`] reads of one categorical feature.
 struct Feature<'a> {
     codes: CategoryCodes,
     books: &'a [u32],
@@ -80,22 +85,30 @@ struct Feature<'a> {
     ids: &'a [u32],
     splits: &'a [Split],
     categories: &'a [u32],
-    /// The feature's first chain slot, and its index among the categorical features.
+    /// The feature's first categorical slot, and its index among the categorical
+    /// features.
     slot: usize,
     held: usize,
-    /// The cap on the rank tables' bytes, which also bounds the heavy sets and their
-    /// inclusion graph, built on the way.
+    /// The cap on the rank tables' bytes, which also bounds the heavy sets, built on
+    /// the way.
     max_bytes: u64,
 }
 
 /// The categorical features' rank tables, flat: [`BinMap`]'s defaults, offsets and
-/// exceptions, and the chain slots so far.
+/// exceptions, and the categorical slots so far.
 #[derive(Default)]
 struct Tables {
     defaults: Vec<u32>,
     offsets: Vec<u32>,
     exceptions: Vec<[u32; 2]>,
-    chains: usize,
+    slots: usize,
+}
+
+impl Tables {
+    /// Their bytes so far, as [`BinMap::rank_table_bytes`] counts them.
+    const fn bytes(&self) -> u64 {
+        4 * (self.slots + self.offsets.len()) as u64 + 8 * self.exceptions.len() as u64
+    }
 }
 
 /// A load that would exceed `max_bytes`.
@@ -105,21 +118,39 @@ fn too_big(what: &str, max_bytes: u64) -> LoadError {
     ))
 }
 
-/// The chain slots of one categorical feature: its splits' distinct heavy sets, a
-/// minimum chain cover of them, each categorical split's words by heavy side into
-/// `words`, and the feature's defaults and exceptions appended to `tables`; with the
-/// number of distinct heavy sets.
+/// A categorical feature's distinct heavy sets, and which one each split side's is:
+/// what [`category_slots`] covers with chains or holds in bits.
 ///
 /// A heavy set is a split's list, its listed codes and with a default left missing,
 /// or with its heavy side on the right the list's complement, which holds no
-/// category. Everything is built from the lists, never from sets over the domain,
-/// so the work and the bytes follow the model's lists.
-fn chain_slots(
-    f: &Feature<'_>,
-    tables: &mut Tables,
-    words: &mut [[u64; 2]],
-    members: &mut Vec<u32>,
-) -> Result<(CategoryBins, usize), LoadError> {
+/// category. Everything is built from the lists, never from sets over the domain, so
+/// the work and the bytes follow the model's lists.
+struct HeavySets {
+    /// Each categorical split side, `(split, side)`, and its set.
+    owners: Vec<(u32, usize)>,
+    set_of: Vec<u32>,
+    /// The distinct sets' lists, set i's at `codes[starts[i]..starts[i + 1]]`, and
+    /// whether each is complemented.
+    starts: Vec<u32>,
+    codes: Vec<u32>,
+    complement: Vec<bool>,
+    /// Bytes of every split side's list, built on the way.
+    list_bytes: u64,
+}
+
+impl HeavySets {
+    fn sets(&self, domain: usize) -> Sets<'_> {
+        Sets {
+            domain,
+            starts: &self.starts,
+            codes: &self.codes,
+            complement: &self.complement,
+        }
+    }
+}
+
+/// The distinct heavy sets of the categorical splits of `f`.
+fn heavy_sets(f: &Feature<'_>, members: &mut Vec<u32>) -> Result<HeavySets, LoadError> {
     let domain = f.codes.domain();
     // Each split side's heavy set: its list in `lists` and whether it is complemented.
     let owners: Vec<(u32, usize)> = f
@@ -160,7 +191,7 @@ fn chain_slots(
         );
         spans.push((at as u32, lists.len() as u32, side == 1));
     }
-    let set_bytes = lists.len() as u64 * 4;
+    let list_bytes = lists.len() as u64 * 4;
     // The distinct sets, by size, then listed before complemented, then by list.
     let list = |i: usize| &lists[spans[i].0 as usize..spans[i].1 as usize];
     // Sorted by a key of the size, the kind and the first code, then by the lists.
@@ -193,92 +224,250 @@ fn chain_slots(
         }
         set_of[i] = (complement.len() - 1) as u32;
     }
-    drop(lists);
-    let sets = Sets {
-        domain,
-        starts: &starts,
-        codes: &codes,
-        complement: &complement,
-    };
-    let cover = chains::cover(&sets, f.max_bytes - set_bytes)?;
+    Ok(HeavySets {
+        owners,
+        set_of,
+        starts,
+        codes,
+        complement,
+        list_bytes,
+    })
+}
 
-    // Each split side's chain slot and position, as its bound.
-    for (&(s, side), &i) in owners.iter().zip(&set_of) {
-        let (chain, k) = cover.at[i as usize];
-        words[s as usize][side] =
-            u64::from(k + BOUND_BIAS) | ((f.slot as u64 + u64::from(chain)) << SLOT_SHIFT);
-    }
+/// A chain's rank field: its word among the feature's, its lowest bit and its width.
+#[derive(Clone, Copy, Debug)]
+struct Field {
+    word: u32,
+    low: u32,
+    width: u32,
+}
 
-    // A chain's listed sets come first, as a complement, which holds no category, is
-    // in no listed set, so no category's rank is the number of listed sets: the
-    // default. A code's rank differs from it only where a set of the chain lists the
-    // code: at the first listed set that holds it, or past the last complement whose
-    // list holds it. So the exceptions come from the lists, `(code, chain, rank)`.
+/// The fields of `cover`'s chains: with `pack`, a chain of m sets takes the bit length
+/// of m, the ranks 0 to m, packed first-fit decreasing into the fewest 32-bit words,
+/// each at the lowest free bit of the first word with room; else, and in a word of
+/// one field, a chain takes a whole word, with no shift. With the number of words.
+fn pack_fields(cover: &Cover, pack: bool) -> (Vec<Field>, usize) {
     let m = cover.chains();
-    let mut found: Vec<(u32, u32, u32)> = Vec::new();
-    tables.defaults.resize(f.slot, 0);
-    for c in 0..m {
-        let chain = cover.chain(c);
-        let listed = chain
-            .iter()
-            .take_while(|&&i| !complement[i as usize])
-            .count();
-        tables.defaults.push(listed as u32);
-        for (k, &i) in chain.iter().enumerate() {
-            let set = sets.list(i as usize);
-            if k < listed {
-                let before = if k == 0 {
-                    &[][..]
-                } else {
-                    sets.list(chain[k - 1] as usize)
-                };
-                found.extend(chains::difference(set, before).map(|e| (e, c as u32, k as u32)));
-            } else {
-                let after = chain.get(k + 1).map_or(&[][..], |&j| sets.list(j as usize));
-                found.extend(chains::difference(set, after).map(|e| (e, c as u32, k as u32 + 1)));
-            }
+    if !pack {
+        let whole = |c: usize| Field {
+            word: c as u32,
+            low: 0,
+            width: u32::BITS,
+        };
+        return ((0..m).map(whole).collect(), m);
+    }
+    let width = |c: usize| u32::BITS - (cover.chain(c).len() as u32).leading_zeros();
+    let mut fields = vec![
+        Field {
+            word: 0,
+            low: 0,
+            width: 0,
+        };
+        m
+    ];
+    let mut order: Vec<u32> = (0..m as u32).collect();
+    order.sort_by_key(|&c| std::cmp::Reverse(width(c as usize)));
+    // The bits each word uses, its fields, and the words by their free bits.
+    let (mut used, mut count): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
+    let mut by_free: Vec<BTreeSet<u32>> = vec![BTreeSet::new(); u32::BITS as usize + 1];
+    for &c in &order {
+        let b = width(c as usize);
+        let first = (b as usize..by_free.len())
+            .filter_map(|free| by_free[free].first().copied())
+            .min();
+        let w = if let Some(w) = first {
+            by_free[(u32::BITS - used[w as usize]) as usize].remove(&w);
+            w
+        } else {
+            used.push(0);
+            count.push(0);
+            (used.len() - 1) as u32
+        };
+        fields[c as usize] = Field {
+            word: w,
+            low: used[w as usize],
+            width: b,
+        };
+        used[w as usize] += b;
+        count[w as usize] += 1;
+        by_free[(u32::BITS - used[w as usize]) as usize].insert(w);
+    }
+    for f in &mut fields {
+        if count[f.word as usize] == 1 {
+            (f.low, f.width) = (0, u32::BITS);
         }
     }
-    tables.chains += m;
-    let bytes = 4 * (tables.chains + tables.offsets.len() + domain + 1) as u64
-        + 8 * (tables.exceptions.len() + found.len()) as u64;
-    if bytes > f.max_bytes {
-        return Err(too_big("the categorical splits' rank tables", f.max_bytes));
+    (fields, used.len())
+}
+
+/// The chains of `fields` in word order, each word's by their lowest bit.
+fn by_word(fields: &[Field]) -> Vec<u32> {
+    let mut order: Vec<u32> = (0..fields.len() as u32).collect();
+    order.sort_by_key(|&c| (fields[c as usize].word, fields[c as usize].low));
+    order
+}
+
+/// The exceptions of `chain`, a chain of `sets`' listed sets then its complements:
+/// each code whose rank differs from the default, the number of listed sets, with its
+/// rank, to `found`. A complement, which holds no category, is in no listed set, so a
+/// code's rank differs only where a set of the chain lists the code: at the first
+/// listed set that holds it, or past the last complement whose list holds it. A code
+/// has one rank a chain, so one exception. With the listed sets.
+fn chain_exceptions(chain: &[u32], sets: &Sets<'_>, mut found: impl FnMut(u32, u32)) -> usize {
+    let listed = chain
+        .iter()
+        .take_while(|&&i| !sets.complement[i as usize])
+        .count();
+    for (k, &i) in chain.iter().enumerate() {
+        let set = sets.list(i as usize);
+        let (other, rank) = if k < listed {
+            let before = k.checked_sub(1).map(|j| chain[j]);
+            (before, k as u32)
+        } else {
+            (chain.get(k + 1).copied(), k as u32 + 1)
+        };
+        let other = other.map_or(&[][..], |j| sets.list(j as usize));
+        for e in chains::difference(set, other) {
+            found(e, rank);
+        }
     }
-    let base = tables.exceptions.len();
-    let end = u32::try_from(base + found.len())
-        .map_err(|_| LoadError::Limit("the rank tables exceed u32 exceptions".into()))?;
-    // By code, each code's in chain order: a counting sort.
-    let offsets = tables.offsets.len();
-    LoadError::reserve(tables.offsets.try_reserve_exact(domain + 1))?;
-    tables.offsets.resize(offsets + domain + 1, 0);
-    let bounds = &mut tables.offsets[offsets..];
+    listed
+}
+
+/// The exceptions a feature's fill saves a code when its chains of `cover` pack: a
+/// code's exceptions, one a chain, less the packed words they fall in, weighted by the
+/// code's exceptions ([`crate::rules::pack`]).
+fn exceptions_saved(heavy: &HeavySets, cover: &Cover, domain: usize) -> f64 {
+    let sets = heavy.sets(domain);
+    let (fields, _) = pack_fields(cover, true);
+    let (mut chains, mut words) = (vec![0u32; domain], vec![0u32; domain]);
+    let mut last = vec![u32::MAX; domain];
+    for c in by_word(&fields) {
+        let word = fields[c as usize].word;
+        chain_exceptions(cover.chain(c as usize), &sets, |e, _| {
+            let e = e as usize;
+            chains[e] += 1;
+            words[e] += u32::from(last[e] != word);
+            last[e] = word;
+        });
+    }
+    let total: f64 = chains.iter().map(|&x| f64::from(x)).sum();
+    if total == 0.0 {
+        return 0.0;
+    }
+    let weighted: f64 = chains
+        .iter()
+        .zip(&words)
+        .map(|(&x, &y)| f64::from(x) * f64::from(x - y))
+        .sum();
+    weighted / total
+}
+
+/// The slots of one categorical feature: its splits' distinct heavy sets
+/// ([`heavy_sets`]) in the chains of `cover`, each chain's rank field in the words of
+/// [`pack_fields`], each categorical split's words by heavy side into `words`, and the
+/// feature's word defaults and exceptions appended to `tables`.
+fn category_slots(
+    f: &Feature<'_>,
+    heavy: &HeavySets,
+    cover: &Cover,
+    pack: bool,
+    tables: &mut Tables,
+    words: &mut [[u64; 2]],
+) -> Result<CategoryBins, LoadError> {
+    let domain = f.codes.domain();
+    let sets = heavy.sets(domain);
+    let (fields, n_words) = pack_fields(cover, pack);
+
+    // Each split side's word, field and position: its bound puts the field at the top,
+    // `rank <= k` exactly when the shifted word is at most ((k + 1) << (32 - b)) - 1,
+    // whatever the fields below it hold.
+    for (&(s, side), &i) in heavy.owners.iter().zip(&heavy.set_of) {
+        let (chain, k) = cover.at[i as usize];
+        let Field { word, low, width } = fields[chain as usize];
+        let bound = ((u64::from(k) + 1) << (u32::BITS - width)) - 1 + u64::from(BOUND_BIAS);
+        let shift = u32::BITS - width - low;
+        words[s as usize][side] = bound
+            | u64::from(shift) << SHIFT_AT
+            | ((f.slot as u64 + u64::from(word)) << SLOT_SHIFT);
+    }
+
+    // A chain's listed sets come first, so no category's rank is the number of listed
+    // sets: the default, which each word packs for its fields. The exceptions come
+    // from the lists ([`chain_exceptions`]), `(code, chain, rank)`, taken chain by chain
+    // in word order, so that each code's are in word order, then merged by word.
+    tables.defaults.resize(f.slot + n_words, 0);
+    let mut found: Vec<(u32, u32, u32)> = Vec::new();
+    for c in by_word(&fields) {
+        let listed = chain_exceptions(cover.chain(c as usize), &sets, |e, rank| {
+            found.push((e, c, rank));
+        });
+        let Field { word, low, .. } = fields[c as usize];
+        tables.defaults[f.slot + word as usize] |= (listed as u32) << low;
+    }
+    tables.slots += n_words;
+    // By code, each code's in word order: a counting sort, then a word per code and
+    // word, its default with the code's ranks in its fields. The triples are at most
+    // the heavy sets' listed codes, which the cap bounded; the tables are checked
+    // once merged.
+    let mut bounds = vec![0u32; domain + 1];
     for &(e, _, _) in &found {
         bounds[e as usize + 1] += 1;
     }
-    bounds[0] = base as u32;
     for e in 0..domain {
         bounds[e + 1] += bounds[e];
     }
-    debug_assert_eq!(bounds[domain], end);
-    LoadError::reserve(tables.exceptions.try_reserve_exact(found.len()))?;
-    tables.exceptions.resize(end as usize, [0, 0]);
+    let mut sorted = vec![(0u32, 0u32); found.len()];
     let mut next = bounds[..domain].to_vec();
     for &(e, c, rank) in &found {
         let at = &mut next[e as usize];
-        tables.exceptions[*at as usize] = [(f.slot + c as usize) as u32, rank];
+        sorted[*at as usize] = (c, rank);
         *at += 1;
     }
-    Ok((
-        CategoryBins {
-            codes: f.codes,
-            slot: f.slot,
-            chains: m,
-            offsets,
-            held: f.held,
-        },
-        sets.len(),
-    ))
+    drop(found);
+    let offsets = tables.offsets.len();
+    LoadError::reserve(tables.offsets.try_reserve_exact(domain + 1))?;
+    for e in 0..domain {
+        tables.offsets.push(
+            u32::try_from(tables.exceptions.len())
+                .map_err(|_| LoadError::Limit("the rank tables exceed u32 exceptions".into()))?,
+        );
+        let ranks = &sorted[bounds[e] as usize..bounds[e + 1] as usize];
+        for run in ranks.chunk_by(|a, b| fields[a.0 as usize].word == fields[b.0 as usize].word) {
+            let slot = f.slot + fields[run[0].0 as usize].word as usize;
+            let mut value = tables.defaults[slot];
+            for &(c, rank) in run {
+                let Field { low, width, .. } = fields[c as usize];
+                value = value & !((u32::MAX >> (u32::BITS - width)) << low) | rank << low;
+            }
+            tables.exceptions.push([slot as u32, value]);
+        }
+    }
+    tables.offsets.push(
+        u32::try_from(tables.exceptions.len())
+            .map_err(|_| LoadError::Limit("the rank tables exceed u32 exceptions".into()))?,
+    );
+    if tables.bytes() > f.max_bytes {
+        return Err(too_big("the categorical splits' rank tables", f.max_bytes));
+    }
+    Ok(CategoryBins {
+        codes: f.codes,
+        slot: f.slot,
+        slots: n_words,
+        offsets,
+        held: f.held,
+    })
+}
+
+/// Whether the features' bins fit in `slots` slots: at most [`MAX_SLOTS`], what word 0's
+/// slot field holds.
+pub(super) fn slots_fit(slots: usize) -> Result<(), LoadError> {
+    if slots > MAX_SLOTS {
+        return Err(LoadError::Limit(format!(
+            "the features' bins need more than {MAX_SLOTS} slots"
+        )));
+    }
+    Ok(())
 }
 
 impl Layout {
@@ -297,19 +486,58 @@ impl Layout {
         check_node_total(total, 0)?;
         let dummy = node_link(total);
         let mut words = vec![[0u64; 2]; source.splits.len()];
-        let (bins, chain_sets) = bin_map(input, &source.splits, &mut words)?;
-        Ok(encode_trees(input, source, &words, dummy, bins, chain_sets))
+        let (bins, sets) = bin_map(input, &source.splits, &mut words, |max| {
+            group_lane_slots(input, &source, max)
+        })?;
+        Ok(encode_trees(input, source, &words, dummy, bins, sets))
     }
+}
+
+/// The expected lane slots of a group of the configuration's widest groups, for the
+/// packing rule: a pass over the trees, which stops once their steps pass `max`, past
+/// which the rule doesn't pack.
+fn group_lane_slots(input: &Input<'_>, source: &LayoutSource, max: f64) -> f64 {
+    let width = input.config.max_group_width();
+    let constant: Vec<bool> = source.splits.iter().map(|s| !s.is_varying()).collect();
+    let mut sums = GroupSums::default();
+    for tree in &source.trees {
+        let start = tree.start as usize;
+        let nodes = TreeNodes::new(&source.nodes[start..start + tree.count as usize]);
+        let splits = nodes.iter().map(|node| {
+            (!node.is_leaf()).then(|| (node.heavy_probability(), constant[node.id() as usize]))
+        });
+        sums.tree(width, splits);
+        if sums.group >= max {
+            return sums.group;
+        }
+    }
+    sums.lane_slots(lanes(width > 1, false))
+}
+
+/// A categorical feature's codes, distinct heavy sets and their cover, between the
+/// two passes of [`bin_map`].
+struct Covered {
+    codes: CategoryCodes,
+    heavy: HeavySets,
+    cover: Option<Cover>,
 }
 
 /// The bins, codebooks and rank tables of the forest's distinct `splits`, flat, each
 /// feature's slots in feature order, and each split's word 0 by its heavy side
-/// (left, right) into `words`; with the number of distinct heavy sets.
+/// (left, right) into `words`; with the number of distinct heavy sets and of chains.
+///
+/// A first pass takes each feature's thresholds, codebook, heavy sets and cover; the
+/// packing rule ([`crate::rules::pack`]) then decides whether the chains' rank fields
+/// pack ("Packed fields"), from the bins' size, the fills' exceptions, and the
+/// groups' expected `lane_slots`, which it takes only when the first two leave the
+/// choice open, and only up to the most at which packing pays; and the second pass
+/// lays the slots out.
 fn bin_map(
     input: &Input<'_>,
     splits: &[Split],
     words: &mut [[u64; 2]],
-) -> Result<(BinMap, usize), LoadError> {
+    lane_slots: impl FnOnce(f64) -> f64,
+) -> Result<(BinMap, [usize; 2]), LoadError> {
     let Input {
         categories,
         config,
@@ -320,16 +548,17 @@ fn bin_map(
     // Splits by feature, in feature order.
     let mut by_feature: Vec<u32> = (0..splits.len() as u32).collect();
     by_feature.sort_unstable_by_key(|&s| splits[s as usize].feature);
+    let features =
+        || by_feature.chunk_by(|&a, &b| splits[a as usize].feature == splits[b as usize].feature);
 
     let (mut thresholds, mut books, mut tables) = (Vec::new(), Vec::new(), Tables::default());
     let (mut constant, mut varying) = (Vec::new(), Vec::new());
     let (mut t, mut cats, mut members) = (Vec::new(), Vec::new(), Vec::new());
-    let mut next_slot = DUMMY_SLOT + 1;
-    let (mut chain_sets, mut n_categorical) = (0, 0);
-    for ids in
-        by_feature.chunk_by(|&a, &b| splits[a as usize].feature == splits[b as usize].feature)
-    {
-        let feature = splits[ids[0] as usize].feature;
+    // Each feature's thresholds and, if categorical, its cover; with the heavy sets'
+    // lists so far, which the cap bounds.
+    let mut first: Vec<(std::ops::Range<usize>, Option<Covered>)> = Vec::new();
+    let (mut n_chains, mut n_sets, mut list_bytes) = (0, 0, 0);
+    for ids in features() {
         t.clear();
         cats.clear();
         let mut categorical = false;
@@ -348,23 +577,101 @@ fn bin_map(
                 t.push(split.value);
             }
         }
-        let numeric_splits = !t.is_empty();
         t.sort_by(f64::total_cmp);
         // Sorted, so `<=` is IEEE equality: signed zeros split alike and share a bin.
         t.dedup_by(|later, earlier| later <= earlier);
         let start = thresholds.len();
         thresholds.extend_from_slice(&t);
-        let numeric = next_slot;
-        if numeric_splits {
-            next_slot += 4;
-        }
-        let category_bins = if !categorical {
-            None
-        } else {
+        let covered = if categorical {
             cats.sort_unstable();
             cats.dedup();
             let codes = CategoryCodes::new(&mut books, &cats)?;
-            let (c, sets) = chain_slots(
+            let feature = Feature {
+                codes,
+                books: &books,
+                ids,
+                splits,
+                categories,
+                slot: 0,
+                held: 0,
+                max_bytes: max_rank_bytes,
+            };
+            let heavy = heavy_sets(&feature, &mut members)?;
+            list_bytes += heavy.list_bytes;
+            if list_bytes > max_rank_bytes {
+                return Err(too_big(
+                    "the features' categorical heavy sets",
+                    max_rank_bytes,
+                ));
+            }
+            Some(Covered {
+                codes,
+                heavy,
+                cover: None,
+            })
+        } else {
+            None
+        };
+        first.push((start..thresholds.len(), covered));
+    }
+    if thresholds.len() >= u32::MAX as usize {
+        return Err(LoadError::Limit("threshold count exceeds u32".into()));
+    }
+    // The covers, the features of the fewest list entries first, sharing their steps.
+    let size = |c: &Covered| c.heavy.sets(c.codes.domain()).codes.len() + c.heavy.complement.len();
+    let mut by_size: Vec<&mut Covered> = first.iter_mut().filter_map(|f| f.1.as_mut()).collect();
+    by_size.sort_by_key(|c| size(c));
+    let (mut pool, mut minimum) = (chains::SHARED_WORK, true);
+    for c in by_size {
+        let cover = chains::cover(&c.heavy.sets(c.codes.domain()), &mut pool);
+        n_chains += cover.chains();
+        n_sets += c.heavy.complement.len();
+        minimum &= cover.minimum;
+        c.cover = Some(cover);
+    }
+    let pack = input.pack.unwrap_or_else(|| {
+        let width = config.max_group_width();
+        let numeric = first.iter().filter(|(range, _)| !range.is_empty()).count();
+        let unpacked = DUMMY_SLOT + 1 + 4 * numeric + n_chains;
+        if n_chains == 0 {
+            return false;
+        }
+        // Covers cut short may keep extra chains, which packed take fields, not slots.
+        if !minimum || !pack::resident_here(4 * unpacked) {
+            return true;
+        }
+        // A group fills its constant features; a single row every one.
+        let saved: f64 = features()
+            .zip(&first)
+            .filter_map(|(ids, (_, covered))| {
+                let feature = splits[ids[0] as usize].feature as usize;
+                let c = covered
+                    .as_ref()
+                    .filter(|_| width == 1 || !config.is_varying(feature))?;
+                let cover = c.cover.as_ref().expect("every categorical feature's cover");
+                Some(exceptions_saved(&c.heavy, cover, c.codes.domain()))
+            })
+            .sum();
+        let max = pack::max_lane_slots(saved, width > 1);
+        saved > 0.0 && lane_slots(max) < max
+    });
+
+    let mut next_slot = DUMMY_SLOT + 1;
+    let mut n_categorical = 0;
+    for (ids, (range, covered)) in features().zip(first) {
+        let feature = splits[ids[0] as usize].feature;
+        let t = &thresholds[range.clone()];
+        let numeric = next_slot;
+        if !t.is_empty() {
+            next_slot += 4;
+        }
+        let category_bins = if let Some(Covered {
+            codes,
+            heavy,
+            cover,
+        }) = covered
+        {
+            let c = category_slots(
                 &Feature {
                     codes,
                     books: &books,
@@ -375,20 +682,19 @@ fn bin_map(
                     held: n_categorical,
                     max_bytes: max_rank_bytes,
                 },
+                &heavy,
+                cover.as_ref().expect("every categorical feature's cover"),
+                pack,
                 &mut tables,
                 words,
-                &mut members,
             )?;
-            next_slot += c.chains;
+            next_slot += c.slots();
             n_categorical += 1;
-            chain_sets += sets;
             Some(c)
+        } else {
+            None
         };
-        if next_slot > MAX_SLOTS {
-            return Err(LoadError::Limit(format!(
-                "the features' bins need more than {MAX_SLOTS} slots"
-            )));
-        }
+        slots_fit(next_slot)?;
         for &s in ids {
             let split = &splits[s as usize];
             if split.is_categorical() {
@@ -408,7 +714,7 @@ fn bin_map(
         }
         let b = FeatureBins {
             feature: feature as usize,
-            thresholds: start..thresholds.len(),
+            thresholds: range,
             slot: numeric,
             categories: category_bins,
         };
@@ -418,9 +724,6 @@ fn bin_map(
             constant.push(b);
         }
     }
-    if thresholds.len() >= u32::MAX as usize {
-        return Err(LoadError::Limit("threshold count exceeds u32".into()));
-    }
     let Tables {
         mut defaults,
         offsets,
@@ -429,6 +732,8 @@ fn bin_map(
     } = tables;
     defaults.resize(next_slot, 0);
     defaults[DUMMY_SLOT] = u32::MAX;
+    // A shift is in a split's word 0 only where a word holds two fields or more.
+    let shifts = words.iter().flatten().any(|&w| w >> SHIFT_AT & 31 != 0);
     let bins = BinMap {
         f32: threshold_type == ThresholdType::F32,
         n_features: config.n_features(),
@@ -438,11 +743,12 @@ fn bin_map(
         defaults,
         offsets,
         exceptions,
+        shifts,
         n_categorical,
         constant,
         varying,
     };
-    Ok((bins, chain_sets))
+    Ok((bins, [n_sets, n_chains]))
 }
 
 /// The trees' layout nodes, in tree order, from the words of `bin_map`, and the dummy
@@ -454,7 +760,7 @@ fn encode_trees(
     words: &[[u64; 2]],
     dummy: u32,
     bins: BinMap,
-    chain_sets: usize,
+    [chain_sets, chains]: [usize; 2],
 ) -> Built {
     let Input {
         order,
@@ -585,8 +891,9 @@ fn encode_trees(
             if split.flags & VARYING_CATEGORICAL == VARYING_CATEGORICAL {
                 points[id as usize] = ChainPoint {
                     slot: (w0 >> SLOT_SHIFT) as u32,
-                    // Word 0 holds the bound.
-                    k: w0 as u32 - BOUND_BIAS,
+                    // Word 0 holds the shift and the bound.
+                    shift: (w0 >> SHIFT_AT) as u32 & 31,
+                    bound: w0 as u32,
                     invert: !heavy_left,
                 };
             }
@@ -635,7 +942,8 @@ fn encode_trees(
             bins,
             leaves,
             varying_share,
-            chain_sets,
+            chain_sets: chain_sets as u32,
+            chains: chains as u32,
         },
         steps: steps.steps(order.len()),
         items: steps.items(),

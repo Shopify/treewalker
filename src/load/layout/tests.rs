@@ -23,6 +23,7 @@ fn choices(rng: &mut Rng) -> Choices {
             Prefix::Depth(3),
         ]),
         predicate_dedup: !rng.chance(0.2),
+        pack: *rng.pick_mod(&[Some(true), None, Some(false)]),
     }
 }
 
@@ -112,7 +113,7 @@ fn check_bins(bins: &BinMap, row: &[f64], reused: &mut [Vec<u32>; 2]) {
     }
     // A categorical feature's slots hold its code's ranks, the defaults but for its
     // exceptions: the first set of each chain that holds the code, by the layout's
-    // own nodes in check_decisions.
+    // own nodes in check_decisions; or its row of bits.
     for (f, &x) in row.iter().enumerate() {
         if let Some(c) = bins.feature_categories(f) {
             let code = if bins.f32 {
@@ -120,7 +121,7 @@ fn check_bins(bins: &BinMap, row: &[f64], reused: &mut [Vec<u32>; 2]) {
             } else {
                 c.codes.code::<false>(&bins.books, x)
             };
-            assert_eq!(b[c.slot..c.slot + c.chains], bins.ranks_of(c, code));
+            assert_eq!(b[c.slot..c.slot + c.slots()], bins.ranks_of(c, code));
         }
     }
     assert_eq!(b[DUMMY_SLOT], u32::MAX);
@@ -146,7 +147,7 @@ fn check_structure(model: &Model) {
         &[u32::MAX]
     };
     for &bin in bins {
-        assert!(!d.goes_heavy(&[bin]), "{bin}");
+        assert!(!d.goes_heavy::<true>(&[bin]), "{bin}");
     }
 
     let n_leaves = layout.leaves.len();
@@ -185,8 +186,9 @@ fn check_structure(model: &Model) {
             assert!(i + 1 < end && child > i + 1 && child < end, "node {i}");
             assert_eq!(child, start + old.skip as usize);
             assert_eq!(new.is_varying(), !old.is_constant());
-            // A categorical split reads one of its feature's chains; a numeric one, one
-            // of its four numeric slots.
+            // A categorical split reads one of its feature's words of rank fields,
+            // shifted to bring its field to the top; a numeric one, one of its four
+            // numeric slots, unshifted.
             let f = old.feature as usize;
             if old.is_categorical() {
                 let c = layout
@@ -194,10 +196,14 @@ fn check_structure(model: &Model) {
                     .feature_categories(f)
                     .expect("a categorical feature");
                 assert!(
-                    (c.slot..c.slot + c.chains).contains(&new.slot()),
+                    (c.slot..c.slot + c.slots()).contains(&new.slot()),
                     "node {i}"
                 );
+                if !layout.bins.has_shifts() {
+                    assert_eq!(new.shift(), 0, "node {i}");
+                }
             } else {
+                assert_eq!(new.shift(), 0, "node {i}");
                 let s = layout.bins.numeric_slot(f).expect("a numeric feature");
                 assert!((s..s + 4).contains(&new.slot()), "node {i}");
             }
@@ -518,7 +524,7 @@ fn random_config(rng: &mut Rng, nf: usize) -> WalkerConfig {
 #[test]
 fn generated_models_decide_like_the_parsed_nodes() {
     let mut rng = Rng::new(0x5EED);
-    let (mut categorical, mut chained, mut fixed, mut float) = (0, 0, 0, 0);
+    let (mut categorical, mut chained, mut bits, mut fixed, mut float) = (0, 0, 0, 0, 0);
     for _ in 0..300 {
         let spec = random_spec(&mut rng);
         let json = random_model_json(&mut rng, &spec);
@@ -534,14 +540,15 @@ fn generated_models_decide_like_the_parsed_nodes() {
         let layout = &forest.model.layout;
         let slots = layout.bins.chain_slots();
         categorical += usize::from(slots > 0);
-        chained += usize::from(layout.chain_sets > slots);
+        chained += usize::from(layout.chain_sets > layout.chains);
+        bits += usize::from(layout.bins.has_shifts());
         match layout.leaves {
             LeafValues::Fixed(_) => fixed += 1,
             LeafValues::Wide(_) => float += 1,
         }
         check_model(&mut rng, &forest, 200);
     }
-    assert!(categorical > 100 && chained > 50 && fixed > 50 && float > 10);
+    assert!(categorical > 100 && chained > 50 && bits > 30 && fixed > 50 && float > 10);
 }
 
 #[test]
@@ -619,10 +626,7 @@ fn heavy_right_splits_read_inverted_bins_and_complemented_sets() {
     // Slot 0 is the dummy's; the feature's numeric slots follow. k = 0, inverted: its
     // bound `u32::MAX - 1`, or `u32::MAX` with byte offsets.
     let inverted = if BYTE_LINKS { u32::MAX } else { u32::MAX - 1 };
-    assert_eq!(
-        (n.slot(), n.payload(), (n.w0 >> 32) & 3),
-        (1 + 2, inverted, 0)
-    );
+    assert_eq!((n.slot(), n.payload(), n.shift()), (1 + 2, inverted, 0));
     for (list, default_left, f32) in [
         (vec![0, 3], true, false),
         // 31 categories and 40, past the 30 that 2.x held in a word.
@@ -656,7 +660,7 @@ fn heavy_right_splits_read_inverted_bins_and_complemented_sets() {
         let domain = c.codes.domain() as u32;
         let ranks: Vec<u32> = (0..domain).map(|e| layout.bins.ranks_of(c, e)[0]).collect();
         assert_eq!(ranks, want);
-        assert_eq!(c.chains, 1);
+        assert_eq!(c.slots(), 1);
         let listed = list.len() + usize::from(default_left);
         assert_eq!(layout.bins.exceptions.len(), listed);
         assert_eq!(
@@ -682,7 +686,7 @@ fn heavy_right_splits_read_inverted_bins_and_complemented_sets() {
             let mut bins = layout.bins.new_bins();
             layout.bins.fill(&[x], &mut bins, false);
             let left = if x.is_nan() { default_left } else { listed(x) };
-            assert_eq!(n.goes_heavy(&bins), !left, "{x}");
+            assert_eq!(n.goes_heavy::<true>(&bins), !left, "{x}");
         }
     }
 }
@@ -723,7 +727,7 @@ fn split_bounds_part_bins_k_and_k_plus_1() {
             };
             assert_eq!((n.slot(), n.payload()), (slot, bound));
             let goes = |bins: &[u32], left: bool, what: &str| {
-                assert_eq!(n.goes_heavy(bins), left == heavy_left, "{what}");
+                assert_eq!(n.goes_heavy::<true>(bins), left == heavy_left, "{what}");
                 let next = if left != heavy_left {
                     n.child()
                 } else if BYTE_LINKS {
@@ -750,33 +754,64 @@ fn split_bounds_part_bins_k_and_k_plus_1() {
 }
 
 /// A model of one categorical feature with a tree per split: `(categories,
-/// default_left, heavy_left)`.
+/// default_left, heavy_left)`, its chains unpacked.
 fn categorical_forest(splits: &[(Vec<u32>, bool, bool)], varying: bool) -> Forest {
-    categorical_load(splits, varying, &LoadOptions::default()).unwrap()
+    categorical_load(splits, varying, &LoadOptions::default(), Some(false)).unwrap()
 }
 
+/// [`categorical_forest`] with `options`, packed as `pack` forces, else as the rule
+/// decides; the trees
+/// in the model's order, so that tree t holds split t.
 fn categorical_load(
     splits: &[(Vec<u32>, bool, bool)],
     varying: bool,
     options: &LoadOptions,
+    pack: Option<bool>,
 ) -> Result<Forest, LoadError> {
-    let trees: Vec<String> = splits
+    let varying: &[usize] = if varying { &[0] } else { &[] };
+    categorical_features_load(&[splits], varying, options, pack)
+}
+
+/// [`categorical_load`] of a feature per entry of `features`, a tree per split, the
+/// features in `varying` varying.
+fn categorical_features_load(
+    features: &[&[(Vec<u32>, bool, bool)]],
+    varying: &[usize],
+    options: &LoadOptions,
+    pack: Option<bool>,
+) -> Result<Forest, LoadError> {
+    let trees: Vec<String> = features
         .iter()
-        .map(|(list, default_left, heavy_left)| {
-            let test = format!(
-                r#""node_type": "categorical_test_node", "category_list": {list:?}, "category_list_right_child": false"#
-            );
-            let counts = if *heavy_left { (5, 1) } else { (1, 5) };
-            json::stump(&test, *default_left, counts)
+        .enumerate()
+        .flat_map(|(f, splits)| {
+            splits.iter().map(move |(list, default_left, heavy_left)| {
+                let test = format!(
+                    r#""node_type": "categorical_test_node", "category_list": {list:?}, "category_list_right_child": false"#
+                );
+                let counts = if *heavy_left { (5, 1) } else { (1, 5) };
+                json::stump(&test, *default_left, counts)
+                    .replace(r#""split_feature_id": 0"#, &format!(r#""split_feature_id": {f}"#))
+            })
         })
         .collect();
-    let json = json::regressor(false, 1, &trees);
-    let config = WalkerConfig::builder(1)
+    let json = json::regressor(false, features.len(), &trees);
+    let config = WalkerConfig::builder(features.len())
         .max_group_width(8)
-        .varying(if varying { vec![0] } else { vec![] })
+        .varying(varying.to_vec())
         .build()
         .unwrap();
-    Forest::from_bytes(json.as_bytes(), ModelFormat::TreeliteJson, config, options)
+    let choices = Choices {
+        tree_ordering: false,
+        pack,
+        ..Choices::default()
+    };
+    Forest::from_reader_with(
+        json.as_bytes(),
+        ModelFormat::TreeliteJson,
+        config,
+        options,
+        &choices,
+    )
 }
 
 #[test]
@@ -818,16 +853,169 @@ fn chains_stop_at_the_rank_table_cap() {
     };
     let mut rng = Rng::new(31);
     for (varying, bytes) in [(false, 212), (true, 324)] {
-        let forest = categorical_load(&splits, varying, &cap(bytes)).unwrap();
+        let forest = categorical_load(&splits, varying, &cap(bytes), Some(false)).unwrap();
         let (bins, masks) = (&forest.model.layout.bins, &forest.model.masks);
         assert_eq!((bins.rank_table_bytes(), bins.chain_slots()), (212, 10));
         let flips = 4 * (masks.flip_bounds.len() + masks.flips.len());
         assert_eq!(flips, if varying { 112 } else { 0 });
         check_model(&mut rng, &forest, 500);
         assert!(matches!(
-            categorical_load(&splits, varying, &cap(bytes - 1)),
+            categorical_load(&splits, varying, &cap(bytes - 1), Some(false)),
             Err(LoadError::Limit(_))
         ));
+    }
+}
+
+#[test]
+fn packed_fields_share_a_word() {
+    // The five distinct heavy sets of `nested_heavy_sets_share_a_chain`, packed: the
+    // chains {1} ⊂ {1, 2} ⊂ {1, 2, 3} and {5} ⊂ the complement of {1, 2} take 2 bits
+    // each, one word after the dummy's slot, over the six codes.
+    let splits = [
+        (vec![1, 2], false, true),
+        (vec![1], false, true),
+        (vec![5], false, true),
+        (vec![1, 2, 3], false, true),
+        (vec![1, 2], false, false),
+    ];
+    let mut rng = Rng::new(37);
+    let options = LoadOptions::default();
+    for varying in [false, true] {
+        let forest = categorical_load(&splits, varying, &options, Some(true)).unwrap();
+        let layout = &forest.model.layout;
+        let bins = &layout.bins;
+        assert_eq!((layout.chain_sets, layout.chains), (5, 2));
+        assert_eq!((bins.chain_slots(), bins.has_shifts()), (1, true));
+        let c = bins.feature_categories(0).unwrap();
+        assert_eq!((c.slot, c.slots()), (1, 1));
+        assert_eq!(bins.defaults[1], bins.ranks_of(c, NO_CATEGORY)[0]);
+        // Fields of 2 bits at bits 0 and 2: shifts 30 and 28.
+        let mut shifts: Vec<u32> = forest
+            .model
+            .trees
+            .iter()
+            .map(|t| layout.nodes[t.node_start as usize].shift())
+            .collect();
+        shifts.sort_unstable();
+        shifts.dedup();
+        assert_eq!(shifts, [28, 30]);
+        // Each split goes heavy exactly when the value is in its heavy set.
+        assert_eq!(bins.feature_book(0), [1, 2, 3, 5]);
+        for x in [f64::NAN, 0.0, 4.0, 1.0, 2.0, 3.0, 5.0] {
+            let mut b = bins.new_bins();
+            bins.fill(&[x], &mut b, true);
+            for (t, (list, _, heavy_left)) in splits.iter().enumerate() {
+                let n = layout.nodes[forest.model.trees[t].node_start as usize];
+                let left = !x.is_nan() && list.contains(&(x as u32));
+                assert_eq!(
+                    n.goes_heavy::<true>(&b),
+                    left == *heavy_left,
+                    "{x}, split {t}"
+                );
+            }
+        }
+        check_model(&mut rng, &forest, 500);
+        // Unpacked, each chain takes its word and nothing shifts.
+        let forest = categorical_load(&splits, varying, &options, Some(false)).unwrap();
+        let bins = &forest.model.layout.bins;
+        assert_eq!((bins.chain_slots(), bins.has_shifts()), (2, false));
+        check_model(&mut rng, &forest, 200);
+    }
+}
+
+#[test]
+fn the_packing_rule_weighs_the_fills_against_the_shift() {
+    // 64 listed sets that share category 7 and hold one more each, none in another:
+    // 64 chains of a set each, packed 1-bit fields in 2 words. A fill writes 64
+    // exceptions for 7 unpacked and 2 packed, and one for each other category either
+    // way, so weighted by their exceptions packing saves 64 × 62 / 128 = 31 a code,
+    // against 64 stumps of 2 steps and a last round's: 142 lane slots on 8 lanes, 144
+    // on 9, below the 13 × 31 / 2.25 = 179 at which packing stops paying on x86-64 and
+    // the 17 × 31 / 2 = 263.5 on AArch64.
+    let shared: Vec<_> = (0..64).map(|i| (vec![7, 100 + i], false, true)).collect();
+    let options = LoadOptions::default();
+    let layout = |forest: &Forest| {
+        let bins = &forest.model.layout.bins;
+        (bins.chain_slots(), bins.has_shifts())
+    };
+    let forest = categorical_load(&shared, false, &options, None).unwrap();
+    assert_eq!(layout(&forest), (2, true));
+    check_model(&mut Rng::new(37), &forest, 200);
+    // Varying, a group's rows fill the feature one by one, which packing doesn't
+    // change: no fill the rule counts saves anything.
+    let forest = categorical_load(&shared, true, &options, None).unwrap();
+    assert_eq!(layout(&forest), (64, false));
+    // A chain of nested sets takes a word alone, which saves nothing.
+    let nested: Vec<_> = (1..=100)
+        .map(|n| ((1..=n).collect(), false, true))
+        .collect();
+    let forest = categorical_load(&nested, false, &options, None).unwrap();
+    assert_eq!(layout(&forest), (1, false));
+    // With those 100 stumps too, 342 lane slots or more pass what the fills pay for,
+    // where the pass over the trees stops.
+    let both = categorical_features_load(&[&shared, &nested], &[], &options, None).unwrap();
+    assert_eq!(layout(&both), (65, false));
+}
+
+#[test]
+fn a_cover_cut_short_packs() {
+    // Every nonempty proper subset of 14 categories: 16,382 sets, whose fewest chains
+    // are the middle level's 3,432. The cover takes that many, but its steps run out
+    // before it can show they are the fewest. Varying, no fill the rule counts saves
+    // anything, and the unpacked bins fit L1, so the rule alone would leave the chains
+    // a word each; cut short, they pack, into 276 words.
+    let splits: Vec<_> = (1..(1u32 << 14) - 1)
+        .map(|m| ((0..14).filter(|c| m >> c & 1 != 0).collect(), false, true))
+        .collect();
+    let forest = categorical_load(&splits, true, &LoadOptions::default(), None).unwrap();
+    let layout = &forest.model.layout;
+    let bins = &layout.bins;
+    assert_eq!((layout.chain_sets, layout.chains), (16_382, 3_432));
+    assert_eq!((bins.chain_slots(), bins.has_shifts()), (276, true));
+    check_model(&mut Rng::new(47), &forest, 100);
+}
+
+#[test]
+fn a_lone_field_takes_its_word() {
+    // One chain, packed: its word holds no other field, so it takes the word whole.
+    let splits = [(vec![1], false, true), (vec![1, 2], false, true)];
+    let forest = categorical_load(&splits, false, &LoadOptions::default(), Some(true)).unwrap();
+    let bins = &forest.model.layout.bins;
+    assert_eq!(
+        (
+            forest.model.layout.chains,
+            bins.chain_slots(),
+            bins.has_shifts()
+        ),
+        (1, 1, false)
+    );
+    check_model(&mut Rng::new(43), &forest, 200);
+}
+
+#[test]
+fn packed_fields_span_words() {
+    // 160 singletons over 162 codes: 160 1-bit fields in five words. The tables take
+    // five defaults, 163 exception bounds and an exception per singleton's code,
+    // 1,952 bytes, against 2,572 for 160 chains of a word each.
+    let splits: Vec<_> = (0..160).map(|c| (vec![c], false, true)).collect();
+    let mut rng = Rng::new(41);
+    for varying in [false, true] {
+        let forest =
+            categorical_load(&splits, varying, &LoadOptions::default(), Some(true)).unwrap();
+        let bins = &forest.model.layout.bins;
+        assert_eq!(
+            (
+                bins.rank_table_bytes(),
+                bins.chain_slots(),
+                bins.has_shifts()
+            ),
+            (1952, 5, true)
+        );
+        check_model(&mut rng, &forest, 200);
+        let forest =
+            categorical_load(&splits, varying, &LoadOptions::default(), Some(false)).unwrap();
+        let bins = &forest.model.layout.bins;
+        assert_eq!((bins.rank_table_bytes(), bins.chain_slots()), (2572, 160));
     }
 }
 
@@ -902,4 +1090,24 @@ fn small_codebooks_rank_like_the_search() {
             assert_eq!(small.of(&books, c), search.of(&books, c), "{book:?} {c}");
         }
     }
+}
+
+/// A categorical feature's bins keep the size they had before packed fields, and so
+/// does a varying feature's entry in the masks' plan, which the group paths index: a
+/// model that doesn't pack indexes them as before.
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn category_bins_keep_their_size() {
+    assert_eq!(size_of::<CategoryBins>(), 48);
+    assert_eq!(size_of::<masks::MaskFeature>(), 96);
+}
+
+#[test]
+fn slots_stop_at_the_layout_limit() {
+    assert_eq!(MAX_SLOTS, 1 << 27);
+    assert!(super::build::slots_fit(MAX_SLOTS).is_ok());
+    assert!(matches!(
+        super::build::slots_fit(MAX_SLOTS + 1),
+        Err(LoadError::Limit(_))
+    ));
 }

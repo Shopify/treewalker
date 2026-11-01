@@ -121,3 +121,139 @@ impl StepSums {
         }
     }
 }
+
+/// Expected lane slots of a group of `width` rows, from the training weights, which
+/// the packing rule reads ([`super::pack`]): each tree's nodes that a row of the group
+/// reaches, and the round in which the lanes run out of items.
+///
+/// The rows of a group share the constant features, so they take a constant split's
+/// side together, and they take a varying split's sides apart, each like the training
+/// data, independently. A node is then reached by the group with the probability of
+/// its constant path `c` and by at least one row of its varying path `v`: `c (1 − (1 −
+/// v)^width)`, which a step of the group's walk reads once. The trees' last round leaves
+/// up to `k − 1` lanes on the dummy for about a tree's steps. Over the categorical
+/// cell's cuts of 1 to 20 trees at 16 rows this gave 308 to 2,226 lane slots where the
+/// counted walk took 392 to 2,267, within 8% from 2 trees: the independence counts
+/// about 30% more steps than the rows take, and the tail fewer.
+#[derive(Default)]
+pub(crate) struct GroupSums {
+    /// The expected steps of the group's walk and of a row's, over the trees so far.
+    pub(crate) group: f64,
+    leaf: f64,
+    trees: usize,
+    /// The light children's path probabilities, constant and varying, of the splits
+    /// whose heavy subtree the pass is in.
+    pending: Vec<(f64, f64)>,
+}
+
+impl GroupSums {
+    /// Add a tree for groups of `width` rows: its `nodes` in heavy-first preorder, each
+    /// a leaf (`None`) or a split that goes heavy with probability `p` and is constant
+    /// with `constant`. A split's heavy child is the next node, and the node after a
+    /// leaf is the light child of the deepest split whose heavy subtree it ends, so a
+    /// stack of the splits' light children carries the probabilities.
+    pub(crate) fn tree(&mut self, width: usize, nodes: impl Iterator<Item = Option<(f64, bool)>>) {
+        let width = i32::try_from(width).unwrap_or(i32::MAX);
+        self.trees += 1;
+        self.pending.clear();
+        let (mut c, mut v) = (1.0f64, 1.0f64);
+        for node in nodes {
+            // `1 − (1 − v)^width` is `v` for a lone row or a constant path (`v`, at
+            // most 1, is 1).
+            let reach = if width == 1 || v >= 1.0 {
+                v
+            } else {
+                1.0 - (1.0 - v).powi(width)
+            };
+            self.group = c.mul_add(reach, self.group);
+            self.leaf = c.mul_add(v, self.leaf);
+            match node {
+                Some((p, true)) => {
+                    self.pending.push((c * (1.0 - p), v));
+                    c *= p;
+                }
+                Some((p, false)) => {
+                    self.pending.push((c, v * (1.0 - p)));
+                    v *= p;
+                }
+                None => (c, v) = self.pending.pop().unwrap_or((0.0, 0.0)),
+            }
+        }
+    }
+
+    /// The lane slots of a group on `lanes` lanes.
+    pub(crate) fn lane_slots(&self, lanes: usize) -> f64 {
+        let tail = lanes.saturating_sub(1) as f64 * self.leaf / self.trees.max(1) as f64;
+        self.group + tail
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rng::Rng;
+
+    /// A random tree of at most `depth` levels in heavy-first preorder, appended to
+    /// `nodes`, with each node's probability of being reached by a group of `width`
+    /// rows added to `group`: on its constant path, `c`, by any row on its varying
+    /// one, `v`.
+    fn random_tree(
+        rng: &mut Rng,
+        depth: u32,
+        (c, v): (f64, f64),
+        width: usize,
+        nodes: &mut Vec<Option<(f64, bool)>>,
+        group: &mut f64,
+    ) {
+        *group = c.mul_add(1.0 - (1.0 - v).powi(i32::try_from(width).unwrap()), *group);
+        if depth == 0 || rng.chance(0.25) {
+            nodes.push(None);
+            return;
+        }
+        let (p, constant) = (rng.unit(), rng.chance(0.5));
+        nodes.push(Some((p, constant)));
+        let (heavy, light) = if constant {
+            ((c * p, v), (c * (1.0 - p), v))
+        } else {
+            ((c, v * p), (c, v * (1.0 - p)))
+        };
+        random_tree(rng, depth - 1, heavy, width, nodes, group);
+        random_tree(rng, depth - 1, light, width, nodes, group);
+    }
+
+    #[test]
+    fn a_group_takes_a_constant_split_together_and_a_varying_one_apart() {
+        // A constant split: the group's rows take one side, 2 steps as for a row.
+        let mut sums = GroupSums::default();
+        sums.tree(4, [Some((0.75, true)), None, None].into_iter());
+        assert!((sums.group - 2.0).abs() < 1e-12);
+        // A varying one: the heavy leaf unless all 4 rows go light, the light one unless
+        // all go heavy.
+        let mut sums = GroupSums::default();
+        sums.tree(4, [Some((0.75, false)), None, None].into_iter());
+        let group = 1.0 + (1.0 - 0.25f64.powi(4)) + (1.0 - 0.75f64.powi(4));
+        assert!((sums.group - group).abs() < 1e-12);
+        // The last round's idle lanes: 7 for a tree's 2 steps.
+        assert!((sums.lane_slots(8) - group - 14.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn group_steps_follow_each_nodes_paths() {
+        let mut rng = Rng::new(41);
+        for width in [1, 2, 16] {
+            let mut sums = GroupSums::default();
+            let (mut expected, mut before) = (0.0, 0.0);
+            for _ in 0..50 {
+                let mut nodes = Vec::new();
+                random_tree(&mut rng, 8, (1.0, 1.0), width, &mut nodes, &mut expected);
+                sums.tree(width, nodes.into_iter());
+                assert!((sums.group - expected).abs() <= 1e-9 * expected);
+                // Steps only add, so a pass that stops once they pass a bound decides
+                // as the whole pass would.
+                assert!(sums.group >= before);
+                before = sums.group;
+            }
+            assert!(sums.lane_slots(8) >= sums.group);
+        }
+    }
+}

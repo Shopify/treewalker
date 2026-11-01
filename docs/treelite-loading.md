@@ -225,7 +225,7 @@ peak process RSS. Large legitimate forests should use binary.
 | Config JSON (`max_config_bytes`) | 64 KiB | oversized configurations |
 | Attributes (`max_attributes_bytes`) | 16 MiB | the attributes document |
 | JSON nesting (`max_json_nesting`) | 64 | parser recursion, in models, attributes and configurations |
-| Categorical rank tables built at load (`max_rank_table_bytes`) | 256 MiB | amplification: a feature with C categories whose splits' heavy sets need W chains takes 4 × (W + C + 3) bytes and 8 per exception (a code's rank where it differs from an unlisted category's, at most one per listed category of each heavy set), linear in the lists, and a varying one 4 × (C + 3) more and at most 8 per exception in a chain its varying splits test, for the masks its rows flip; the cap also bounds, per feature, the heavy sets built on the way (4 bytes per listed category of each split side) and their inclusion graph (8 bytes per inclusion between two listed sets or two complements, a bit per pair of a listed set and a complement), which a hostile file can make quadratic in its splits |
+| Categorical rank tables built at load (`max_rank_table_bytes`) | 256 MiB | amplification: a feature with C categories whose splits' heavy sets need W chains takes 4 × (W + C + 3) bytes and 8 per exception (a code's rank where it differs from an unlisted category's, at most one per listed category of each heavy set), linear in the lists, and no more when the model packs its chains' rank fields several to a word; a varying one 4 × (C + 3) more and at most 8 per exception in a chain its varying splits test, for the masks its rows flip; the cap also bounds the heavy sets built on the way (4 bytes per listed category of each split side, over all the features), and the chain cover, which keeps no inclusion graph, bounds its search, so a hostile file can make neither quadratic in its splits |
 
 Nothing else has a fixed limit. What bounds the representation:
 
@@ -237,7 +237,7 @@ Nothing else has a fixed limit. What bounds the representation:
 | Category IDs | any `u32`: each categorical feature's splits share a codebook of the categories they name, and rank tables cover its codes, not the IDs |
 | Category-list entries | the binary `category_list` array; segments must not overlap, so decoding is linear in it |
 | Varying predicates | 2^29 − 1: the layout's 30-bit mask field indexes a mask per side of each |
-| Features with splits | 2^30 bin slots: 4 per feature with numeric splits, and one per chain of a feature's categorical heavy sets |
+| Features with splits | 2^27 bin slots: 4 per feature with numeric splits, and one per chain of a feature's categorical heavy sets, or per word of their packed rank fields |
 | Rank tables | `max_rank_table_bytes` |
 | Prefix depth | any; chosen per group of trees at load, and a prefix stops at the first leaf or varying split |
 

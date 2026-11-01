@@ -60,15 +60,13 @@ pub struct LoadOptions {
     /// categorical feature with C categories whose splits' sets need W chains takes
     /// 4 × (W + C + 3) bytes, and 8 more per exception, a code's rank in a chain
     /// where it differs from an unlisted category's: at most one per listed category
-    /// (or missing sent left) of each distinct heavy set. A categorical feature the
-    /// walker configuration declares varying also takes, for the masks its rows
-    /// flip, 4 × (C + 3) bytes and at most 8 per exception in a chain that its splits
-    /// test. The cap also bounds, per feature, what is
-    /// built on the way: 4 bytes per listed category of each split's heavy side, and
-    /// the inclusions between distinct heavy sets, which a small hostile file could
-    /// otherwise make quadratic in its splits: 8 bytes per inclusion between two
-    /// listed sets or two complements, and a bit for each pair of a listed set and a
-    /// complement.
+    /// (or missing sent left) of each distinct heavy set. A model whose chains' rank
+    /// fields pack several to a 32-bit word takes a word where it took a chain, and an
+    /// exception per word where it took one per chain, so no more. A categorical
+    /// feature the walker configuration declares varying also takes, for the masks its
+    /// rows flip, 4 × (C + 3) bytes and at most 8 per exception in a chain that its
+    /// splits test. The cap also bounds the heavy sets built on the way, 4 bytes per
+    /// listed category of each split's heavy side, over all the features.
     pub max_rank_table_bytes: u64,
 }
 
@@ -98,6 +96,8 @@ pub(crate) struct Choices {
     pub(crate) prefix: crate::rules::Prefix,
     /// Share one predicate between identical varying splits.
     pub(crate) predicate_dedup: bool,
+    /// Whether to pack the categorical rank fields, instead of the packing rule.
+    pub(crate) pack: Option<bool>,
 }
 
 impl Default for Choices {
@@ -107,6 +107,7 @@ impl Default for Choices {
             bitset_intern: true,
             prefix: crate::rules::Prefix::Rule,
             predicate_dedup: true,
+            pack: None,
         }
     }
 }

@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Changes
+
+- The chain cover of a categorical feature's distinct heavy sets keeps no inclusion
+  graph. The graph took a bit per pair of a listed and a complemented set and
+  8 bytes per inclusion, so it grew faster than the sets: a model whose splits take
+  hundreds of thousands of distinct heavy sets failed to load at the default
+  `LoadOptions::max_rank_table_bytes`, and with it raised loaded slowly (the known
+  gap of 3.0 and 3.1). The cover matches each set, largest first, to the tightest
+  free strict superset that the sets' lists name, then grows the matching by
+  augmenting paths in phases with a look-ahead, as Pothen and Fan's matching does,
+  with the steps of a model's searches bounded; past the bound it keeps the chains
+  it has, and the model packs them. It takes the fewest chains on all 554
+  categorical models of the benchmark grid and on the `categorical-scale` cell's
+  model cut to 1 to 20 trees; the full model takes 325,899 chains, against the
+  fewest, 190,335.
+- A model's categorical chains pack their rank fields several to a 32-bit word when
+  its covers ran out of steps or when the packing rule says so (`rules::pack`): when
+  its unpacked bins would not fit one CPU's share of L1, or when the exceptions its
+  fills save outweigh the shift its walks then take at every lane step. Both sides
+  are issue-bound, so the rule weighs uops: a group's expected lane slots at
+  `max_group_width`, from the training weights, times the shift's uops per step,
+  against the exceptions a fill saves per code, counted at load and weighted by each
+  code's exceptions, times the fill's uops per exception. A chain of m sets takes a
+  field of the bit length of m, and a split on a packed field shifts its word to
+  bring the field to the top; the walks shift only for a model that packs, which
+  packs its varying categorical features too. The shifting walk with varying stops
+  takes 8 lanes on Apple's AArch64 rather than 9, at which it spilled.
+- A layout holds at most 2^27 slots, rather than 2^30: word 0 gives a packed field's
+  shift 5 bits. A model that needs more (4 per feature with numeric splits, one per
+  chain or word of packed fields) is a `LoadError::Limit`.
+- Research: `LoadAblation` gains `pack`, `Some(true)` or `Some(false)` to pack the
+  rank fields or not instead of the rule, which code that names every field of
+  `LoadAblation` must add (`..LoadAblation::default()` takes the default);
+  `LayoutStats` gains `chains` and `packed`, and `chain_slots` counts the rank
+  fields' slots, a word each.
+
 ### Performance
 
 - A tree counts at most its group's width class's rows of leaves when trees are
@@ -22,6 +58,23 @@
   LightGBM cohorts of 4 rows 0.45 to 0.50), 0.970 at depth 8, and 0.998 at depths 2
   and 4, whose trees the cap cannot bind; 0.955 on the 86 batch cells. Trees of up
   to 32 leaves chunk as before. Outputs are unchanged.
+- Models with a categorical feature of hundreds of thousands of distinct heavy sets
+  load at the default limits, and their fills take fewer writes. On Genoa
+  (c3d-standard-90), against the code before with the cap raised to 4 GiB, the
+  `categorical-scale` cell's model, 600 LightGBM trees of 4,096 leaves on Expedia
+  searches in groups of 16 whose `srch_destination_id` splits take 265,406 sets,
+  loads in 1.1 s rather than 4.6, at a peak of 0.33 GB rather than 1.46 and with
+  25 MB of rank tables against 31 MB, and takes 0.85 of the time per group at one
+  group per call and in batch on one core, and 0.86 on 45 threads. Its cuts to 1 to
+  20 trees, packed against unpacked, took 1.000 to 0.897 of the time per group at
+  one group per call on Genoa and 1.029 to 0.899 in batch, the rule packing them
+  from 2 trees, and 0.932 to 0.821 on an M4 Pro, every cut packed. Of the grid's 554
+  categorical models the rule packs 4 on Genoa, which took 0.988 to 1.017 of their
+  time unpacked, and 14 on the M4, 0.895 to 0.995. On the 1,190 serving cells of the
+  factorial, validation and kernel manifests, timed against the code before in
+  alternation on Genoa, the geometric mean is 0.999 at the default function
+  alignment and 1.001 at 64 bytes; loads take 1.01 of the time for the models with
+  categorical features and 0.99 for the rest. Outputs are unchanged.
 
 ## 3.1.0
 

@@ -264,7 +264,8 @@ uses to measure the kernel. Serving needs none of it.
   `LoadAblation`, the load-time choices turned off or forced:
   `disable_tree_ordering`, `disable_bitset_intern`, `disable_predicate_dedup` and
   `prefix_depth` (every run of trees sharing that many constant splits, instead of
-  the rule's groups; 0 for none).
+  the rule's groups; 0 for none) and `pack` (`Some(true)` or `Some(false)` to pack
+  the categorical chains' rank fields or not, instead of the packing rule).
 - `predict_group` and `predict_groups` are the timed build; `predict_group_counted`
   returns `WorkCounters` (`COUNTERS_VERSION` 6: groups, single rows, bins, precompute,
   event scans, prefix and walk steps, lane slots, passes, events, splits, runs and
@@ -277,8 +278,9 @@ uses to measure the kernel. Serving needs none of it.
   budget, the expected walk steps per tree, the cache level holding the nodes with
   its probed latency and the prefetch distances, the prefix groups with the steps
   they save and cost, and the bytes of the node pool, leaf table, categorical
-  rank tables (with the chain slots and the heavy sets they cover) and the varying
-  categorical features' flip lists.
+  rank tables (with their slots, the chains, whether their rank fields are packed,
+  and the heavy sets the chains cover) and the varying categorical features' flip
+  lists.
 - `forest.predict_full_walk(rows, out)` walks every tree for every row and sums
   exactly: an independent reference that production matches bit for bit.
 - `nodes()`, `trees()`, `tree_nodes()`, `bitset_bytes()`, `threshold_type()` and

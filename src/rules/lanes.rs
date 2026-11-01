@@ -38,23 +38,28 @@ const fn invariants(varying: bool) -> usize {
 /// - x86-64 (emeraldrapids) folds the bin and item loads into the compare and the
 ///   conditional move: word 0, word 1 and the candidate (or the stop flag), 3.
 ///
+/// A walk that shifts for packed fields (`shift`, [`crate::load::layout`], "Packed
+/// fields") holds the shift too, word 0's high half: one more on both (AArch64 `lsr` and
+/// `lslv`; x86-64 `shr` and `shlx`, which takes the bin's load).
+///
 /// Checked by building every walk at one lane more than the AArch64 rule's
 /// (`walk_spills.py --lanes`): with these counts, the rule's lane count is the largest
 /// without stack stores for every walk.
-const fn temporaries(varying: bool) -> usize {
-    if cfg!(target_arch = "x86_64") {
-        3
-    } else {
-        5 - varying as usize
-    }
+const fn temporaries(varying: bool, shift: bool) -> usize {
+    shift as usize
+        + if cfg!(target_arch = "x86_64") {
+            3
+        } else {
+            5 - varying as usize
+        }
 }
 
 /// The lane values (nodes and cursors) that do not fit the registers at `k` lanes:
 /// each lane holds two, beside the invariants and a step's temporaries.
 /// `experiments/scripts/walk_spills.py` expects a production walk loop to store to the
 /// stack exactly when this is above zero.
-pub(crate) const fn spilled(k: usize, varying: bool) -> usize {
-    (2 * k + invariants(varying) + temporaries(varying)).saturating_sub(GENERAL_REGISTERS)
+pub(crate) const fn spilled(k: usize, varying: bool, shift: bool) -> usize {
+    (2 * k + invariants(varying) + temporaries(varying, shift)).saturating_sub(GENERAL_REGISTERS)
 }
 
 /// Whether advancing a lane's cursor by `k` items when it stops is one instruction
@@ -111,6 +116,10 @@ const X86_ISSUE_WIDTH: usize = 6;
 /// prefetch's, and `cmova`'s or `cmovbe`'s second uop.
 const X86_STEP_UOPS: usize = 20;
 
+/// x86-64: the uops a shifting step adds, the shift's copy and `shr`; `shlx` takes the
+/// bin's load, as the compare did.
+const X86_SHIFT_UOPS: usize = 2;
+
 /// x86-64: uops a lane value that does not fit the registers adds per round, its store
 /// and its reload. The assembly adds more per lane step (at 8 lanes 3 to 6 against
 /// 2 lanes, invariant reloads and register moves included): more uops only reach the
@@ -119,8 +128,32 @@ const X86_SPILL_UOPS: usize = 2;
 
 /// x86-64: whether `k` lanes reach the issue bound, `chain / k <= uops per step /
 /// width`, with the uops of the values [`spilled`] at `k`.
-const fn x86_issue_bound(k: usize, varying: bool) -> bool {
-    X86_CHAIN_CYCLES * X86_ISSUE_WIDTH <= k * X86_STEP_UOPS + X86_SPILL_UOPS * spilled(k, varying)
+const fn x86_issue_bound(k: usize, varying: bool, shift: bool) -> bool {
+    let step = X86_STEP_UOPS + X86_SHIFT_UOPS * shift as usize;
+    X86_CHAIN_CYCLES * X86_ISSUE_WIDTH <= k * step + X86_SPILL_UOPS * spilled(k, varying, shift)
+}
+
+/// AArch64: the instructions a shifting step adds, `lsr` and `lslv`. Counted from the
+/// post-LTO assembly of `examples/walk_asm.rs` (apple-m4, rustc 1.97.1): the walk with
+/// varying stops takes 171 instructions a round at 9 lanes and 168 at the shifting
+/// walk's 8, 19 and 21 a step; the walk without them 128 and 144 at 8 lanes, 16 and 18.
+const AARCH64_SHIFT_INSTRUCTIONS: usize = 2;
+
+/// What shifting adds to a lane step of the walk with varying stops, or without them,
+/// in the units of the issue width: on x86-64 the shift's uops and those of the values
+/// it spills at its lanes (2 and 2 × 1 / 8, 2.25 for both walks); on AArch64, whose
+/// lanes fit the registers, its two instructions.
+pub(crate) fn shift_uops(varying: bool) -> f64 {
+    if cfg!(target_arch = "x86_64") {
+        let step = |shift: bool| {
+            let k = lanes(varying, shift);
+            let spills = X86_SPILL_UOPS * spilled(k, varying, shift);
+            (X86_SHIFT_UOPS * usize::from(shift)) as f64 + spills as f64 / k as f64
+        };
+        step(true) - step(false)
+    } else {
+        AARCH64_SHIFT_INSTRUCTIONS as f64
+    }
 }
 
 /// A lane count fixed at build time by `TREEWALKER_LANES`, for the spill check of
@@ -146,7 +179,8 @@ const fn parse(s: &str) -> usize {
     n
 }
 
-/// Walk lanes for a walk stopping at varying splits with `varying`.
+/// Walk lanes for a walk stopping at varying splits with `varying`, and shifting for
+/// packed fields with `shift`.
 ///
 /// Each lane's step is a dependent chain (the node's load, its bin's load, the compare
 /// and two selects), so `k` lanes finish at most `k` steps per chain, and the core's
@@ -168,8 +202,9 @@ const fn parse(s: &str) -> usize {
 ///   a store and a reload, but on Golden Cove and Zen 3 and later no chain latency, since
 ///   those cores forward a store to a load of the same address with zero latency. So
 ///   the lanes are the fewest powers of two that reach the issue bound
-///   ([`x86_issue_bound`]) with the spilled values' uops counted: 8, `25 × 6 = 150 <=
-///   8 × 20 + 2 × 10` (4 give 84). Without zero-latency forwarding a spilled lane's
+///   ([`x86_issue_bound`]) with the spilled values' uops counted: 8 for the constant
+///   walk, `25 × 6 = 150 <= 8 × 20 + 2 × 10` (4 give 84), and for each walk in the
+///   table below. Without zero-latency forwarding a spilled lane's
 ///   chain is about 30 cycles, and 8 lanes still step every 3.75 cycles against 4
 ///   lanes' 6.25 to 7.5, so the choice does not depend on it. On Emerald Rapids, with
 ///   node indices, over R5's 90 cells at both alignments, research lanes=4 took 0.793
@@ -185,6 +220,8 @@ const fn parse(s: &str) -> usize {
 /// |---|---|---|---|---|
 /// | varying | 7 | 4 | 9 | 9 |
 /// | constant | 5 | 5 | 9; 10 on Linux | 8 (a power of two) |
+/// | varying, shifting | 7 | 5 | 8; 9 on Linux | 8; 9 on Linux |
+/// | constant, shifting | 5 | 6 | 9 | 8 |
 ///
 /// On x86-64 (15 registers, 6 uops renamed per cycle, a chain of 25 cycles):
 ///
@@ -192,6 +229,16 @@ const fn parse(s: &str) -> usize {
 /// |---|---|---|---|---|
 /// | varying | 20 | 2 | 11 | 8 (`150 <= 160 + 22`; 4 give 86) |
 /// | constant | 20 (21 counted) | 3 | 10 | 8 (`150 <= 160 + 20`; 4 give 84) |
+/// | varying, shifting | 22 | 2 | 12 | 8 (`150 <= 176 + 24`; 4 give 96) |
+/// | constant, shifting | 22 | 2 | 11 | 8 (`150 <= 176 + 22`; 4 give 94) |
+///
+/// The chains are the walks' without the shift, which adds a cycle to each (13 to 14
+/// on AArch64, 25 to 26 on x86-64): `26 × 6 = 156` changes no choice.
+///
+/// At 9 lanes on Apple the shifting walk with varying stops kept a value on the stack,
+/// a store and a load per round (192 instructions against 171 without the shift); on
+/// x86-64 (znver4) the shift added about 3 instructions per lane step, its copy, `shr`
+/// and a stack store more per round.
 ///
 /// The counts that changed with byte offsets and the one-flag select, 26 cycles to 25
 /// and 24 uops to 20, leave both walks at 8.
@@ -252,19 +299,20 @@ const fn parse(s: &str) -> usize {
 ///   ports 0 and 6.
 /// - On Zen 5 `prefetcht0` is microcoded, and `cmova` takes 2 macro ops where `cmovae`
 ///   takes 1, as on Intel.
-pub(crate) const fn lanes(varying: bool) -> usize {
+pub(crate) const fn lanes(varying: bool, shift: bool) -> usize {
     if let Some(k) = FORCED_LANES {
         return k;
     }
     if cfg!(target_arch = "x86_64") {
         let mut k = 1;
-        while k < MAX_LANES && !(one_instruction_advance(k, varying) && x86_issue_bound(k, varying))
+        while k < MAX_LANES
+            && !(one_instruction_advance(k, varying) && x86_issue_bound(k, varying, shift))
         {
             k += 1;
         }
         return k;
     }
-    let held = invariants(varying) + temporaries(varying);
+    let held = invariants(varying) + temporaries(varying, shift);
     let fit = GENERAL_REGISTERS.saturating_sub(held) / 2;
     let mut k = if fit > MAX_LANES { MAX_LANES } else { fit };
     while k > 1 && !one_instruction_advance(k, varying) {
@@ -279,8 +327,8 @@ mod tests {
 
     #[test]
     fn lanes_follow_the_rule() {
-        for varying in [false, true] {
-            let k = lanes(varying);
+        for (varying, shift) in [(false, false), (true, false), (false, true), (true, true)] {
+            let k = lanes(varying, shift);
             assert!((1..=MAX_LANES).contains(&k));
             if FORCED_LANES.is_some() {
                 continue;
@@ -288,22 +336,26 @@ mod tests {
             assert!(one_instruction_advance(k, varying));
             if cfg!(target_arch = "x86_64") {
                 // The fewest lanes that reach the issue bound: half as many do not.
-                assert!(x86_issue_bound(k, varying) && !x86_issue_bound(k / 2, varying));
+                assert!(
+                    x86_issue_bound(k, varying, shift) && !x86_issue_bound(k / 2, varying, shift)
+                );
             } else {
-                assert!(spilled(k, varying) == 0 || k == 1);
+                assert!(spilled(k, varying, shift) == 0 || k == 1);
             }
         }
+        let all = |shift| (lanes(true, shift), lanes(false, shift));
         if FORCED_LANES.is_none() && cfg!(all(target_arch = "aarch64", target_vendor = "apple")) {
-            assert_eq!((lanes(true), lanes(false)), (9, 8));
+            assert_eq!((all(false), all(true)), ((9, 8), (8, 8)));
         }
         if FORCED_LANES.is_none() && cfg!(target_arch = "x86_64") {
-            assert_eq!((lanes(true), lanes(false)), (8, 8));
+            assert_eq!((all(false), all(true)), ((8, 8), (8, 8)));
+            let spilled = |shift| (spilled(8, true, shift), spilled(8, false, shift));
             assert_eq!(
-                (spilled(8, true), spilled(8, false)),
+                (spilled(false), spilled(true)),
                 if cfg!(target_vendor = "apple") {
-                    (12, 11)
+                    ((12, 11), (13, 12))
                 } else {
-                    (11, 10)
+                    ((11, 10), (12, 11))
                 }
             );
         }

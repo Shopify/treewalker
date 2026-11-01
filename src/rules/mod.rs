@@ -8,9 +8,12 @@
 //!   holds the nodes and a lower bound on the time a lane spends on an item.
 //! - [`prefix_groups`]: which trees share a constant prefix and how deep, from the
 //!   forest's heavy paths and their training weights.
+//! - [`pack`]: whether a model packs its categorical rank fields, from its bins' size,
+//!   its groups' expected lane slots and its fills' exceptions.
 
 mod lanes;
 pub(crate) mod machine;
+pub(crate) mod pack;
 mod prefetch;
 mod prefix;
 mod steps;
@@ -20,7 +23,7 @@ pub(crate) use prefetch::{Distance, MAX_DISTANCE, distance, pass_distance};
 pub(crate) use prefix::{
     PathNode, Paths, Prefix, PrefixStats, Token, compare_paths, prefix_groups,
 };
-pub(crate) use steps::{ItemLengths, StepSums, Steps};
+pub(crate) use steps::{GroupSums, ItemLengths, StepSums, Steps};
 
 /// What the rules read of a model besides its layout and steps, boxed in
 /// [`crate::model::Model`]: its walks' item lengths, and its node pool's latency when
@@ -90,7 +93,7 @@ impl Tuning {
                 &model.rules.pool_latency,
                 leaf,
                 Some(&model.rules.items.leaf_short),
-                lanes(false),
+                lanes(false, layout.bins.has_shifts()),
                 caches,
             ),
             varying: distance(
@@ -99,7 +102,7 @@ impl Tuning {
                 &model.rules.pool_latency,
                 stop,
                 None,
-                lanes(true),
+                lanes(true, layout.bins.has_shifts()),
                 caches,
             ),
         }

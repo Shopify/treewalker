@@ -74,6 +74,8 @@ struct Coverage {
     rank_tables: usize,
     chained: usize,
     long_chains: usize,
+    /// Models loaded again with their rank fields packed.
+    packed: usize,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -143,6 +145,7 @@ fn check(profile: &Profile, case: usize, seed: u64, coverage: &mut Coverage) {
         disable_bitset_intern: rng.chance(0.3),
         prefix_depth: *rng.pick(&[Some(0), Some(1), None, Some(2), Some(3), Some(5)]),
         disable_predicate_dedup: rng.chance(0.1),
+        pack: None,
     };
     let groups: Vec<Vec<f64>> = sizes
         .iter()
@@ -172,9 +175,14 @@ fn check(profile: &Profile, case: usize, seed: u64, coverage: &mut Coverage) {
         );
     }
 
-    let forest =
-        Forest::from_bytes_ablated(&bytes, format, config, &LoadOptions::default(), &ablation)
-            .unwrap_or_else(|e| panic!("load: {e}; {}", describe(&model)));
+    let forest = Forest::from_bytes_ablated(
+        &bytes,
+        format,
+        config.clone(),
+        &LoadOptions::default(),
+        &ablation,
+    )
+    .unwrap_or_else(|e| panic!("load: {e}; {}", describe(&model)));
 
     // The exact full walk equals the oracle on every model.
     let expected: Vec<f64> = data
@@ -254,6 +262,40 @@ fn check(profile: &Profile, case: usize, seed: u64, coverage: &mut Coverage) {
         &data,
         &model,
     );
+    // Every categorical feature's rank fields packed: the walks that shift, on a
+    // group at a time and on the batch.
+    let packing = LoadAblation {
+        pack: Some(true),
+        ..ablation
+    };
+    let forest_packed =
+        Forest::from_bytes_ablated(&bytes, format, config, &LoadOptions::default(), &packing)
+            .unwrap_or_else(|e| panic!("load packed: {e}; {}", describe(&model)));
+    let packed = forest_packed.layout_stats().packed;
+    if packed {
+        let mut predictor = forest_packed.predictor();
+        let mut start = 0;
+        for g in &groups {
+            let rows = g.len() / model.n_features;
+            predictor.predict_group(g, &mut out[start..start + rows]);
+            start += rows;
+        }
+        same(
+            &out,
+            &full,
+            "predict_group packed against the full walk",
+            &data,
+            &model,
+        );
+        predictor.predict_groups(&data, &offsets, &mut batch);
+        same(
+            &batch,
+            &full,
+            "predict_groups packed against the full walk",
+            &data,
+            &model,
+        );
+    }
 
     coverage.cases += 1;
     coverage.i128_sums += usize::from(i128_sums);
@@ -279,7 +321,8 @@ fn check(profile: &Profile, case: usize, seed: u64, coverage: &mut Coverage) {
     let stats = forest.layout_stats();
     coverage.rank_tables += usize::from(stats.rank_table_bytes > 0);
     coverage.chained += usize::from(stats.chain_sets > stats.chain_slots);
-    coverage.long_chains += usize::from(stats.chain_sets >= 5 * stats.chain_slots.max(1));
+    coverage.long_chains += usize::from(stats.chain_sets >= 5 * stats.chains.max(1));
+    coverage.packed += usize::from(packed);
 }
 
 /// Panic at the first row whose bits differ.
@@ -664,7 +707,7 @@ fn nested_categorical_sets() {
     });
     if full_run() {
         assert!(
-            c.chained > c.cases / 2 && c.long_chains > c.cases / 10,
+            c.chained > c.cases / 2 && c.long_chains > c.cases / 10 && c.packed > c.cases / 4,
             "{c:?}"
         );
     }

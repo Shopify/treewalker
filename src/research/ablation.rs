@@ -176,6 +176,9 @@ pub struct LoadAblation {
     /// Give every varying node its own predicate instead of sharing one between
     /// identical splits. This multiplies the precompute work.
     pub disable_predicate_dedup: bool,
+    /// Pack the categorical chains' rank fields (`true`) or not (`false`), instead of
+    /// the packing rule.
+    pub pack: Option<bool>,
 }
 
 impl LoadAblation {
@@ -189,6 +192,7 @@ impl LoadAblation {
                 None => Prefix::Rule,
             },
             predicate_dedup: !self.disable_predicate_dedup,
+            pack: self.pack,
         }
     }
 }

@@ -16,7 +16,7 @@ use std::hint::select_unpredictable;
 
 use super::isa::Isa;
 use crate::load::layout::{
-    FLAG_LEAF, LINK_STRIDE, LayoutNode, SLOT_SHIFT, STOPS_VARYING, node_at, takes_heavy,
+    FLAG_LEAF, LINK_STRIDE, LayoutNode, SLOT_SHIFT, STOPS_VARYING, node_at, shifted, takes_heavy,
 };
 
 pub(super) use crate::rules::{MAX_DISTANCE, MAX_LANES};
@@ -54,10 +54,11 @@ pub(super) const fn pad(lanes: usize, distance: usize) -> usize {
 /// The most padding any walk needs.
 pub(super) const MAX_PAD: usize = pad(MAX_LANES, MAX_DISTANCE);
 
-/// The lanes of a walk given `K`: the rule's for its stops when `K` is 0, else `K`.
-pub(super) const fn lanes_of(k: usize, varying: bool) -> usize {
+/// The lanes of a walk given `K`: the rule's for its stops and its shift when `K` is
+/// 0, else `K`.
+pub(super) const fn lanes_of(k: usize, varying: bool, shift: bool) -> usize {
     if k == 0 {
-        crate::rules::lanes(varying)
+        crate::rules::lanes(varying, shift)
     } else {
         k
     }
@@ -104,17 +105,20 @@ pub(super) struct Pools {
 /// One lane's step: the next node's link, from the node at `link`, and the node's
 /// word 1. Every split tests its bin against its bound on word 0's low 32 bits, so
 /// the slot above them costs no masking: on x86-64 `bin < k + 1`, whose heavy select
-/// reads one flag ([`crate::load::layout`]).
+/// reads one flag ([`crate::load::layout`]). With `SHIFT` the bin is shifted first by
+/// word 0's shift, 0 but for splits on packed fields: a model that doesn't pack takes
+/// the walks without it.
 ///
 /// # Safety
 ///
 /// `link` is a node's of the pool, and its slot a bin.
 #[inline(always)]
-unsafe fn step(p: &Pools, link: u32) -> (u32, u64) {
+unsafe fn step<const SHIFT: bool>(p: &Pools, link: u32) -> (u32, u64) {
     // SAFETY: the caller guarantees link and its slot are in range.
     unsafe {
         let node = *node_at(p.nodes, link);
-        let x = *p.bins.add((node.w0 >> SLOT_SHIFT) as usize);
+        let bin = *p.bins.add((node.w0 >> SLOT_SHIFT) as usize);
+        let x = if SHIFT { shifted(bin, node.w0) } else { bin };
         let heavy = takes_heavy(x, node.w0 as u32);
         (
             select_unpredictable(heavy, link + LINK_STRIDE, node.w1 as u32),
@@ -189,6 +193,7 @@ pub(super) unsafe fn walk_at<
     const D: usize,
     const R: usize,
     const STATS: bool,
+    const SHIFT: bool,
 >(
     p: &Pools,
     items: *const I,
@@ -198,13 +203,13 @@ pub(super) unsafe fn walk_at<
 ) {
     if X::NATIVE {
         // SAFETY: the caller's, which `walk` shares.
-        return unsafe { walk::<I, K, VARYING, D, R, STATS>(p, items, stops, words, steps) };
+        return unsafe { walk::<I, K, VARYING, D, R, STATS, SHIFT>(p, items, stops, words, steps) };
     }
     X::with5(
         #[inline(always)]
         |p, items, stops, words, steps| {
             // SAFETY: as above.
-            unsafe { walk::<I, K, VARYING, D, R, STATS>(p, items, stops, words, steps) }
+            unsafe { walk::<I, K, VARYING, D, R, STATS, SHIFT>(p, items, stops, words, steps) }
         },
         p,
         items,
@@ -215,14 +220,15 @@ pub(super) unsafe fn walk_at<
 }
 
 /// One pass over the items `items[..n]`, which are followed by
-/// `pad(lanes, D)` items on the dummy, with the lanes of [`lanes_of`] for `K` and
-/// `VARYING`.
+/// `pad(lanes, D)` items on the dummy, with the lanes of [`lanes_of`] for `K`,
+/// `VARYING` and `SHIFT`.
 /// Writes each item's stop node to `stops` (with `VARYING` only) and the node's word
 /// 1 to `words`, at the item's position. Items stop at leaves and, with `VARYING`, at
 /// varying splits; without it, varying splits are stepped through their constant
 /// encoding, as for a single row, whose bins hold every feature. When a lane takes
 /// an item, it prefetches the root of the item `D` items later in its sequence; `D`
-/// = 0 prefetches nothing.
+/// = 0 prefetches nothing. With `SHIFT`, which a model with packed fields needs,
+/// [`step`] shifts.
 ///
 /// A lane loads its next item once the step has moved its cursor, on the chain from
 /// its node to its next one. Loading the item after its own at the start of each
@@ -257,6 +263,7 @@ pub(super) unsafe fn walk<
     const D: usize,
     const R: usize,
     const STATS: bool,
+    const SHIFT: bool,
 >(
     p: &Pools,
     items: *const I,
@@ -265,7 +272,7 @@ pub(super) unsafe fn walk<
     steps: &mut Steps,
 ) {
     let k: usize = const {
-        let k = lanes_of(K, VARYING);
+        let k = lanes_of(K, VARYING, SHIFT);
         assert!(k >= 1 && k <= MAX_LANES && D <= MAX_DISTANCE);
         assert!(R == 1 || R == 2 || R == 4);
         k
@@ -283,7 +290,7 @@ pub(super) unsafe fn walk<
                 if STATS {
                     steps.count(*i != p.dummy);
                 }
-                let (next, w1) = step(p, *i);
+                let (next, w1) = step::<SHIFT>(p, *i);
                 let stops_at = if VARYING { STOPS_VARYING } else { FLAG_LEAF };
                 let stop = w1 & stops_at != 0;
                 // The lane's item stops here or later, so its last writes are its stop.
