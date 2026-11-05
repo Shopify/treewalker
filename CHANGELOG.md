@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## 3.2.1
+
+3.2.1 fixes what the review of 3.0's and 3.1's changes found that 3.2.0 does not: the
+prefix rule values the runs that a deeper group leaves as the groups' emission does,
+`WorkCounters::precompute_row_evals` counts categorical predicates as documented, with
+`COUNTERS_VERSION` 7, and the Treelite docs say where GTIL computes in float32. The
+serving API is unchanged, and so are outputs. The release also fixes what the crate
+does not ship: tests that did not reach what they named, and the experiments' assembly
+comparison, spill checks, 3.x counter read-outs, kernel-suite retiming, ablation no-op
+reasons and source stamp. It adds tests of the step estimator and of the sigmoid's
+2-ulp bound, and a debug check that the exact sums' unchecked adds take their layout's
+leaves. GitHub Actions runs the fast checks, and the release tests in a generic x86-64
+build at the CPU's level, x86-64-v3 and base; the local full checks run that build's
+tests too, and clippy on riscv64 and at x86-64-v3. The benchmark crate's tests no
+longer take in zip 6.0.0, which Dependabot flags, and 27 other crates leave the lock;
+the library's own dependencies are unchanged.
 
 ### Fixes
 
