@@ -38,6 +38,14 @@
   `LayoutStats` gains `chains` and `packed`, and `chain_slots` counts the rank
   fields' slots, a word each.
 
+### Fixes
+
+- A tree whose splits share children fails to load with `LoadError::MalformedModel`
+  in every build. Shared children double the subtree sizes at each level, which wrap,
+  and 3.1 added their positions without wrapping, so that debug builds panicked with
+  an overflow before the check of the children's parents rejected the tree; a chain
+  of 31 pairs of nodes did it.
+
 ### Performance
 
 - A tree counts at most its group's width class's rows of leaves when trees are

@@ -214,7 +214,8 @@ pub fn order_tree(
 /// children, there are `n − 1` child links, and each child has one parent: links
 /// only go forward, so the links reach every node but the root, and following
 /// parents from any node ends at the root. A child claimed by two splits keeps the
-/// first one as its parent, which the second then fails to find.
+/// first one as its parent, which the second then fails to find. Until then, sizes
+/// and positions wrap: shared children double them at each level.
 ///
 /// Where a node's child is the next node, as in a depth-first numbering, the loops
 /// carry the child's size or position in a register rather than through memory.
@@ -272,7 +273,8 @@ fn forward_positions(temp: &[TempNode], s: &mut OrderScratch) -> bool {
         let hil = split & (temp[l.min(n - 1)].weight >= temp[r.min(n - 1)].weight);
         let heavy = select_unpredictable(hil, l, r);
         let light = select_unpredictable(hil, r, l);
-        let (at_heavy, at_light) = (at + 1, at + 1 + size[heavy]);
+        let at_heavy = at.wrapping_add(1);
+        let at_light = at_heavy.wrapping_add(size[heavy]);
         position[i] = at;
         position[heavy] = at_heavy;
         position[light] = at_light;

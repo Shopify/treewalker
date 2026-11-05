@@ -477,6 +477,38 @@ fn rejects_bad_json_nodes_and_topology() {
     assert_eq!(out, reference);
 }
 
+/// A tree whose splits share children is malformed in every build. Below the root,
+/// both nodes of each of 31 pairs split to the next pair, the last pair leaves, so
+/// subtree sizes double at each pair to `u32::MAX` at the root's children, and their
+/// positions pass it before the check of the children's parents fails the tree.
+#[test]
+fn shared_children_are_malformed() {
+    let mut v = model_json();
+    let (split, leaf) = (
+        v["trees"][0]["nodes"][0].clone(),
+        v["trees"][0]["nodes"][1].clone(),
+    );
+    let nodes: Vec<Value> = (0..65u64)
+        .map(|i| {
+            let mut node = if i < 63 { split.clone() } else { leaf.clone() };
+            node["node_id"] = i.into();
+            if i < 63 {
+                let left = if i == 0 { 1 } else { 2 * i.div_ceil(2) + 1 };
+                node["left_child"] = left.into();
+                node["right_child"] = (left + 1).into();
+            }
+            node
+        })
+        .collect();
+    v["trees"][0]["nodes"] = Value::Array(Box::new(nodes));
+    v["trees"][0]["num_nodes"] = 65.into();
+    let error = parse_json(&v).unwrap_err();
+    assert!(
+        matches!(&error, LoadError::MalformedModel(m) if m.contains("shared child")),
+        "{error}"
+    );
+}
+
 // Offset map for mutating *real Treelite-generated* checkpoints. Not a serializer.
 fn binary_fields(data: &[u8]) -> std::collections::BTreeMap<String, usize> {
     fn arr(
