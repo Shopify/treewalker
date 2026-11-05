@@ -1,8 +1,10 @@
 """results and figures: cell designs, the TikZ heatmap, and the work decomposition."""
 
+from pathlib import Path
+
 import pytest
 
-from treewalker_exp import figures, results
+from treewalker_exp import figures, grids, results
 
 
 @pytest.mark.parametrize(
@@ -31,6 +33,24 @@ from treewalker_exp import figures, results
 def test_design_reads_the_cell_id(cell, expected):
     got = results.design(cell)
     assert {k: got[k] for k in expected} == expected
+
+
+def test_design_reads_every_kernel_cell_for_retiming():
+    suite = grids.suite(grids.load(Path(__file__).resolve().parents[1] / "grids.toml"), "kernel")
+    assert len(suite.cells) == 60
+    for cell in suite.cells:
+        d = results.design(cell.id)
+        assert (d["T"], d["L"], d["horizon"]) == (
+            cell.model.n_trees,
+            cell.model.max_depth,
+            cell.model.horizon,
+        )
+        if cell.generator == "rows-v1":
+            assert (d["family"], d["G"]) == ("single-row", 1)
+        elif cell.generator == "panel-v2":
+            assert (d["family"], d["G"]) == ("panel", 16)
+        else:
+            assert (d["family"], d["G"], d["k"]) == ("whatif", cell.param["G"], cell.param["k"])
 
 
 def test_heatmap_tex_has_every_cell_and_contrasting_text():
