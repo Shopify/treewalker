@@ -6,7 +6,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from treewalker_exp import counters, results
+from treewalker_exp import counters, figures, numbers, results
 
 V2 = {
     "constant_steps": 100,
@@ -123,3 +123,48 @@ def test_unknown_versions_are_refused(tmp_path):
         work(tmp_path, 8, ["all-on"])
     with pytest.raises(ValueError, match="version 1"):
         counters.terms(1, V2, 10)
+
+
+def anchor_work(tmp: Path, version: int) -> pl.DataFrame:
+    """A packed run with each figure and number's anchors and variants."""
+    write_run(tmp, version, ["all-on", "disable_unsplit", figures.ALL_DISABLED])
+    cells = [
+        f"{ds}/nt500_md8{h}/{fw}/{w}"
+        for ds, h, w in [
+            ("support", "_h16", "panel"),
+            ("flchain", "_h4", "panel"),
+            ("flchain", "_h16", "panel"),
+            ("expedia", "", "sessions"),
+        ]
+        for fw in ("lightgbm", "xgboost")
+    ]
+    for name in ("counters", "groups"):
+        path = tmp / f"{name}.parquet"
+        df = pl.read_parquet(path)
+        pl.concat([df.with_columns(cell=pl.lit(c)) for c in cells]).write_parquet(path)
+    results._work.cache_clear()
+    return results._work(tmp)
+
+
+@pytest.mark.parametrize("version", [3, 6])
+def test_unsplit_numbers_without_recursion(tmp_path, version):
+    w = anchor_work(tmp_path, version)
+    out = numbers.unsplit(w)
+    assert len(out) == 6
+    assert all("E per group" not in label and "; E " not in value for label, value in out)
+    assert all("% of V)" in value for _, value in out)
+
+
+@pytest.mark.parametrize("version", [3, 6])
+def test_node_figure_without_recursion(tmp_path, monkeypatch, version):
+    saved = []
+    monkeypatch.setattr(figures, "_save", lambda p, *args: saved.append(p))
+    figures.fig_ablation_nodes(anchor_work(tmp_path, version), tmp_path)
+    assert len(saved) == 1
+    assert set(saved[0].data["category"]) == {"Const steps", "Unsplit skips", "Leaf hits"}
+
+
+def test_unsplit_identity_does_not_ignore_missing_legacy_counters(tmp_path):
+    w = anchor_work(tmp_path, 2).with_columns(recursive_calls=pl.lit(None, dtype=pl.Int64))
+    with pytest.raises(ValueError, match=r"unavailable.*version 2"):
+        numbers.unsplit(w)

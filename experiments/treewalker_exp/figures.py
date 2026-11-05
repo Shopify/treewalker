@@ -466,7 +466,8 @@ def fig_ablation_waterfall(ablation: Any, out: Path) -> None:
 
 def fig_ablation_nodes(work: Any, out: Path) -> None:
     """Node visits per group at the anchors (FLCHAIN and SUPPORT at horizon 16),
-    all optimizations enabled and disabled, the mean over frameworks."""
+    all optimizations enabled and disabled, the mean over frameworks. Omit
+    recursive calls when unavailable (3.x has no recursion)."""
     import pandas as pd
     from plotnine import (
         aes,
@@ -485,6 +486,8 @@ def fig_ablation_nodes(work: Any, out: Path) -> None:
         "recursive_calls": "Recursive calls",
         "leaf_hits": "Leaf hits",
     }
+    if work["recursive_calls"].null_count():
+        del cols["recursive_calls"]
     states = {
         "all-on": "(a) All optimizations enabled",
         ALL_DISABLED: "(b) All optimizations disabled",
