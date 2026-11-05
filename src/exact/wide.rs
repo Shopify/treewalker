@@ -391,6 +391,10 @@ pub(crate) unsafe fn add_in_turns(
             let Some(v) = values.next() else {
                 return added;
             };
+            debug_assert!(
+                v.first as usize + LEAF_DIGITS <= n,
+                "a leaf of another layout"
+            );
             // SAFETY: as above.
             unsafe { v.add_to(base) };
             added += 1;
