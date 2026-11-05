@@ -70,6 +70,12 @@ lane_cross() {
       step $n "cross $1 $2 $f" env RUSTFLAGS="-C target-cpu=$2" cargo clippy --target "$1" --workspace --all-targets $f -- -D warnings
     done
   done
+  # The library alone on targets without a prefetch or a SIMD level, with research.
+  n=37
+  for t in riscv64gc-unknown-linux-gnu i686-unknown-linux-gnu; do
+    n=$((n + 1))
+    step $n "cross $t" env RUSTFLAGS= cargo clippy --target "$t" -p treewalker-gbdt --all-targets --features research -- -D warnings
+  done
 }
 
 lane_python() {

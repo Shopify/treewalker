@@ -163,6 +163,16 @@ for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids
 done
 ```
 
+The library alone is also checked on RISC-V and 32-bit x86, whose builds take no
+prefetch and no SIMD level (`rustup target add riscv64gc-unknown-linux-gnu
+i686-unknown-linux-gnu`):
+
+```bash
+for t in riscv64gc-unknown-linux-gnu i686-unknown-linux-gnu; do
+  RUSTFLAGS= cargo clippy --target $t -p treewalker-gbdt --all-targets --features research -- -D warnings
+done
+```
+
 Miri checks the unsafe code on small production-shaped cases (`tests/miri.rs` and the
 lib's `prefetching_walks` and `production_scratch_holds_a_leaf_per_row`, the latter in
 buffers sized as production builds size them), each of which runs every kind of unsafe operation of its
