@@ -177,8 +177,10 @@ def build(target: str | None, cpu: str, lanes: int | None) -> Path:
     # cross target's link fails after the assembly is written; only a missing
     # assembly file is an error.
     os.utime(ROOT / "examples" / "walk_asm.rs")
-    run = subprocess.run(cmd, cwd=ROOT, env=env, check=False, capture_output=True, text=True)
     examples = out / (target or "") / "release" / "examples"
+    for old in examples.glob("walk_asm-*.s"):
+        old.unlink()
+    run = subprocess.run(cmd, cwd=ROOT, env=env, check=False, capture_output=True, text=True)
     found = sorted(examples.glob("walk_asm-*.s"), key=lambda p: p.stat().st_mtime)
     if not found:
         sys.exit(f"no assembly was emitted:\n{run.stderr}")
