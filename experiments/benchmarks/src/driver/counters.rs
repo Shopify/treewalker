@@ -218,6 +218,15 @@ pub fn no_op(flag: &str, spec: &VariantSpec, facts: &Facts) -> Option<&'static s
         {
             Some("the model has no varying predicates")
         }
+        // Masks, the precompute and the event scans serve the masked path only.
+        "disable_unsplit"
+        | "disable_varying_precompute"
+        | "disable_predicate_sweep"
+        | "disable_monotonic"
+            if widths.is_empty() =>
+        {
+            Some("no group takes the masked path")
+        }
         _ => None,
     }
 }

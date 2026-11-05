@@ -127,12 +127,24 @@ fn single_row_groups_show_every_path() {
     let rows = [0.5, 1.0];
     let facts = facts(&f, &rows);
     assert!(facts.varying_predicates);
+    let spec = |flags: &[&str]| VariantSpec {
+        runtime: flags.iter().map(ToString::to_string).collect(),
+        load: Vec::new(),
+    };
     for flag in PATH_FLAGS {
-        let spec = VariantSpec {
-            runtime: vec![flag.into()],
-            load: Vec::new(),
-        };
-        assert_eq!(no_op(flag, &spec, &facts), None, "{flag}");
+        // A single row steps through varying splits as constants, so the masked
+        // path's flags do nothing unless that path is off too.
+        let masked = matches!(
+            flag,
+            "disable_varying_precompute" | "disable_unsplit" | "disable_predicate_sweep"
+        );
+        assert_eq!(
+            no_op(flag, &spec(&[flag]), &facts),
+            masked.then_some("no group takes the masked path"),
+            "{flag}"
+        );
+        let with_masks = spec(&["disable_g1_constant", flag]);
+        assert_eq!(no_op(flag, &with_masks, &facts), None, "{flag}");
         assert!(
             signature(flag, &counted(&f, &rows, &[flag]), &facts),
             "{flag}"
