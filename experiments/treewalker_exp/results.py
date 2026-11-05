@@ -42,7 +42,7 @@ from typing import Any
 
 import polars as pl
 
-from . import analysis, counters
+from . import analysis, counters, grids
 from . import formats as fm
 
 MACHINES = {"intel": "x86_64", "arm": "aarch64"}
@@ -52,7 +52,11 @@ BASELINES = {
 }
 # The released scenario model (grids.toml's whatif-v1 workload: 500 trees, depth 8).
 SCENARIO_MODEL = (500, 8)
-_MODEL = re.compile(r"nt(\d+)_md(\d+)(?:_nl\d+)?(?:_h(\d+))?(?:_r(\d+))?")
+_MODEL = re.compile(
+    r"nt(\d+)_md(\d+)(?:_nl\d+)?(?:_h(\d+))?(?:_r(\d+))?(?:_({}))?".format(
+        "|".join(grids.DERIVED.values())
+    )
+)
 
 
 _DESIGN_SCHEMA = {
@@ -66,6 +70,7 @@ _DESIGN_SCHEMA = {
     "replicate": pl.Int64,
     "k": pl.Int64,
     "G": pl.Int64,
+    "derive": pl.String,
 }
 
 
@@ -127,7 +132,10 @@ def design(cell: str) -> dict[str, Any]:
     depth ``L``, the survival ``horizon``, the seed ``replicate``, the what-if's
     ``k``, and ``G``: the horizon, the cohort size or the what-if's scenarios (None
     for whole sessions). ``family`` is panel, panel-long (horizons of 256 or
-    more), sessions, sessions-filled, cohort or whatif. The released scenario cells
+    more), panel-share (the kernel suite's panels of a set varying share), sessions,
+    sessions-filled, cohort, whatif or g1 (the kernel suite's single rows, ``G`` 1).
+    ``derive`` names a derived model's derivation (`grids.DERIVED`'s suffix), None for
+    the trained one. The released scenario cells
     (E1, ``scenario_credit/lightgbm/whatif-v1-kK-GG``) have no model part: their
     one model is `SCENARIO_MODEL`'s."""
     parts = cell.split("/")
@@ -141,10 +149,14 @@ def design(cell: str) -> dict[str, Any]:
     m = _MODEL.fullmatch(model)
     if m is None:
         raise ValueError(f"unknown model name in {cell}")
-    trees, depth, horizon, replicate = (int(x) if x else None for x in m.groups())
+    trees, depth, horizon, replicate = (int(x) if x else None for x in m.groups()[:4])
     k = None
     if workload == "panel":
         family, g = ("panel-long" if horizon and horizon >= 256 else "panel"), horizon
+    elif re.fullmatch(r"panel-share\d+", workload):
+        family, g = "panel-share", horizon
+    elif re.fullmatch(r"g1-\w+", workload):
+        family, g = "g1", 1
     elif workload == "sessions":
         family, g = "sessions", None
     elif workload.startswith("cohort"):
@@ -170,6 +182,7 @@ def design(cell: str) -> dict[str, Any]:
         "replicate": replicate,
         "k": k,
         "G": g,
+        "derive": m[5],
     }
 
 

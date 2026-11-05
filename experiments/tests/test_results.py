@@ -26,11 +26,33 @@ from treewalker_exp import figures, results
         ("credit/nt500_md8/lightgbm/whatif-v2-k4-G128", {"family": "whatif", "k": 4, "G": 128}),
         ("support/nt500_md4_h16_r2/lightgbm/panel", {"family": "panel", "replicate": 2}),
         ("expedia-filled/nt50_md4/lightgbm/sessions", {"family": "sessions-filled"}),
+        (
+            "support/nt500_md8_h16/lightgbm/g1-independent",
+            {"family": "g1", "G": 1, "horizon": 16, "derive": None},
+        ),
+        ("support/nt500_md8_h16/xgboost/panel-share35", {"family": "panel-share", "G": 16}),
+        (
+            "support/nt500_md8_h16_pooled/lightgbm/panel",
+            {"family": "panel", "T": 500, "horizon": 16, "derive": "pooled"},
+        ),
+        ("support/nt500_md8_h16_wide/xgboost/g1-file", {"family": "g1", "derive": "wide"}),
     ],
 )
 def test_design_reads_the_cell_id(cell, expected):
     got = results.design(cell)
     assert {k: got[k] for k in expected} == expected
+
+
+def test_design_reads_every_model_cell_of_the_grid():
+    from pathlib import Path
+
+    from treewalker_exp import grids
+
+    doc = grids.load(Path(__file__).parents[1] / "grids.toml")
+    cells = {c.id for name in doc["suites"] for c in grids.suite(doc, name).cells}
+    # The exported fixtures' import cells have no trained model to read.
+    for cell in sorted(c for c in cells if not c.startswith("fixtures/")):
+        results.design(cell)
 
 
 def test_heatmap_tex_has_every_cell_and_contrasting_text():
@@ -120,6 +142,46 @@ def test_unsplit_reports_u_and_the_ablated_paths_calls_beyond_it():
     broken = work.with_columns(unsplit_skips=pl.lit(1, pl.Int64))
     with pytest.raises(ValueError, match="unsplit skips differ"):
         numbers.unsplit(broken)
+
+
+def test_unsplit_reports_u_alone_for_counters_without_recursion():
+    import polars as pl
+
+    from treewalker_exp import numbers
+
+    # Version 3's rows, through counters.terms: no recursive calls, U = V - splits.
+    work = pl.DataFrame(
+        [
+            {**work_row("lightgbm", variant, 100, 0), "recursive_calls": None, "unsplit_skips": 40}
+            for variant in ("all-on", "disable_unsplit")
+        ]
+    )
+    ((what, value),) = numbers.unsplit(work)
+    assert "no E" in what and value == "20.0 (40.0% of V)"
+
+
+def test_the_node_visits_figure_leaves_out_recursive_calls_where_none_were_counted(
+    tmp_path, monkeypatch
+):
+    import polars as pl
+
+    captured = []
+    monkeypatch.setattr(figures, "_save", lambda p, *_: captured.append(p.data))
+    rows = [
+        {
+            **work_row("lightgbm", variant, 100, 0, ds=ds, h=h),
+            "recursive_calls": None,
+            "unsplit_skips": 40,
+            "constant_steps": 600,
+            "leaf_hits": 500,
+        }
+        for ds, h in (("flchain", 16), ("support", 16), ("expedia", None))
+        for variant in ("all-on", figures.ALL_DISABLED)
+    ]
+    figures.fig_ablation_nodes(pl.DataFrame(rows), tmp_path)
+    (data,) = captured
+    assert "Recursive calls" not in set(data["category"].cat.categories)
+    assert {"Const steps", "Unsplit skips", "Leaf hits"} <= set(data["category"])
 
 
 def test_the_tl2cgen_defect_table_lists_cells_with_affected_rows():

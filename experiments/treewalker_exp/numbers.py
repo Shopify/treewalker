@@ -249,7 +249,8 @@ def unsplit(work: Any) -> list[tuple[str, str]]:
     extra calls: ``disable_unsplit`` recurses where the default skips, so its
     recursive calls exceed the default's B by E, and E - U are the calls beyond U
     (splits reached only below an unsplit node). Asserts U = V - B, the counters'
-    identity, on every cell and variant of ``work`` (`results.work`)."""
+    identity, on every cell and variant of ``work`` (`results.work`) that counts B: the
+    3.x kernel does not recurse, so its rows give U alone."""
     bad = work.filter(
         pl.col("unsplit_skips") != pl.col("varying_splits") - pl.col("recursive_calls")
     )
@@ -267,6 +268,15 @@ def unsplit(work: Any) -> list[tuple[str, str]]:
             if d is None or ab is None:
                 continue
             u, v = d["unsplit_skips"], d["varying_splits"]
+            if d["recursive_calls"] is None or ab["recursive_calls"] is None:
+                out.append(
+                    (
+                        f"U at the {label} anchor, {fw} (per group, share of V; no recursive "
+                        "calls, so no E)",
+                        f"{r(u / d['groups'], 1)} ({r(100 * u / v, 1)}% of V)",
+                    )
+                )
+                continue
             extra = ab["recursive_calls"] - d["recursive_calls"]
             beyond = (extra - u) / u if u else float("nan")
             per = r(extra / d["groups"], 1)

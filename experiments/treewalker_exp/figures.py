@@ -499,6 +499,9 @@ def fig_ablation_nodes(work: Any, out: Path) -> None:
         for variant, state in states.items():
             v = a.filter(pl.col("variant") == variant)
             for c, cl in cols.items():
+                # The 3.x kernel does not recurse: its rows hold no recursive calls.
+                if v[c].is_null().all():
+                    continue
                 rows.append(
                     {
                         "ds": label,
@@ -508,7 +511,10 @@ def fig_ablation_nodes(work: Any, out: Path) -> None:
                     }
                 )
     pdf = pd.DataFrame(rows)
-    pdf["category"] = pd.Categorical(pdf["category"], categories=list(cols.values()), ordered=True)
+    present = set(pdf["category"])
+    pdf["category"] = pd.Categorical(
+        pdf["category"], categories=[c for c in cols.values() if c in present], ordered=True
+    )
     pdf["state_panel"] = pd.Categorical(
         pdf["state_panel"], categories=list(states.values()), ordered=True
     )
