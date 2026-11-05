@@ -55,6 +55,12 @@
   the decoder read past the limit: a model of a million nodes took 16 MiB under a
   4 KiB limit, and one at the 2^28-node bound would take 4 GiB. Models within the
   limit load as before.
+- `Forest::predictor` panics, naming `max_group_width` and the bytes, when a chunk of
+  trees needs more arena for its splits' masks than the 32-bit offsets that items
+  carry into it reach: 2^32 units of 16 bytes, 64 GiB. 3.1 converted the offsets to
+  32 bits without a check, so that where the allocator provided the arena, splits
+  could write into other masks. Only a `max_group_width` past 2,048 can need that much: at
+  2^20 rows, a complete tree of depth 20 on a varying feature takes 128 GiB.
 
 ### Performance
 

@@ -329,6 +329,35 @@ fn chunks_count_at_most_the_class_rows_of_a_trees_leaves() {
     }
 }
 
+/// Items carry 32-bit offsets of 16-byte units into the arena. At 2^20 rows a slot
+/// takes 8,193 units, and a complete tree of depth 20 on a varying feature takes a
+/// chunk of 2^20 slots; 524,221 slots fit.
+#[test]
+fn arena_offsets_fit_32_bits() {
+    use super::scratch::{Width, check_arena, chunk_arena_bytes, chunk_trees};
+    use crate::load::layout::Need;
+    let w = Width::of(1 << 20);
+    assert_eq!(w.slot_bytes(), 8193 * 16);
+    let need = Need {
+        leaves: 1 << 20,
+        slots: 1 << 20,
+    };
+    assert_eq!(
+        chunk_trees(&[need], w, usize::MAX, w.rows())[0].slots,
+        1 << 20
+    );
+    check_arena(1 << 20, chunk_arena_bytes(w, 524_221));
+}
+
+/// The predictor refuses an arena of one slot more than fit, rather than truncate
+/// its offsets.
+#[test]
+#[should_panic(expected = "past the 32-bit offsets of its masks")]
+fn arena_offsets_past_32_bits_panic() {
+    use super::scratch::{Width, check_arena, chunk_arena_bytes};
+    check_arena(1 << 20, chunk_arena_bytes(Width::of(1 << 20), 524_222));
+}
+
 /// A tree of a leaf per value `0..values` of varying feature 0, each range split
 /// unevenly (a third or two thirds of it left, by `t`), so that leaves end at
 /// different depths.

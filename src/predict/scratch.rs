@@ -334,7 +334,7 @@ impl Scratch {
         let slot_leaves = most(&Width::runtime);
         let arena_bytes = all()
             .filter(|(w, _)| w.handles())
-            .flat_map(|(w, c)| c.iter().map(move |c| (c.slots + 3) * w.slot_bytes()))
+            .flat_map(|(w, c)| c.iter().map(move |c| chunk_arena_bytes(w, c.slots)))
             .max()
             .unwrap_or(0);
         let runtime_units = if rows > WIDE_ROWS {
@@ -360,6 +360,7 @@ impl Scratch {
             queues(handle_leaves),
             queues(slot_leaves),
         );
+        check_arena(rows, arena_bytes);
         let scratch = Self {
             common: Common {
                 bins: layout.bins.new_bins(),
@@ -410,6 +411,24 @@ impl Scratch {
         );
         scratch
     }
+}
+
+/// The arena bytes of a chunk whose splits may take `slots` slots at width `w`.
+pub(super) const fn chunk_arena_bytes(w: Width, slots: usize) -> usize {
+    (slots + 3) * w.slot_bytes()
+}
+
+/// Panics, naming `max_group_width` (`rows`) and the bytes, if an arena of `bytes`
+/// has units past the 32-bit offsets that items carry into it. Checked before the
+/// arena is reserved, as the allocator may provide the 64 GiB, and after the sums,
+/// which a width the allocator cannot serve fails first: only widths past 2,048 rows
+/// reach it, with a chunk of 130 million slots at 4,096 rows or 524,222 at 2^20.
+pub(super) fn check_arena(rows: usize, bytes: usize) {
+    assert!(
+        u32::try_from(bytes.div_ceil(size_of::<Unit>())).is_ok(),
+        "max_group_width {rows} needs {bytes} bytes of arena for a chunk's splits, past \
+         the 32-bit offsets of its masks"
+    );
 }
 
 /// Bytes of the scratch that grows with the widest group of `rows` rows, given

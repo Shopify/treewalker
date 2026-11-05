@@ -103,7 +103,10 @@ impl Forest {
     /// If the scratch for `max_group_width` exceeds what memory can address, or the
     /// allocator cannot provide it; the message names `max_group_width` and the bytes.
     /// Also if `max_group_width` passes 2^38 − 128 rows, whose 2^32 mask words a 32-bit
-    /// index no longer counts.
+    /// index no longer counts, or if a chunk of trees needs more arena for its splits'
+    /// masks than 32-bit offsets reach, 2^32 units of 16 bytes: only a
+    /// `max_group_width` past 2,048 can, with a tree of over half a million leaves at
+    /// 2^20 rows.
     #[must_use]
     pub fn predictor(&self) -> Predictor {
         Predictor {
