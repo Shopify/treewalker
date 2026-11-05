@@ -9,9 +9,14 @@ changes when nothing in a function does:
 - symbols are demangled (`c++filt`, which reads Rust's v0 and legacy manglings) and
   written `«path»`, so that they compare by path, not by mangled bytes whose
   backreferences shift whenever a path's length does;
-- local labels, constant pools, jump and switch tables, anonymous constants, Apple's
-  linker-optimization hints, crate hashes and LTO's numeric suffixes on duplicated
-  local symbols are renumbered away;
+- a function's local labels, branch targets and the labels of its constant pools and
+  jump tables are numbered in the order the function defines them, so that a branch
+  that changes its target differs;
+- a function's constant pools and jump tables, which the assembly emits outside its
+  body, are compared with it, after the code;
+- anonymous constants (the panics' source locations among them, which move with any
+  line above them), switch tables, Apple's linker-optimization hints, crate hashes and
+  LTO's numeric suffixes on duplicated local symbols are renumbered away;
 - LLVM's MergeFunctions keeps one of identical functions under a name chosen by
   order, so functions only one side has are paired by identical bodies.
 
@@ -48,13 +53,37 @@ ROOT = Path(__file__).resolve().parents[2]
 # A mangled Rust symbol (v0 `_R`, legacy `_ZN`, with Mach-O's extra underscore), not
 # inside another identifier, and LLVM's suffix after it.
 MANGLED = re.compile(r"(?<![A-Za-z0-9_$.])(_{0,2}(?:_R|_ZN)[A-Za-z0-9_$]+)((?:\.[A-Za-z0-9_$]+)*)")
+# A function's local labels: basic blocks, temporaries, constant pools and jump tables.
+LOCAL = re.compile(
+    r"(?<![A-Za-z0-9_$.])(?:\.?LBB\d+_\d+|\.?[Ll]tmp\d+|[l.]?L?CPI\d+_\d+|\.?LJTI\d+_\d+)"
+    r"(?![A-Za-z0-9_$])"
+)
+# A constant pool or jump table, whose data the assembly emits outside the function.
+POOL = re.compile(r"^(?:[l.]?L?CPI|\.?LJTI)\d+_\d+$")
+DATA = (
+    ".quad",
+    ".long",
+    ".short",
+    ".byte",
+    ".word",
+    ".hword",
+    ".xword",
+    ".2byte",
+    ".4byte",
+    ".8byte",
+    ".zero",
+    ".space",
+    ".ascii",
+    ".asciz",
+    ".double",
+    ".float",
+    ".int",
+    ".octa",
+)
 LABELS = [
-    (re.compile(r"\.?(L|l)tmp\d+"), "Ltmp"),
-    (re.compile(r"\.?LBB\d+_\d+"), "LBB"),
     (re.compile(r"l_anon\.[0-9a-f]+\.\d+|\.Lanon\.[0-9a-f]+\.\d+"), "anon"),
     (re.compile(r"\.?L__unnamed_\d+|l___unnamed_\d+"), "unnamed"),
     (re.compile(r"Lloh\d+|Lfunc_(begin|end)\d+|\.?Lexception\d+|GCC_except_table\d+"), "L"),
-    (re.compile(r"[l.]?L?CPI\d+_\d+|\.?LJTI\d+_\d+"), "L"),
     (
         re.compile(r"(l_switch\.table\.|\.Lswitch\.table\.)(\S+?)\.\d+(?=@|\(|\.rel|$|\s|,)"),
         r"\1\2",
@@ -97,27 +126,61 @@ def functions(text: str, renames: list[tuple[str, str]]) -> dict[str, list[str]]
         table = dict(renames)
         pattern = re.compile("|".join(re.escape(k) for k in sorted(table, key=len, reverse=True)))
         text = pattern.sub(lambda m: table[m.group(0)], text)
-    out: dict[str, list[str]] = {}
+    raw: dict[str, list[str]] = {}
+    pools: dict[str, list[str]] = {}
     cur: list[str] | None = None
+    pool: list[str] | None = None
     for line in text.splitlines():
         m = FUNC.match(line)
         if m:
             name = re.sub(r"\.(?:llvm\.)?\d+»", "»", m.group(1))
-            while name in out:
+            while name in raw:
                 name += "'"
-            cur = out[name] = []
-            continue
-        if cur is None:
+            cur = raw[name] = []
+            pool = None
             continue
         s = line.strip()
+        if cur is None:
+            # Outside a function: a constant pool's or jump table's label opens its
+            # data, which any other label or directive closes.
+            if s.endswith(":") and POOL.match(s[:-1]):
+                pool = pools[s[:-1]] = []
+            elif pool is not None and s.startswith(DATA):
+                pool.append(s)
+            elif s and not s.startswith((".p2align", *SKIP)):
+                pool = None
+            continue
         if s.startswith(END):
             cur = None
             continue
         if not s or s.startswith(SKIP):
             continue
-        for pattern_, repl in LABELS:
-            s = pattern_.sub(repl, s)
         cur.append(s)
+    out: dict[str, list[str]] = {}
+    for name, lines in raw.items():
+        body = list(lines)
+        seen: set[str] = set()
+        for line in lines:
+            for label in LOCAL.findall(line):
+                if label in pools and label not in seen:
+                    seen.add(label)
+                    body += [f"{label}:", *pools[label]]
+        # Number the local labels in the order the body defines them.
+        order: dict[str, str] = {}
+        for line in body:
+            if line.endswith(":") and LOCAL.fullmatch(line[:-1]):
+                order.setdefault(line[:-1], f"L{len(order)}")
+
+        def number(m: re.Match[str], table: dict[str, str] = order) -> str:
+            return table.get(m.group(0), "L?")
+
+        normal = []
+        for line in body:
+            line = LOCAL.sub(number, line)
+            for pattern_, repl in LABELS:
+                line = pattern_.sub(repl, line)
+            normal.append(line)
+        out[name] = normal
     return out
 
 
