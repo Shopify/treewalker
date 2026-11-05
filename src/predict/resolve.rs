@@ -884,17 +884,18 @@ unsafe fn list_avx512<C: Copy>(
     (n_leaves, n_listed)
 }
 
-/// `list_avx512` against [`list_scalar`]. These run only where the build enables
-/// AVX-512F and VL (`-C target-cpu=x86-64-v4`, or `native` on such a CPU): first run
-/// on GCE, since neither Rosetta nor Miri executes AVX-512.
-#[cfg(all(
-    test,
-    target_arch = "x86_64",
-    target_feature = "avx512f",
-    target_feature = "avx512vl"
-))]
+#[cfg(test)]
 mod tests {
-    use super::{FLAG_LEAF, Handle, Item, LISTED_SLACK, list_avx512, list_scalar};
+    use super::{FLAG_LEAF, Handle, Item, list_scalar};
+
+    type List = unsafe fn(
+        *const u64,
+        *const Item<Handle>,
+        usize,
+        *mut Item<Handle>,
+        usize,
+        *mut u32,
+    ) -> (usize, usize);
 
     /// A guard value past the slack, which neither loop may write.
     const GUARD: u32 = 0xDEAD_BEEF;
@@ -906,21 +907,24 @@ mod tests {
         listed: Vec<u32>,
     }
 
-    /// Both loops over the same input, each into buffers sized as [`super::list`]
-    /// requires, with a guard past them.
-    fn lists(words: &[u64], items: &[Item<Handle>], n_leaves: usize, avx512: bool) -> Lists {
+    /// One listing loop `f` over the input, into buffers sized as [`super::list`]
+    /// requires with `slack`, and a guard past them.
+    fn lists(
+        words: &[u64],
+        items: &[Item<Handle>],
+        n_leaves: usize,
+        f: List,
+        slack: usize,
+    ) -> Lists {
         let n = words.len();
         let guard = Item {
             node: GUARD,
             carry: Handle(GUARD),
         };
-        let mut leaves = vec![guard; n_leaves + n + 1 + LISTED_SLACK + 8];
-        let mut listed = vec![GUARD; n + LISTED_SLACK + 8];
-        let f = if avx512 {
-            list_avx512::<Handle>
-        } else {
-            list_scalar::<Handle>
-        };
+        let count = words.iter().filter(|&&w| w & FLAG_LEAF != 0).count();
+        let written = n_leaves + count + 1 + slack;
+        let mut leaves = vec![guard; written + 8];
+        let mut listed = vec![GUARD; n + slack + 8];
         // SAFETY: the buffers are sized as `list` requires, and a handle is 4 bytes.
         let (end, n_listed) = unsafe {
             f(
@@ -932,13 +936,12 @@ mod tests {
                 listed.as_mut_ptr(),
             )
         };
-        let written = n_leaves + n + 1 + LISTED_SLACK;
         assert!(
             leaves[written..]
                 .iter()
                 .all(|e| e.node == GUARD && e.carry.0 == GUARD)
         );
-        assert!(listed[n + LISTED_SLACK..].iter().all(|&p| p == GUARD));
+        assert!(listed[n + slack..].iter().all(|&p| p == GUARD));
         Lists {
             n_leaves: end,
             n_listed,
@@ -948,7 +951,21 @@ mod tests {
     }
 
     #[test]
+    fn listed_leaves_stay_within_the_promised_room() {
+        check_lists(None);
+    }
+
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx512f",
+        target_feature = "avx512vl"
+    ))]
+    #[test]
     fn compressed_lists_match_the_loop_item_by_item() {
+        check_lists(Some(super::list_avx512::<Handle>));
+    }
+
+    fn check_lists(compressed: Option<List>) {
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
         let mut next = move || {
             state ^= state << 13;
@@ -976,10 +993,9 @@ mod tests {
                     })
                     .collect();
                 let start = (next() % 9) as usize;
-                let (a, b) = (
-                    lists(&words, &items, start, false),
-                    lists(&words, &items, start, true),
-                );
+                let a = lists(&words, &items, start, list_scalar::<Handle>, 0);
+                let Some(f) = compressed else { continue };
+                let b = lists(&words, &items, start, f, super::LISTED_SLACK);
                 assert_eq!(
                     (a.n_leaves, a.n_listed),
                     (b.n_leaves, b.n_listed),
