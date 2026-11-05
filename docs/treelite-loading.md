@@ -99,8 +99,10 @@ output   = 1 / (1 + exp(-alpha * margin))    # sigmoid
 
 The base score is stored on the forest and added once, after the sum and the
 division, each step rounded to float64: the finalization is staged, in the same
-order as Treelite GTIL's, so the two can differ only through `tree_sum`, which GTIL
-adds in float64 in tree order. Version 1 (the `neurips2026-submission` tag) instead spread the base
+order as Treelite GTIL's, so for float64 models the two can differ only through
+`tree_sum`, which GTIL adds in float64 in tree order. For float32 models GTIL also
+rounds the margin and the output to float32, while TreeWalker finalizes in float64,
+so a sigmoid output can differ from GTIL's even where the leaf sum is exact. Version 1 (the `neurips2026-submission` tag) instead spread the base
 score across the leaves: its parser added `base_score / tree_count` to every leaf
 value, each addition rounded, and the margin was the float64 sum of those leaves.
 The two agree up to rounding, so outputs can differ from version 1's in the last
