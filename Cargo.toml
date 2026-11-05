@@ -60,7 +60,7 @@ thiserror = "2.0.21"
 [dev-dependencies]
 # Turns research on for this package's tests, so `cargo test` runs them.
 treewalker-gbdt = { path = ".", features = ["research"] }
-divan = "0.1.21"
+divan = { version = "0.1.21", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true

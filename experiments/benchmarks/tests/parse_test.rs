@@ -278,10 +278,9 @@ fn test_lightgbm_json_matches_native() {
         eprintln!("Skipping: {} not found", preds_path.display());
         return;
     }
-    let reference: Vec<f64> = {
-        let arr: ndarray::Array1<f64> = ndarray_npy::read_npy(&preds_path).unwrap();
-        arr.to_vec()
-    };
+    let reference = treewalker_bench::data::read_npy(&preds_path)
+        .unwrap()
+        .into_f64();
 
     let (data, n_rows) = load_test_bin(&dir.join("test_data.bin"));
     let mut results = vec![0.0f64; n_rows];

@@ -18,8 +18,8 @@ treewalker-gbdt = { path = "../..", features = ["research"] }
 serde.workspace = true
 serde_json = "1.0.151"
 anyhow = "1.0.104"
-clap = { version = "4.6.7", features = ["derive"] }
-sha2 = "0.11.0"
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+sha2 = { version = "0.11.0", default-features = false }
 arrow-array = "60"
 arrow-schema = "60"
 parquet = { version = "60", default-features = false, features = ["arrow", "zstd"] }
@@ -31,10 +31,6 @@ libc.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 perf-event = { version = "0.4.9", optional = true }
-
-[dev-dependencies]
-ndarray = "0.17"
-ndarray-npy = "0.10"
 
 [lints]
 workspace = true
