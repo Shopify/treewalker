@@ -58,8 +58,9 @@ counters! {
         /// Bin fills: one per group, from its first row.
         pub bins_computed: u64,
         /// Row values the precompute evaluates: per numerical feature, one missing-value
-        /// check per row in the threshold sweep; one evaluation per row for each
-        /// categorical predicate, and for every predicate in the brute force.
+        /// check per row in the threshold sweep; per categorical feature, one code per
+        /// row and one per rank exception of its code, from which its chains' masks
+        /// follow; and in the brute force, one per row for every predicate.
         pub precompute_row_evals: u64,
         /// Comparisons made sorting each numerical feature's rows for the sweep.
         pub precompute_sort_compares: u64,

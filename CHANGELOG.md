@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Research: `WorkCounters::precompute_row_evals` documents what 3.x counts for a
+  categorical feature, one code per row and one per rank exception of the row's code,
+  rather than 2.x's one evaluation per row for each of the feature's predicates: with
+  two predicates and no row's code listed, 3.x counts N where the documentation said
+  2N. The 3.0 migration table's row for the precompute counters says so too.
+
 ## 3.2.0
 
 In 3.2, models with a categorical feature of hundreds of thousands of distinct
@@ -310,7 +320,7 @@ behind the `research` feature:
 | variant names built by the caller | `Ablation::tokens()`, `id()` (`all-on`, or the tokens joined by `+`), `from_id(id)` and `with(token)`; a token is a flag's name or `lanes=N` |
 | `LoadOptions::{disable_tree_ordering, disable_bitset_intern, prefix_depth, disable_predicate_dedup}` | `LoadAblation`'s fields of the same names, with `prefix_depth: Option<usize>` (`None` for the rule's groups), passed to `Forest::load_ablated`, `from_bytes_ablated` or `from_reader_ablated` |
 | `WorkCounters`, `COUNTERS_VERSION` 2: `constant_steps`, `varying_splits`, `unsplit_skips`, `recursive_calls`, `leaf_hits`, `leaf_adds`, `partition_row_evals`, `scan_row_evals`, `scan_compares`, `scan_missing_checks` | `COUNTERS_VERSION` 6: `groups`, `single_rows`, `bins_computed`, `scan_rows`, `scan_evals`, `prefix_steps`, `walk_steps`, `lane_slots`, `passes`, `varying_events`, `splits`, `empty_sides`, `leaf_events`, `runs_written`, `arena_slots`; `WorkCounters::fields()` lists every counter by name |
-| `precompute_row_evals`, `precompute_sort_compares`, `precompute_sweep_compares`, `precompute_mask_writes` | the same meaning |
+| `precompute_row_evals`, `precompute_sort_compares`, `precompute_sweep_compares`, `precompute_mask_writes` | the same meaning, except that `precompute_row_evals` counts a categorical feature's rows once each, with their codes' rank exceptions, rather than once per predicate |
 | — | `ResearchPredictor::take_phases()` returns the counted calls' time per phase as `Phases`: `bins`, `precompute`, `prefix`, `walk`, `resolve`, `leaf_pass`, `finish` |
 | — | `Forest::layout_stats()` returns `LayoutStats`: the rules' choices on this machine (lanes per walk, chunk budget, prefetch distances, prefix groups) with their inputs (registers, cache sizes, probed latency, expected walk steps), the share of internal nodes on varying features, the bytes of the node pool, leaf table, categorical rank tables and varying categorical features' flip lists, the categorical chain slots and the heavy sets they cover, and the wide accumulator's slots |
 | `predict_full_walk`, which added in `f64` in tree order | sums exactly, so production matches it bit for bit |
