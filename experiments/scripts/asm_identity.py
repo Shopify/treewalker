@@ -50,7 +50,6 @@ ROOT = Path(__file__).resolve().parents[2]
 MANGLED = re.compile(r"(?<![A-Za-z0-9_$.])(_{0,2}(?:_R|_ZN)[A-Za-z0-9_$]+)((?:\.[A-Za-z0-9_$]+)*)")
 LABELS = [
     (re.compile(r"\.?(L|l)tmp\d+"), "Ltmp"),
-    (re.compile(r"\.?LBB\d+_\d+"), "LBB"),
     (re.compile(r"l_anon\.[0-9a-f]+\.\d+|\.Lanon\.[0-9a-f]+\.\d+"), "anon"),
     (re.compile(r"\.?L__unnamed_\d+|l___unnamed_\d+"), "unnamed"),
     (re.compile(r"Lloh\d+|Lfunc_(begin|end)\d+|\.?Lexception\d+|GCC_except_table\d+"), "L"),
@@ -115,9 +114,17 @@ def functions(text: str, renames: list[tuple[str, str]]) -> dict[str, list[str]]
             continue
         if not s or s.startswith(SKIP):
             continue
-        for pattern_, repl in LABELS:
-            s = pattern_.sub(repl, s)
         cur.append(s)
+    for body in out.values():
+        labels = {
+            s[:-1]: f"L{i}"
+            for i, s in enumerate(s for s in body if re.fullmatch(r"\.?LBB\d+_\d+:", s))
+        }
+        for i, s in enumerate(body):
+            s = re.sub(r"\.?LBB\d+_\d+", lambda m: labels.get(m[0], m[0]), s)
+            for pattern_, repl in LABELS:
+                s = pattern_.sub(repl, s)
+            body[i] = s
     return out
 
 
