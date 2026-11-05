@@ -74,11 +74,16 @@ fn source(repo: &Path) -> (String, bool, &'static str) {
     // the index: any `git status` rewrites it, this script's own included, so every
     // build in another target directory would rebuild this one; staging a change
     // leaves what is compiled as it was, and the files themselves are watched below.
+    // A branch whose ref is packed has no loose ref yet, and its next commit writes
+    // one without touching HEAD or packed-refs: then the nearest directory that
+    // exists on its path is watched, which the new ref changes.
     let mut watched = vec!["HEAD".to_string(), "packed-refs".to_string()];
     watched.extend(git(&["symbolic-ref", "-q", "HEAD"]));
     for name in &watched {
-        if let Some(p) = git(&["rev-parse", "--path-format=absolute", "--git-path", name]) {
-            rerun_if_changed(Path::new(&p));
+        if let Some(p) = git(&["rev-parse", "--path-format=absolute", "--git-path", name])
+            && let Some(p) = Path::new(&p).ancestors().find(|a| a.exists())
+        {
+            rerun_if_changed(p);
         }
     }
     for p in COMPILED {
