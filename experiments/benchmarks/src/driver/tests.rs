@@ -122,7 +122,7 @@ const PATH_FLAGS: [&str; 5] = [
 ];
 
 #[test]
-fn single_row_groups_show_every_path() {
+fn single_row_groups_skip_the_masked_paths_unless_their_constant_path_is_off() {
     let f = fixture_forest(&[0]);
     let rows = [0.5, 1.0];
     let facts = facts(&f, &rows);
@@ -132,12 +132,65 @@ fn single_row_groups_show_every_path() {
             runtime: vec![flag.into()],
             load: Vec::new(),
         };
-        assert_eq!(no_op(flag, &spec, &facts), None, "{flag}");
+        let masked = matches!(
+            flag,
+            "disable_varying_precompute" | "disable_unsplit" | "disable_predicate_sweep"
+        );
+        assert_eq!(
+            no_op(flag, &spec, &facts),
+            masked.then_some("no group takes the masked path"),
+            "{flag}"
+        );
         assert!(
             signature(flag, &counted(&f, &rows, &[flag]), &facts),
             "{flag}"
         );
+        if masked {
+            assert_eq!(counted(&f, &rows, &[flag]), counted(&f, &rows, &[]));
+            let spec = VariantSpec {
+                runtime: vec![flag.into(), "disable_g1_constant".into()],
+                load: Vec::new(),
+            };
+            assert_eq!(no_op(flag, &spec, &facts), None, "{flag}");
+            let spec = VariantSpec {
+                runtime: vec![flag.into(), "disable_width_dispatch".into()],
+                load: Vec::new(),
+            };
+            assert_eq!(no_op(flag, &spec, &facts), None, "{flag}");
+            let c = counted(&f, &rows, &[flag, "disable_width_dispatch"]);
+            assert_eq!(c.single_rows, 0);
+            assert!(c.varying_events > 0);
+        }
     }
+    // Even with precompute off and monotonic features, single rows never scan.
+    let monotonic = Facts {
+        monotonic: true,
+        ..facts
+    };
+    let spec = VariantSpec {
+        runtime: vec![
+            "disable_monotonic".into(),
+            "disable_varying_precompute".into(),
+        ],
+        load: Vec::new(),
+    };
+    assert_eq!(
+        no_op("disable_monotonic", &spec, &monotonic),
+        Some("no group takes the masked path")
+    );
+    // More specific reasons still take precedence over the masked-path rule.
+    assert_eq!(
+        no_op("disable_predicate_sweep", &spec, &monotonic),
+        Some("precompute is off")
+    );
+    let constant = Facts {
+        varying_predicates: false,
+        ..monotonic
+    };
+    assert_eq!(
+        no_op("disable_unsplit", &spec, &constant),
+        Some("the model has no varying predicates")
+    );
 }
 
 #[test]
@@ -201,7 +254,7 @@ fn the_kernel_flags_are_no_ops_where_the_policy_already_chose_them() {
     );
     let policy = f.layout_stats();
     let lanes = format!("lanes={}", policy.lanes);
-    // A single row: no masks unless its path is off.
+    // A single row: no masks unless its path or width dispatch is off.
     let one = facts(&f, &[0.5, 1.0]);
     // The fixture's nodes fit L1, so the rules prefetch nothing, and forced lanes
     // prefetch one item ahead: no lane count is a no-op.
@@ -220,7 +273,15 @@ fn the_kernel_flags_are_no_ops_where_the_policy_already_chose_them() {
         ..prefetching
     };
     assert!(why(&every_other, &[&lanes]).is_none());
-    assert!(why(&one, &["disable_width_dispatch"]).is_some());
+    assert!(why(&one, &["disable_width_dispatch"]).is_none());
+    let narrow = Facts {
+        config_width: 32,
+        ..one.clone()
+    };
+    assert_eq!(
+        why(&narrow, &["disable_width_dispatch"]),
+        Some("no group takes the masked path")
+    );
     assert!(why(&one, &["disable_g1_constant"]).is_none());
     // Off, it takes 32-bit masks, and the configured 128 rows take 128 bits.
     assert!(why(&one, &["disable_width_dispatch", "disable_g1_constant"]).is_none());

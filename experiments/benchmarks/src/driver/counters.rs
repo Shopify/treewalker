@@ -158,10 +158,14 @@ impl Facts {
         }
     }
 
-    /// The mask widths the variant's masked groups take with width dispatch, in
+    /// The dispatched widths of the variant's masked groups, in
     /// increasing order: single rows join them when they stop at varying splits.
     fn dispatched(&self, spec: &VariantSpec) -> Vec<usize> {
-        let g1_off = spec.runtime.iter().any(|x| x == "disable_g1_constant");
+        // The constant path also needs a 32-bit dispatch: forcing a wider configured
+        // width sends even single rows through masks.
+        let g1_off = spec.runtime.iter().any(|x| x == "disable_g1_constant")
+            || (self.config_width > 32
+                && spec.runtime.iter().any(|x| x == "disable_width_dispatch"));
         let mut widths = self.mask_widths.clone();
         if self.single_rows && g1_off && widths.first() != Some(&32) {
             widths.insert(0, 32);
@@ -217,6 +221,14 @@ pub fn no_op(flag: &str, spec: &VariantSpec, facts: &Facts) -> Option<&'static s
             if !facts.varying_predicates =>
         {
             Some("the model has no varying predicates")
+        }
+        "disable_unsplit"
+        | "disable_varying_precompute"
+        | "disable_predicate_sweep"
+        | "disable_monotonic"
+            if widths.is_empty() =>
+        {
+            Some("no group takes the masked path")
         }
         _ => None,
     }
