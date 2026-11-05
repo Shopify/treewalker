@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- The prefix rule values each run of trees that a deeper group leaves on either side
+  as a group of its own, and drops the runs that do not pay, as the groups' emission
+  does, so that with tree ordering the groups it chooses save at least as many steps,
+  by its cost model, as any fixed prefix depth. 3.0 to 3.2.0 valued the trees left at
+  a node of the trie as one group, which emission then split into runs, dropping those
+  that did not pay: of nine trees sharing their first split, five of which also share
+  their second, at a heavy share of 0.8, they grouped the five, saving 5.3 lane steps
+  a call, rather than all nine, saving 6.1. None of the 49 models of the crate's tests
+  changes its groups, and outputs are unchanged.
+
 ## 3.2.0
 
 In 3.2, a model whose categorical splits take hundreds of thousands of distinct heavy
