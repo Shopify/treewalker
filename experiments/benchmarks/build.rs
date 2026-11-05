@@ -78,7 +78,16 @@ fn source(repo: &Path) -> (String, bool, &'static str) {
     watched.extend(git(&["symbolic-ref", "-q", "HEAD"]));
     for name in &watched {
         if let Some(p) = git(&["rev-parse", "--path-format=absolute", "--git-path", name]) {
-            rerun_if_changed(Path::new(&p));
+            let path = Path::new(&p);
+            if name.starts_with("refs/") {
+                // A packed branch has no loose ref until its next commit. Watch its
+                // nearest existing parent so that creating the ref rebuilds too.
+                if let Some(existing) = path.ancestors().find(|p| p.exists()) {
+                    rerun_if_changed(existing);
+                }
+            } else {
+                rerun_if_changed(path);
+            }
         }
     }
     for p in COMPILED {
