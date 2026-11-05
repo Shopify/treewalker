@@ -154,8 +154,8 @@ def estimate(
         b.sized += 1
         b.from_twins += twin
         plan = sv.plan_for(c)
-        m = len(plan["variants"]) + OTHER_METHODS[plan["methods"]]
-        modes = plan["modes"]
+        m = len(plan.variants) + OTHER_METHODS[plan.methods]
+        modes = plan.modes
         # Serving calls, batch calls, or both, per the suite's modes.
         # A pool above the row cap times its sample's rows.
         f = timed_fraction(rows, groups, run)
@@ -171,7 +171,7 @@ def estimate(
         b.work += m * rounds * len(modes) * trows * level
         # XGBoost alone in its extra processes: a warm-up round and a timed one.
         children = arch in run.get("xgboost_process_arches", []) if arch else False
-        if c.framework == "xgboost" and plan["methods"] == "factorial" and children:
+        if c.framework == "xgboost" and plan.methods == "factorial" and children:
             k = int(run.get("xgboost_processes", 0))
             b.work += k * 2 * len(modes) * trows * level
             b.samples += k * calls
@@ -179,7 +179,7 @@ def estimate(
             b.child_processes += k
         data = 8 * rows * nf
         b.disk_bytes += data
-        b.ram_bytes = max(b.ram_bytes, largest_model * (1 + len(plan["variants"])) + data)
+        b.ram_bytes = max(b.ram_bytes, largest_model * (1 + len(plan.variants)) + data)
     every = int(run.get("sentinel_every", 0))
     if every:
         # The sentinel: a warm-up and a measure, then one per `every` cells, each

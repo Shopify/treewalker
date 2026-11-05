@@ -1,7 +1,8 @@
 """Training, the Treelite export, reference predictions and parser preflight.
 
-Training is seeded with 42 and its parameters are the released ones; changing
-any of them changes every model.
+The default parameters and seed 42 are the released ones. The opt-in
+expedia-cat scale recipe adds a leaf limit, looser categorical regularization
+and deterministic training; neither changes an existing model's parameters.
 """
 
 import importlib.metadata
@@ -10,16 +11,18 @@ from typing import Any
 
 import numpy as np
 
-FRAMEWORKS = ("lightgbm", "xgboost")
 NATIVE_NAME = {"lightgbm": "model_native.txt", "xgboost": "model_native.json"}
 LEARNING_RATE = 0.05
 TRAIN_SEED = 42
 
-# TreeWalker's import limits (src/parser/validation.rs, src/forest.rs).
-MAX_TREE_NODES = 32767  # the light-child index is an i16
+# The import limits behind prep policy 4's records (a model's limits, a cell's
+# predicate warning): TreeWalker 2.x's, whose light-child index was an i16 and whose
+# predicate IDs were u16 with u16::MAX the sentinel. The 3.0 loader takes wider models
+# (src/load/); these stay until a new PREP_POLICY, because the cells record them.
+MAX_TREE_NODES = 32767
 MAX_TOTAL_NODES = 32_000_000
-MAX_PREDICATES = 65535  # u16 ids 0..=65534; u16::MAX is the sentinel
-MAX_JSON_BYTES = 64 * 1024 * 1024  # the JSON loader's limit (src/parser/validation.rs)
+MAX_PREDICATES = 65535
+MAX_JSON_BYTES = 64 * 1024 * 1024  # LoadOptions::max_json_bytes's default (src/config.rs)
 
 
 def library_versions(framework: str) -> dict[str, str]:
@@ -37,7 +40,14 @@ def _version(dist: str) -> str:
     return "missing"
 
 
-def params(framework: str, n_trees: int, max_depth: int) -> dict[str, Any]:
+def params(
+    framework: str,
+    n_trees: int,
+    max_depth: int,
+    *,
+    dataset: str = "",
+    num_leaves: int | None = None,
+) -> dict[str, Any]:
     """Training parameters, as passed to the library, plus the round count."""
     if framework == "lightgbm":
         p: dict[str, Any] = {
@@ -58,6 +68,26 @@ def params(framework: str, n_trees: int, max_depth: int) -> dict[str, Any]:
             "tree_method": "hist",
             "seed": TRAIN_SEED,
         }
+    if dataset == "expedia-cat":
+        if framework != "lightgbm":
+            raise ValueError("expedia-cat's scale recipe is LightGBM only")
+        p = {
+            "objective": "binary",
+            "metric": "binary_logloss",
+            "num_leaves": num_leaves or 4096,
+            "max_depth": max_depth,
+            "learning_rate": LEARNING_RATE,
+            "cat_l2": 1.0,
+            "min_data_per_group": 50,
+            "deterministic": True,
+            "force_row_wise": True,
+            "verbose": -1,
+            "seed": TRAIN_SEED,
+        }
+    elif num_leaves is not None:
+        if framework != "lightgbm":
+            raise ValueError("num_leaves is LightGBM only")
+        p["num_leaves"] = num_leaves
     return {"params": p, "num_boost_round": n_trees}
 
 
@@ -76,9 +106,12 @@ def train(
     n_trees: int,
     max_depth: int,
     out: Path,
+    *,
+    dataset: str = "",
+    num_leaves: int | None = None,
 ) -> None:
     """Train and save the native model to ``out``."""
-    p = params(framework, n_trees, max_depth)
+    p = params(framework, n_trees, max_depth, dataset=dataset, num_leaves=num_leaves)
     if framework == "lightgbm":
         import lightgbm as lgb
 
@@ -250,6 +283,83 @@ def split_counts(framework: str, native: Path, n_features: int) -> np.ndarray:
     names = bst.feature_names or [f"f{i}" for i in range(n_features)]
     score = bst.get_score(importance_type="weight")
     return np.array([score.get(n, 0) for n in names], dtype=np.int64)
+
+
+def internal_nodes(tl_model: Any) -> np.ndarray:
+    """Each feature's internal nodes in the Treelite model, as its JSON dump
+    lists them (``split_feature_id`` of every node with children)."""
+    counts = np.zeros(tl_model.num_feature, dtype=np.int64)
+    for i in range(tl_model.num_tree):
+        acc = tl_model.get_tree_accessor(i)
+        split = acc.get_field("split_index")[acc.get_field("cleft") >= 0]
+        counts += np.bincount(split, minlength=len(counts))
+    return counts
+
+
+def walk_shares(tl_model: Any, varying: set[int]) -> dict[str, Any]:
+    """Model-only bounds on the new kernel's walk: the shares of walk steps that
+    stop at a varying split (phi) or a leaf (lambda), and their sum, the events
+    per walk step. A group follows the training proportions (each node's
+    ``data_count``, else ``sum_hess``, else halves) at constant splits, and at
+    varying splits it either never splits, following them too, or always
+    splits, sending its whole weight both ways."""
+    var = np.array(sorted(varying), dtype=np.int64)
+    out: dict[str, Any] = {}
+    for name, split in (("never_split", False), ("always_split", True)):
+        c = v = leaf = 0.0
+        for i in range(tl_model.num_tree):
+            acc = tl_model.get_tree_accessor(i)
+            left, right = acc.get_field("cleft"), acc.get_field("cright")
+            feature = acc.get_field("split_index")
+            weight = acc.get_field("data_count").astype(np.float64)
+            if len(weight) != len(left):
+                weight = acc.get_field("sum_hess").astype(np.float64)
+            if len(weight) != len(left):
+                weight = np.ones(len(left))
+            ids, mass = np.zeros(1, dtype=np.int64), np.ones(1)
+            while len(ids):
+                is_leaf = left[ids] < 0
+                leaf += float(mass[is_leaf].sum())
+                ids, mass = ids[~is_leaf], mass[~is_leaf]
+                on_varying = np.isin(feature[ids], var)
+                v += float(mass[on_varying].sum())
+                c += float(mass[~on_varying].sum())
+                wl, wr = weight[left[ids]], weight[right[ids]]
+                total = wl + wr
+                p = np.divide(wl, total, out=np.full(len(ids), 0.5), where=total > 0)
+                both = on_varying & split
+                ids = np.concatenate([left[ids], right[ids]])
+                mass = np.concatenate(
+                    [np.where(both, mass, mass * p), np.where(both, mass, mass * (1 - p))]
+                )
+        steps = c + v + leaf
+        out[name] = {
+            "phi": v / steps,
+            "lambda": leaf / steps,
+            "events_per_step": (v + leaf) / steps,
+        }
+    return out
+
+
+def sum_headroom(tl_model: Any) -> int:
+    """Bits to spare under TreeWalker's exact-sum rule (``scale`` in
+    src/exact/mod.rs): the sum is exact in i128 when the leaves' span, from the
+    highest set bit of any leaf to the lowest, plus the bits of the tree count
+    is below 126. Positive within the rule, zero or negative past it."""
+    import math
+
+    max_top, min_exp = -(10**9), 10**9
+    for i in range(tl_model.num_tree):
+        acc = tl_model.get_tree_accessor(i)
+        leaves = acc.get_field("leaf_value")[acc.get_field("cleft") < 0].astype(np.float64)
+        for v in np.unique(np.abs(leaves[leaves != 0.0])).tolist():
+            frac, ex = math.frexp(v)  # v = frac * 2^ex, 0.5 <= frac < 1
+            m = int(frac * 2**53)
+            max_top = max(max_top, ex)
+            min_exp = min(min_exp, ex - 53 + ((m & -m).bit_length() - 1))
+    if min_exp == 10**9:
+        return 126
+    return 126 - (max_top - min_exp + tl_model.num_tree.bit_length())
 
 
 def structure(tl_model: Any) -> dict[str, Any]:

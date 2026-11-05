@@ -1,612 +1,741 @@
-//! The per-node kernel: prefix starts, the constant walk and recursive partial
-//! evaluation, and the sorted-threshold sweep that precomputes varying masks.
+//! A call's groups through the kernel: per group, the bins of its first row and
+//! prefix starts, the varying masks, the walk and resolve passes over chunks of
+//! trees, the leaf pass and the finish, at the narrowest mask width that holds the group:
+//! `u32` or `u64` by value, `Wide` masks up to [`WIDE_ROWS`] rows and runtime-width
+//! masks of [`rows::units`] 128-bit units above, both in an arena; then the call's
+//! outputs, finalized at once. A single row has bins for every feature, so its walk
+//! steps through varying splits as constants: it needs no masks and stops only at
+//! leaves, which all carry its row.
+//! Its one pass per chunk walks the roots in place and sums the leaf values from the
+//! walk's words, without items, leaf entries or difference arrays.
+//!
+//! Scratch lives in [`Scratch`], allocated once per predictor. Trees are processed in
+//! chunks whose working set across passes (walk queues, stops, words, leaf entries
+//! and mask arena, and the predicates' masks) fits the chunk budget of
+//! [`crate::rules::chunk_budget`] at the group's mask width, so scratch scales with
+//! a chunk rather than the model, and wide masks get chunks of fewer trees.
 
-use super::{Ablation, EvalCtx, WorkCounters};
-use crate::forest::{
-    Model, Node, PrefixGroup, SPLIT_MONO_DEC, SPLIT_MONO_INC, VaryingPredicate, threshold_go_left,
-};
-use crate::mask::RowMask;
+use super::counters::{Clock, Stats};
+use super::isa::Isa;
+use super::leaves::leaf_pass_at;
+use super::mask::rows::{self, Unit};
+use super::mask::{Mask, Wide};
+use super::passes::{Pass, Walks, walk_with};
+use super::precompute::{Lefts, Rows, SWEEP_TURNS};
+use super::resolve::{Carrier, Handle, Slot};
+use super::scan::{NoScan, Scanner, Scans};
+use super::scratch::{Common, Queues, Scratch, Sums, WIDE_ROWS, Width, Words, view};
+use super::walk::{self, MAX_PAD, Pools, Steps};
+use super::{Groups, WorkCounters};
+use crate::exact::{self, Plan, WIDE_SUMS, WideRuns};
+use crate::load::layout::{LINK_STRIDE, LeafValues, node_index};
+use crate::model::Model;
 
-impl Model {
-    // -----------------------------------------------------------------------
-    // Prefix group evaluation (mask-agnostic)
-    // -----------------------------------------------------------------------
+/// The kernel's runtime choices; production uses [`Options::default`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Options {
+    /// Walk single rows' varying splits as constants, without masks.
+    pub(crate) g1_constant: bool,
+    /// Run each group at the narrowest mask width that holds it, rather than the
+    /// widest the configuration allows.
+    pub(crate) width_dispatch: bool,
+    /// Precompute the varying predicates' masks; without it, each varying event scans
+    /// its rows.
+    pub(crate) precompute: bool,
+    /// Precompute with the sorted-threshold sweep rather than by brute force.
+    pub(crate) sweep: bool,
+    /// Let event scans stop comparing early on monotonic features.
+    pub(crate) monotonic: bool,
+    /// Drop sides without rows at varying events.
+    pub(crate) unsplit: bool,
+    /// Walk every walk with this many lanes, rather than the rule's for each, and
+    /// prefetch one item ahead unless `distance` says otherwise.
+    pub(crate) lanes: Option<usize>,
+    /// Prefetch this many items ahead, rather than the rule's distance.
+    pub(crate) distance: Option<usize>,
+    /// Prefetch once every this many rounds in the walk without varying stops,
+    /// rather than at the rule's rate.
+    pub(crate) rate: Option<usize>,
+}
 
-    #[inline(always)]
-    pub(super) fn precompute_prefix_starts<const F32: bool, const STATS: bool>(
-        &self,
-        const_features: &[f64],
-        counters: &mut WorkCounters,
-        group: &PrefixGroup,
-        k: usize,
-        prefix_starts: &mut [u16],
-    ) {
-        let rep_base = group.node_base as usize;
-        let nodes = &self.nodes;
-        let mut bail_level = k;
-        for j in 0..k {
-            // SAFETY: prefix groups hold only trees whose first k heavy-path nodes are
-            // constant splits, so rep_base + j with j < k lies in the representative tree.
-            let node = unsafe { nodes.get_unchecked(rep_base + j) };
-            if STATS {
-                counters.constant_steps += 1;
-            }
-            let go_left = self.eval_split::<F32>(node, const_features);
-            if go_left != node.heavy_is_left() {
-                bail_level = j;
-                break;
-            }
-        }
-        for &tree_idx in &group.trees {
-            let start_idx = if bail_level == k {
-                k as u16
-            } else {
-                let tree_base = self.trees[tree_idx as usize].node_start as usize;
-                // SAFETY: as above, for this tree, with bail_level < k.
-                unsafe { nodes.get_unchecked(tree_base + bail_level) }.skip as u16
-            };
-            prefix_starts[tree_idx as usize] = start_idx;
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Node step / eval
-    // -----------------------------------------------------------------------
-
-    #[inline]
-    pub(crate) fn step<const F32: bool>(
-        &self,
-        nodes: &[Node],
-        abs_idx: usize,
-        local_idx: usize,
-        features: &[f64],
-    ) -> usize {
-        let node = &nodes[abs_idx];
-        if self.eval_split::<F32>(node, features) == node.heavy_is_left() {
-            local_idx + 1
-        } else {
-            node.skip as usize
-        }
-    }
-
-    #[inline]
-    pub(super) fn eval_split<const F32: bool>(&self, node: &Node, features: &[f64]) -> bool {
-        // SAFETY: the parser rejects split features >= n_features, and every caller
-        // passes one row of n_features values.
-        let val = unsafe { *features.get_unchecked(node.feature as usize) };
-        if val.is_nan() {
-            node.default_left()
-        } else if node.is_categorical() {
-            let val = if F32 { f64::from(val as f32) } else { val };
-            val >= 0.0 && self.cat_test(node, val as i32)
-        } else {
-            threshold_go_left::<F32>(val, node.value)
-        }
-    }
-
-    /// Add a leaf's value to the rows of `row_mask`.
-    #[inline(always)]
-    fn add_leaf<M: RowMask, const STATS: bool>(ctx: &mut EvalCtx<M>, node: &Node, row_mask: M) {
-        if STATS {
-            ctx.counters.leaf_hits += 1;
-        }
-        if STATS {
-            ctx.counters.leaf_adds += if ctx.scale.is_some() {
-                let mut runs = 0;
-                row_mask.for_each_run(|_, _| runs += 2);
-                runs
-            } else {
-                u64::from(row_mask.count_ones())
-            };
-        }
-        if let Some(e) = ctx.scale {
-            let x = crate::exact::to_fixed(node.value, e);
-            let diff = &mut *ctx.diff;
-            // SAFETY: diff has n + 1 entries, and runs lie within rows 0..n.
-            row_mask.for_each_run(|a, b| unsafe {
-                *diff.get_unchecked_mut(a) += x;
-                *diff.get_unchecked_mut(b) -= x;
-            });
-        } else {
-            let val = node.value;
-            let results = &mut ctx.results[ctx.start..];
-            // SAFETY: set bits are rows of this piece, below n, and the piece's
-            // rows start..start + n lie within results.
-            row_mask.for_each_bit(|r| unsafe { *results.get_unchecked_mut(r) += val });
-        }
-    }
-
-    /// One tree over all `n` rows of a piece: the constant walk from `idx` and a leaf
-    /// reached without a varying split run here, without a call; everything else is
-    /// [`Self::partial_eval`]'s. Same leaf additions in the same order.
-    #[inline(always)]
-    pub(super) fn eval_tree<const F32: bool, M: RowMask, const STATS: bool, const ABLATE: bool>(
-        &self,
-        ctx: &mut EvalCtx<M>,
-        mut idx: usize,
-        all_mask: M,
-        n: usize,
-    ) {
-        let nodes = self.nodes.as_slice();
-        let base = ctx.base;
-        // SAFETY: as in partial_eval.
-        while unsafe { nodes.get_unchecked(base + idx) }.is_walkable() {
-            if STATS {
-                ctx.counters.constant_steps += 1;
-            }
-            idx = self.step::<F32>(nodes, base + idx, idx, ctx.const_features);
-        }
-        // SAFETY: as above.
-        let node = unsafe { nodes.get_unchecked(base + idx) };
-        if node.is_leaf() && n > 0 {
-            if let (Some(e), false) = (ctx.scale, STATS) {
-                // All rows are one run, 0..n.
-                let x = crate::exact::to_fixed(node.value, e);
-                // SAFETY: diff has n + 1 entries.
-                unsafe {
-                    *ctx.diff.get_unchecked_mut(0) += x;
-                    *ctx.diff.get_unchecked_mut(n) -= x;
-                }
-            } else {
-                Self::add_leaf::<M, STATS>(ctx, node, all_mask);
-            }
-            return;
-        }
-        self.partial_eval::<F32, M, STATS, ABLATE>(ctx, idx, all_mask);
-    }
-
-    // -----------------------------------------------------------------------
-    // Partial eval — counters only with STATS, ablation flags only with ABLATE
-    // -----------------------------------------------------------------------
-
-    pub(super) fn partial_eval<
-        const F32: bool,
-        M: RowMask,
-        const STATS: bool,
-        const ABLATE: bool,
-    >(
-        &self,
-        ctx: &mut EvalCtx<M>,
-        mut idx: usize,
-        mut row_mask: M,
-    ) {
-        if row_mask.is_zero() {
-            return;
-        }
-        let nodes = self.nodes.as_slice();
-        let base = ctx.base;
-        let ablation = if ABLATE {
-            ctx.ablation
-        } else {
-            Ablation::default()
-        };
-        let use_precompute = !ablation.disable_varying_precompute;
-        let use_unsplit = !ablation.disable_unsplit;
-        let use_mono = !ablation.disable_monotonic || use_precompute;
-
-        loop {
-            // Constant walk — single bit test per node.
-            // SAFETY: base is a tree's node_start and idx a tree-local index reached by
-            // fall-through or skip; validation keeps both inside the tree.
-            while unsafe { nodes.get_unchecked(base + idx) }.is_walkable() {
-                if STATS {
-                    ctx.counters.constant_steps += 1;
-                }
-                idx = self.step::<F32>(nodes, base + idx, idx, ctx.const_features);
-            }
-
-            // SAFETY: as above.
-            let node = unsafe { nodes.get_unchecked(base + idx) };
-
-            // Leaf (walked past all constant nodes, could be leaf or varying).
-            if node.is_leaf() {
-                Self::add_leaf::<M, STATS>(ctx, node, row_mask);
-                return;
-            }
-
-            // Varying split.
-            if STATS {
-                ctx.counters.varying_splits += 1;
-            }
-
-            let (left_mask, right_mask) = if use_precompute {
-                let pred_id = node.varying_pred_id as usize;
-                // SAFETY: a varying node's varying_pred_id indexes varying_predicates,
-                // and the mask table holds one mask per predicate.
-                let pred_left_mask = unsafe { *ctx.pred_left_masks.get_unchecked(pred_id) };
-                (row_mask & pred_left_mask, row_mask & !pred_left_mask)
-            } else {
-                let (rows, nf, feat) = (ctx.rows, ctx.n_features, node.feature as usize);
-                let col = |r: usize| rows[r * nf + feat];
-                let c = &mut *ctx.counters;
-                let result = if node.is_categorical() {
-                    self.partition_per_row::<F32, M, STATS>(node, rows, nf, row_mask, c)
-                } else if use_mono {
-                    match node.varying_type() {
-                        SPLIT_MONO_INC => {
-                            Self::partition_mono_inc::<F32, M, STATS>(node, col, row_mask, c)
-                        }
-                        SPLIT_MONO_DEC => {
-                            Self::partition_mono_dec::<F32, M, STATS>(node, col, row_mask, c)
-                        }
-                        _ => Self::partition_non_mono::<F32, M, STATS>(node, col, row_mask, c),
-                    }
-                } else {
-                    Self::partition_non_mono::<F32, M, STATS>(node, col, row_mask, c)
-                };
-                if STATS {
-                    ctx.counters.partition_row_evals += u64::from(row_mask.count_ones());
-                }
-                result
-            };
-
-            let (heavy_idx, light_idx) = (idx + 1, node.skip as usize);
-            let (heavy_mask, light_mask) = if node.heavy_is_left() {
-                (left_mask, right_mask)
-            } else {
-                (right_mask, left_mask)
-            };
-
-            // Unsplit optimization.
-            if use_unsplit {
-                if light_mask.is_zero() {
-                    if STATS {
-                        ctx.counters.unsplit_skips += 1;
-                    }
-                    idx = heavy_idx;
-                    continue;
-                }
-                if heavy_mask.is_zero() {
-                    if STATS {
-                        ctx.counters.unsplit_skips += 1;
-                    }
-                    idx = light_idx;
-                    continue;
-                }
-            }
-
-            if STATS {
-                ctx.counters.recursive_calls += 1;
-            }
-            self.partial_eval::<F32, M, STATS, ABLATE>(ctx, light_idx, light_mask);
-            idx = heavy_idx;
-            row_mask = heavy_mask;
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Predicate precompute — sorted-threshold sweep
-    // -----------------------------------------------------------------------
-
-    /// Left masks of every varying predicate for one piece: per feature, sort the
-    /// rows by value once and sweep the feature's sorted thresholds. With `STATS`,
-    /// the work is added to `counters`.
-    #[inline(always)]
-    pub(crate) fn precompute_varying_masks<const F32: bool, M: RowMask, const STATS: bool>(
-        &self,
-        rows: &[f64],
-        column: &mut [f64],
-        order: &mut [(f64, u16)],
-        out_left_masks: &mut [M],
-        counters: &mut WorkCounters,
-    ) {
-        debug_assert_eq!(out_left_masks.len(), self.varying_predicates.len());
-        let nf = self.config.n_features();
-        let column = &mut column[..rows.len() / nf];
-
-        for range in &self.feature_ranges {
-            let f = range.feature as usize;
-            for (v, row) in column.iter_mut().zip(rows.chunks_exact(nf)) {
-                *v = row[f];
-            }
-
-            if range.num_start < range.num_end {
-                let mut nan_mask = M::ZERO;
-                let mut n_non_nan = 0usize;
-                for (r, &val) in column.iter().enumerate() {
-                    if val.is_nan() {
-                        nan_mask = nan_mask.set_bit(r);
-                    } else {
-                        order[n_non_nan] = (val, r as u16);
-                        n_non_nan += 1;
-                    }
-                }
-
-                let sorted = &mut order[..n_non_nan];
-                if STATS {
-                    counters.precompute_row_evals += column.len() as u64;
-                    let compares = &mut counters.precompute_sort_compares;
-                    if F32 {
-                        sorted.sort_unstable_by(|a, b| {
-                            *compares += 1;
-                            (a.0 as f32).total_cmp(&(b.0 as f32))
-                        });
-                    } else {
-                        sorted.sort_unstable_by(|a, b| {
-                            *compares += 1;
-                            a.0.total_cmp(&b.0)
-                        });
-                    }
-                    counters.precompute_mask_writes += u64::from(range.num_end - range.num_start);
-                } else if F32 {
-                    sorted.sort_unstable_by(|a, b| (a.0 as f32).total_cmp(&(b.0 as f32)));
-                } else {
-                    sorted.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-                }
-
-                let mut row_ptr = 0usize;
-                let mut non_nan_left = M::ZERO;
-                let preds =
-                    &self.varying_predicates[range.num_start as usize..range.num_end as usize];
-                let masks = &mut out_left_masks[range.num_start as usize..range.num_end as usize];
-
-                for (out, pred) in masks.iter_mut().zip(preds.iter()) {
-                    let (threshold, default_left) = match pred {
-                        VaryingPredicate::Num {
-                            threshold,
-                            default_left,
-                            ..
-                        } => (threshold.0, *default_left),
-                        _ => unreachable!(),
-                    };
-                    while row_ptr < n_non_nan {
-                        // SAFETY: row_ptr < n_non_nan, the length of sorted.
-                        let (val, r) = unsafe { *sorted.get_unchecked(row_ptr) };
-                        if STATS {
-                            counters.precompute_sweep_compares += 1;
-                        }
-                        if threshold_go_left::<F32>(val, threshold) {
-                            non_nan_left = non_nan_left.set_bit(usize::from(r));
-                            row_ptr += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    *out = non_nan_left | if default_left { nan_mask } else { M::ZERO };
-                }
-            }
-
-            let cat_preds =
-                &self.varying_predicates[range.cat_start as usize..range.cat_end as usize];
-            let cat_masks = &mut out_left_masks[range.cat_start as usize..range.cat_end as usize];
-            if STATS {
-                let n_cat = u64::from(range.cat_end - range.cat_start);
-                counters.precompute_row_evals += n_cat * column.len() as u64;
-                counters.precompute_mask_writes += n_cat;
-            }
-            for (out, pred) in cat_masks.iter_mut().zip(cat_preds.iter()) {
-                let mut left_mask = M::ZERO;
-                for (r, &val) in column.iter().enumerate() {
-                    if pred.goes_left::<F32>(val, &self.bitsets) {
-                        left_mask = left_mask.set_bit(r);
-                    }
-                }
-                *out = left_mask;
-            }
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            g1_constant: true,
+            width_dispatch: true,
+            precompute: true,
+            sweep: true,
+            monotonic: true,
+            unsplit: true,
+            lanes: None,
+            distance: None,
+            rate: None,
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::config::WalkerConfig;
-    use crate::forest::{FeatureRange, Model, ThresholdType, VaryingPredicate};
-
-    /// Row-major rows from width-32 feature columns.
-    fn rows_from_columns(cols: &[[f64; 32]; 64], n_rows: usize, n_features: usize) -> Vec<f64> {
-        (0..n_rows)
-            .flat_map(|r| (0..n_features).map(move |f| cols[f][r]))
-            .collect()
+impl Options {
+    /// Whether to precompute the varying predicates' masks: always in production
+    /// (not `ABLATE`), else as `precompute` says.
+    #[inline(always)]
+    const fn precompute<const ABLATE: bool>(self) -> bool {
+        !ABLATE || self.precompute
     }
 
-    // --- Sweep tests ---
+    /// Whether to precompute by the sweep rather than by brute force: always in
+    /// production (not `ABLATE`), else as `sweep` says.
+    #[inline(always)]
+    const fn sweep<const ABLATE: bool>(self) -> bool {
+        !ABLATE || self.sweep
+    }
+}
 
-    fn sweep_forest(preds: Vec<VaryingPredicate>, ranges: Vec<FeatureRange>) -> Model {
-        Model {
-            output: crate::parser::Output {
-                base_score: 0.0,
-                divisor: 1.0,
-                postprocessor: crate::parser::Postprocessor::Sigmoid(1.0),
+impl Model {
+    /// [`Self::kernel_groups`] at level `X` ([`Isa`]), inside the level's trampoline, so
+    /// that the code it inlines compiles with the level's features.
+    #[inline(always)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the call, its scratch and its variant"
+    )]
+    pub(super) fn kernel_groups_at<
+        X: Isa,
+        const F32: bool,
+        const STATS: bool,
+        const ABLATE: bool,
+        const SHIFT: bool,
+    >(
+        &self,
+        data: &[f64],
+        out: &mut [f64],
+        groups: Groups<'_>,
+        s: &mut Scratch,
+        options: Options,
+        stats: &mut Stats,
+        finalize: bool,
+    ) {
+        if X::NATIVE {
+            return self.kernel_groups::<X, F32, STATS, ABLATE, SHIFT>(
+                data, out, groups, s, options, stats, finalize,
+            );
+        }
+        X::with8(
+            #[inline(always)]
+            |m: &Self, data, out, groups, s, options, stats, finalize| {
+                m.kernel_groups::<X, F32, STATS, ABLATE, SHIFT>(
+                    data, out, groups, s, options, stats, finalize,
+                );
             },
-            trees: Vec::new(),
-            config: WalkerConfig::builder(64)
-                .max_group_width(32)
-                .all_varying()
-                .build()
-                .unwrap(),
-            nodes: Vec::new(),
-            bitsets: Vec::new(),
-            varying_predicates: preds,
-            feature_ranges: ranges,
-            threshold_type: ThresholdType::F64,
-            prefix_groups: Vec::new(),
-            prefix_depth: 0,
-            fixed_scale: None,
+            self,
+            data,
+            out,
+            groups,
+            s,
+            options,
+            stats,
+            finalize,
+        );
+    }
+
+    /// Tree sums, or with `finalize` outputs, of every group of a call, through the
+    /// kernel; `finalize` turns the whole call's sums into outputs at once, after its
+    /// groups. With `STATS`, the work and phase times are added to `stats`; with
+    /// `ABLATE`, `options` apply, otherwise the defaults do. `SHIFT` is whether the
+    /// model packs its categorical rank fields, which the walks shift to test. The
+    /// input must have passed [`super::Predictor::check`].
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the call, its scratch and its variant"
+    )]
+    fn kernel_groups<
+        X: Isa,
+        const F32: bool,
+        const STATS: bool,
+        const ABLATE: bool,
+        const SHIFT: bool,
+    >(
+        &self,
+        data: &[f64],
+        out: &mut [f64],
+        groups: Groups<'_>,
+        s: &mut Scratch,
+        options: Options,
+        stats: &mut Stats,
+        finalize: bool,
+    ) {
+        debug_assert_eq!(SHIFT, self.layout.bins.has_shifts(), "the kernel's SHIFT");
+        let options = if ABLATE { options } else { Options::default() };
+        let nf = self.config.n_features();
+        let n_rows = out.len();
+        for g in 0..groups.count(n_rows) {
+            let (start, end) = groups.bounds(g, n_rows);
+            let rows = &data[start * nf..end * nf];
+            let results = &mut out[start..end];
+            let constant = results.len() == 1 && options.g1_constant;
+            let c = &mut s.common;
+            let t = Clock::<STATS>::start();
+            self.layout
+                .bins
+                .fill_with::<F32>(&rows[..nf], &mut c.bins, constant);
+            let t = t.lap(&mut stats.phases.bins);
+            self.prefix_starts_at::<X, STATS, ABLATE, SHIFT>(c, &mut stats.counters);
+            t.lap(&mut stats.phases.prefix);
+            if STATS {
+                stats.counters.groups += 1;
+                stats.counters.bins_computed += 1;
+            }
+            // The rows the group's masks hold: its own, or the widest group's.
+            let held = if options.width_dispatch {
+                results.len()
+            } else {
+                s.common.max_rows
+            };
+            let c = &mut s.common;
+            macro_rules! group {
+                ($m:ty, $c:ty, $q:expr, $u:expr) => {
+                    self.masked_group_at::<X, F32, $m, $c, STATS, ABLATE, SHIFT>(
+                        rows, results, c, $q, $u, options, stats,
+                    )
+                };
+            }
+            match Width::of(held) {
+                _ if held > WIDE_ROWS => group!(Unit<X>, Slot, &mut s.slots, rows::units(held)),
+                Width::W32 if constant => {
+                    self.constant_group_at::<X, STATS, ABLATE, SHIFT>(results, c, options, stats);
+                }
+                Width::W32 => group!(u32, u32, &mut s.q32, 1),
+                Width::W64 => group!(u64, u64, &mut s.q64, 1),
+                Width::W128 => group!(Wide<2, X>, Handle, &mut s.handles, 1),
+                Width::W256 => group!(Wide<4, X>, Handle, &mut s.handles, 1),
+                Width::W512 => group!(Wide<8, X>, Handle, &mut s.handles, 1),
+                Width::W1024 => group!(Wide<16, X>, Handle, &mut s.handles, 1),
+                _ => unreachable!("wider groups take runtime-width masks"),
+            }
+        }
+        // Once over the call's output, which its groups cover: each value takes the
+        // same operations wherever it sits in the slice.
+        if finalize {
+            let t = Clock::<STATS>::start();
+            self.finalize_at::<X>(out);
+            t.lap(&mut stats.phases.finish);
         }
     }
 
-    fn num_pred(feature: u16, threshold: f64, default_left: bool) -> VaryingPredicate {
-        VaryingPredicate::Num {
-            feature,
-            threshold: crate::forest::Threshold(threshold),
-            default_left,
+    /// [`Self::prefix_starts`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    #[cfg_attr(not(dispatch), inline(always))]
+    fn prefix_starts_at<X: Isa, const STATS: bool, const ABLATE: bool, const SHIFT: bool>(
+        &self,
+        c: &mut Common,
+        counters: &mut WorkCounters,
+    ) {
+        if X::NATIVE {
+            return self.prefix_starts::<STATS, ABLATE, SHIFT>(c, counters);
+        }
+        X::with3(
+            #[inline(always)]
+            |m: &Self, c, counters| m.prefix_starts::<STATS, ABLATE, SHIFT>(c, counters),
+            self,
+            c,
+            counters,
+        );
+    }
+
+    /// Each tree's start: its root, or after its prefix group's shared constant splits
+    /// on the bins, the first node the group does not share.
+    ///
+    /// `ABLATE` only keeps the research builds' instantiation apart from
+    /// production's, so that compiling `research` in cannot change production code.
+    #[cfg_attr(dispatch, inline(always))]
+    fn prefix_starts<const STATS: bool, const ABLATE: bool, const SHIFT: bool>(
+        &self,
+        c: &mut Common,
+        counters: &mut WorkCounters,
+    ) {
+        let layout = &self.layout;
+        for group in &self.prefix_groups {
+            let (base, k) = (group.node_base as usize, group.depth as usize);
+            let bail = layout.nodes[base..base + k]
+                .iter()
+                .position(|n| !n.goes_heavy::<SHIFT>(&c.bins))
+                .unwrap_or(k);
+            if STATS {
+                counters.prefix_steps += (bail + 1).min(k) as u64;
+            }
+            let trees = group.first as usize..group.end as usize;
+            let (roots, starts) = (&mut c.roots[trees.clone()], &self.tree_roots[trees]);
+            if bail == k {
+                // Every tree's rows follow the whole prefix, k heavy children on: a
+                // vector add.
+                let ahead = k as u32 * LINK_STRIDE;
+                for (root, &start) in roots.iter_mut().zip(starts) {
+                    *root = start + ahead;
+                }
+            } else {
+                for (root, &start) in roots.iter_mut().zip(starts) {
+                    *root = layout.nodes[node_index(start) + bail].child();
+                }
+            }
         }
     }
 
-    pub(super) fn sweep<const F32: bool>(
-        forest: &Model,
-        cols: &[[f64; 32]; 64],
-        n_rows: usize,
-    ) -> Vec<u32> {
-        let rows = rows_from_columns(cols, n_rows, forest.config.n_features());
-        let mut out = vec![0u32; forest.varying_predicates.len()];
-        let (mut column, mut order) = (vec![0.0; n_rows], vec![(0.0, 0); n_rows]);
-        forest.precompute_varying_masks::<F32, u32, false>(
-            &rows,
-            &mut column,
-            &mut order,
-            &mut out,
-            &mut super::WorkCounters::default(),
-        );
-        out
-    }
-
-    fn run_sweep(forest: &Model, cols: &[[f64; 32]; 64], n_rows: usize) -> Vec<u32> {
-        sweep::<false>(forest, cols, n_rows)
-    }
-
-    #[test]
-    fn test_sweep_all_nan_column() {
-        let forest = sweep_forest(
-            vec![num_pred(0, 5.0, true), num_pred(0, 10.0, false)],
-            vec![FeatureRange {
-                feature: 0,
-                num_start: 0,
-                num_end: 2,
-                cat_start: 2,
-                cat_end: 2,
-            }],
-        );
-        let mut cols = Box::new([[0.0f64; 32]; 64]);
-        for r in 0..4 {
-            cols[0][r] = f64::NAN;
+    fn pools(&self, bins: &[u32]) -> Pools {
+        assert!(bins.len() >= self.layout.bins.n_slots());
+        Pools {
+            nodes: self.layout.nodes.as_ptr(),
+            bins: bins.as_ptr(),
+            dummy: self.layout.dummy(),
         }
-        let masks = run_sweep(&forest, &cols, 4);
-        assert_eq!(masks[0], 0b1111);
-        assert_eq!(masks[1], 0b0000);
     }
 
-    #[test]
-    fn test_sweep_single_row() {
-        let forest = sweep_forest(
-            vec![num_pred(0, 3.0, false), num_pred(0, 7.0, false)],
-            vec![FeatureRange {
-                feature: 0,
-                num_start: 0,
-                num_end: 2,
-                cat_start: 2,
-                cat_end: 2,
-            }],
-        );
-        let mut cols = Box::new([[0.0f64; 32]; 64]);
-        cols[0][0] = 5.0;
-        let masks = run_sweep(&forest, &cols, 1);
-        assert_eq!(masks[0], 0b0);
-        assert_eq!(masks[1], 0b1);
-    }
-
-    #[test]
-    fn test_sweep_all_rows_identical() {
-        let forest = sweep_forest(
-            vec![num_pred(0, 3.0, false), num_pred(0, 7.0, false)],
-            vec![FeatureRange {
-                feature: 0,
-                num_start: 0,
-                num_end: 2,
-                cat_start: 2,
-                cat_end: 2,
-            }],
-        );
-        let mut cols = Box::new([[0.0f64; 32]; 64]);
-        for r in 0..8 {
-            cols[0][r] = 5.0;
+    /// [`Self::masked_group`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    #[cfg_attr(not(dispatch), inline(always))]
+    #[cfg_attr(dispatch, inline(never))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the group, its scratch and its variant"
+    )]
+    fn masked_group_at<
+        X: Isa,
+        const F32: bool,
+        M,
+        C,
+        const STATS: bool,
+        const ABLATE: bool,
+        const SHIFT: bool,
+    >(
+        &self,
+        rows: &[f64],
+        results: &mut [f64],
+        c: &mut Common,
+        queues: &mut Queues<C>,
+        runtime_units: usize,
+        options: Options,
+        stats: &mut Stats,
+    ) where
+        M: Mask + Words,
+        C: Carrier<M>,
+    {
+        if X::NATIVE {
+            return self.masked_group::<X, F32, M, C, STATS, ABLATE, SHIFT>(
+                rows,
+                results,
+                c,
+                queues,
+                runtime_units,
+                options,
+                stats,
+            );
         }
-        let masks = run_sweep(&forest, &cols, 8);
-        assert_eq!(masks[0], 0);
-        assert_eq!(masks[1], 0b1111_1111);
+        X::with8(
+            #[inline(always)]
+            |m: &Self, rows, results, c, queues, u, options, stats| {
+                m.masked_group::<X, F32, M, C, STATS, ABLATE, SHIFT>(
+                    rows, results, c, queues, u, options, stats,
+                );
+            },
+            self,
+            rows,
+            results,
+            c,
+            queues,
+            runtime_units,
+            options,
+            stats,
+        );
     }
 
-    #[test]
-    fn test_sweep_max_group_width() {
-        let forest = sweep_forest(
-            vec![num_pred(0, 16.0, false)],
-            vec![FeatureRange {
-                feature: 0,
-                num_start: 0,
-                num_end: 1,
-                cat_start: 1,
-                cat_end: 1,
-            }],
-        );
-        let mut cols = Box::new([[0.0f64; 32]; 64]);
-        for r in 0..32 {
-            cols[0][r] = r as f64;
+    /// Tree sums of one group at mask type `M` carried by `C`, its masks of
+    /// `runtime_units` units of `M` for runtime-width carriers and one otherwise. `ABLATE` keeps research's
+    /// instantiation apart, as in [`Self::prefix_starts`].
+    #[cfg_attr(dispatch, inline(always))]
+    #[cfg_attr(not(dispatch), inline(never))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the group, its scratch and its variant"
+    )]
+    fn masked_group<
+        X: Isa,
+        const F32: bool,
+        M,
+        C,
+        const STATS: bool,
+        const ABLATE: bool,
+        const SHIFT: bool,
+    >(
+        &self,
+        rows: &[f64],
+        results: &mut [f64],
+        c: &mut Common,
+        queues: &mut Queues<C>,
+        runtime_units: usize,
+        options: Options,
+        stats: &mut Stats,
+    ) where
+        M: Mask + Words,
+        C: Carrier<M>,
+    {
+        let n = results.len();
+        let np = self.varying_predicates.len();
+        let (units, width) = if C::RUNTIME {
+            (runtime_units, Width::of(128 * runtime_units))
+        } else {
+            (1, Width::of(M::WIDTH))
+        };
+        let t = Clock::<STATS>::start();
+        // The all-rows mask, which leaves read, then each predicate's left and right
+        // masks, which the splits with that heavy side read.
+        let counters = &mut stats.counters;
+        if C::RUNTIME {
+            let words = 2 * units;
+            let masks = rows::words_mut(&mut c.masks[..(2 * np + 1) * units]);
+            let (all_rows, sides) = masks.split_at_mut(words);
+            // The sweep's copies of its running left mask, then the left and missing
+            // masks.
+            let bits = rows::words_mut(&mut c.bits);
+            let (lefts, bits) = bits.split_at_mut(SWEEP_TURNS * words);
+            let (left, missing) = bits[..2 * words].split_at_mut(words);
+            let sides = &mut Rows {
+                masks: sides,
+                words,
+            };
+            // Production (not ABLATE) always precomputes by the sweep: the defaults.
+            if options.precompute::<ABLATE>() {
+                if options.sweep::<ABLATE>() {
+                    self.precompute_sweep::<F32, _, _, STATS>(
+                        rows,
+                        &mut c.order,
+                        &mut c.codes,
+                        sides,
+                        lefts,
+                        missing,
+                        counters,
+                    );
+                } else {
+                    self.precompute_brute_force::<F32, _, _, STATS>(rows, sides, left, counters);
+                }
+            }
+            all_rows.fill(u64::MAX);
+        } else {
+            let masks = &mut view::<M>(&mut c.masks)[..=2 * np];
+            let (all_rows, sides) = masks.split_first_mut().expect("the all-rows mask");
+            let (sides, _) = sides.as_chunks_mut::<2>();
+            let (mut left, mut missing) = (M::ZERO, M::ZERO);
+            // Production (not ABLATE) always precomputes by the sweep: the defaults.
+            if options.precompute::<ABLATE>() {
+                if options.sweep::<ABLATE>() {
+                    // The sweep's copies of its running left mask: `left` itself for
+                    // masks carried by value, else in the scratch.
+                    let lefts = if <[M] as Lefts<M>>::TURNS == 1 {
+                        core::slice::from_mut(&mut left)
+                    } else {
+                        &mut view::<M>(&mut c.bits)[..<[M] as Lefts<M>>::TURNS]
+                    };
+                    self.precompute_sweep::<F32, M, _, STATS>(
+                        rows,
+                        &mut c.order,
+                        &mut c.codes,
+                        sides,
+                        lefts,
+                        &mut missing,
+                        counters,
+                    );
+                } else {
+                    self.precompute_brute_force::<F32, M, _, STATS>(
+                        rows, sides, &mut left, counters,
+                    );
+                }
+            }
+            *all_rows = M::ones_if(true);
         }
-        let masks = run_sweep(&forest, &cols, 32);
-        let expected: u32 = (0..=16).fold(0u32, |m, r| m | (1 << r));
-        assert_eq!(masks[0], expected);
+        let masks = &view::<M>(&mut c.masks)[..(2 * np + 1) * units];
+        let mut clock = t.lap(&mut stats.phases.precompute);
+        let arena = view::<M>(&mut c.arena);
+        let scratch = view::<M>(&mut c.scan).as_mut_ptr();
+        let p = self.pools(&c.bins);
+        // Walks that keep sides without rows, which only research's ablations run, take
+        // chunks sized for every leaf.
+        #[cfg(any(test, feature = "research"))]
+        let plan = if ABLATE && !options.unsplit {
+            &c.kept
+        } else {
+            &c.chunks
+        };
+        #[cfg(not(any(test, feature = "research")))]
+        let plan = &c.chunks;
+        let chunks = &plan[width.index()];
+        let mut scanner = Scanner {
+            model: self,
+            rows,
+            monotonic: options.monotonic,
+            counters: WorkCounters::default(),
+        };
+        // Production passes a scan without data, so its passes cannot be merged with
+        // research's, whose scan holds the scanner.
+        let mut scan = Scans::<F32, STATS>(&mut scanner);
+        let walks = Walks::of::<ABLATE>(options, c.tuning.varying);
+        for chunk in chunks {
+            assert!(
+                queues.items.len() > chunk.leaves + MAX_PAD
+                    && queues.next.len() > chunk.leaves
+                    && queues.leaves.len() > chunk.leaves
+                    && c.stops.len() > chunk.leaves + MAX_PAD
+                    && c.words.len() > chunk.leaves + MAX_PAD
+                    && (!C::ARENA || arena.len() >= (chunk.slots + 3) * C::slot_units(units))
+                    && (!C::ARENA || C::RUNTIME || queues.listed.len() > chunk.leaves)
+                    && (!C::RUNTIME || c.scan.len() >= units),
+                "chunk scratch"
+            );
+            let roots = &c.roots[chunk.trees.0..chunk.trees.1];
+            let (stops, words) = (&mut c.stops[..], &mut c.words[..]);
+            let mut pass = Pass {
+                p: &p,
+                roots,
+                n,
+                units,
+                masks,
+                scratch,
+                stats: &mut *stats,
+                #[cfg(debug_assertions)]
+                leaves: chunk.leaves,
+            };
+            macro_rules! passes {
+                ($scan:expr) => {
+                    match (options.precompute, options.unsplit) {
+                        (true, true) => pass.run_at::<X, C, STATS, ABLATE, false, false, SHIFT>(
+                            walks, arena, queues, stops, words, $scan,
+                        ),
+                        (true, false) => pass.run_at::<X, C, STATS, ABLATE, false, true, SHIFT>(
+                            walks, arena, queues, stops, words, $scan,
+                        ),
+                        (false, true) => pass.run_at::<X, C, STATS, ABLATE, true, false, SHIFT>(
+                            walks, arena, queues, stops, words, $scan,
+                        ),
+                        (false, false) => pass.run_at::<X, C, STATS, ABLATE, true, true, SHIFT>(
+                            walks, arena, queues, stops, words, $scan,
+                        ),
+                    }
+                };
+            }
+            // SAFETY: the assert above sizes the scratch for the chunk, and the
+            // layout's children and slots are in range by construction.
+            let (n_leaves, n_full) = unsafe {
+                // Production (not ABLATE) runs the default options only, precompute
+                // and unsplit, so it instantiates only their pass.
+                if ABLATE {
+                    passes!(&mut scan)
+                } else {
+                    pass.run_at::<X, C, STATS, ABLATE, false, false, SHIFT>(
+                        walks,
+                        arena,
+                        queues,
+                        stops,
+                        words,
+                        &mut NoScan,
+                    )
+                }
+            };
+            clock = Clock::<STATS>::start();
+            let (full, entries) = queues.leaves[..n_leaves].split_at(n_full);
+            let runs = match (&self.layout.leaves, &mut c.sums) {
+                (LeafValues::Fixed(values), Sums::Fixed(diff)) => {
+                    let half = diff.len() / 2;
+                    let (even, odd) = diff.split_at_mut(half);
+                    leaf_pass_at::<X, M, C, _, STATS>(
+                        entries,
+                        full,
+                        arena,
+                        units,
+                        values,
+                        &mut even[..=n],
+                        &mut odd[..=n],
+                    )
+                }
+                (
+                    LeafValues::Wide(values),
+                    Sums::Wide {
+                        wide, diff, sums, ..
+                    },
+                ) => {
+                    let limbs = (n + 1) * wide.limbs();
+                    let half = diff.len() / 2;
+                    let (even, odd) = diff.split_at_mut(half);
+                    leaf_pass_at::<X, M, C, _, STATS>(
+                        entries,
+                        full,
+                        arena,
+                        units,
+                        values,
+                        &mut WideRuns::new(*wide, &mut even[..limbs], sums),
+                        &mut WideRuns::new(*wide, &mut odd[..limbs], &mut []),
+                    )
+                }
+                _ => unreachable!("leaf values follow the plan"),
+            };
+            clock = clock.lap(&mut stats.phases.leaf_pass);
+            if STATS {
+                stats.counters.runs_written += runs;
+            }
+        }
+        if STATS {
+            stats.counters.scan_rows += scanner.counters.scan_rows;
+            stats.counters.scan_evals += scanner.counters.scan_evals;
+        }
+        self.finish_at::<X>(results, &mut c.sums);
+        clock.lap(&mut stats.phases.finish);
     }
 
-    #[test]
-    fn test_sweep_mixed_nan_and_values() {
-        let forest = sweep_forest(
-            vec![num_pred(0, 2.0, true), num_pred(0, 4.0, false)],
-            vec![FeatureRange {
-                feature: 0,
-                num_start: 0,
-                num_end: 2,
-                cat_start: 2,
-                cat_end: 2,
-            }],
+    /// [`Self::constant_group`] at level `X` ([`Isa`]): where the build dispatches, out of line,
+    /// with the body compiled inside the level's trampoline; elsewhere inlined.
+    #[cfg_attr(not(dispatch), inline(always))]
+    #[cfg_attr(dispatch, inline(never))]
+    fn constant_group_at<X: Isa, const STATS: bool, const ABLATE: bool, const SHIFT: bool>(
+        &self,
+        results: &mut [f64],
+        c: &mut Common,
+        options: Options,
+        stats: &mut Stats,
+    ) {
+        if X::NATIVE {
+            return self.constant_group::<X, STATS, ABLATE, SHIFT>(results, c, options, stats);
+        }
+        X::with5(
+            #[inline(always)]
+            |m: &Self, results, c, options, stats| {
+                m.constant_group::<X, STATS, ABLATE, SHIFT>(results, c, options, stats);
+            },
+            self,
+            results,
+            c,
+            options,
+            stats,
         );
-        let mut cols = Box::new([[0.0f64; 32]; 64]);
-        cols[0][0] = f64::NAN;
-        cols[0][1] = 1.0;
-        cols[0][2] = f64::NAN;
-        cols[0][3] = 5.0;
-        cols[0][4] = 3.0;
-        let masks = run_sweep(&forest, &cols, 5);
-        assert_eq!(masks[0], 0b00111);
-        assert_eq!(masks[1], 0b10010);
     }
 
-    #[test]
-    fn test_sweep_no_numerical_predicates() {
-        let forest = sweep_forest(
-            vec![VaryingPredicate::CatInline {
-                feature: 0,
-                default_left: false,
-                word: 0b1010,
-            }],
-            vec![FeatureRange {
-                feature: 0,
-                num_start: 0,
-                num_end: 0,
-                cat_start: 0,
-                cat_end: 1,
-            }],
-        );
-        let mut cols = Box::new([[0.0f64; 32]; 64]);
-        cols[0][0] = 0.0;
-        cols[0][1] = 1.0;
-        cols[0][2] = 3.0;
-        let masks = run_sweep(&forest, &cols, 3);
-        assert_eq!(masks[0], 0b110);
+    /// Tree sums of a group whose walks stop only at leaves: rows whose bins hold
+    /// every feature, as a single row's do, so that varying splits step through their
+    /// constant encoding. Every leaf a walk reaches carries all the rows: each chunk's
+    /// one pass walks the roots in place, the leaf values are summed in a register from
+    /// the walk's words, which hold each stop's leaf-value index, and the sum is every
+    /// row's. No mask, item, leaf entry or difference array is touched. `ABLATE` keeps
+    /// research's instantiation apart, as in [`Self::prefix_starts`].
+    #[cfg_attr(dispatch, inline(always))]
+    #[cfg_attr(not(dispatch), inline(never))]
+    fn constant_group<X: Isa, const STATS: bool, const ABLATE: bool, const SHIFT: bool>(
+        &self,
+        results: &mut [f64],
+        c: &mut Common,
+        options: Options,
+        stats: &mut Stats,
+    ) {
+        let mut clock = Clock::<STATS>::start();
+        if STATS {
+            stats.counters.single_rows += 1;
+        }
+        if let Sums::Wide { acc, .. } = &mut c.sums {
+            acc.fill(0);
+        }
+        let fixed = self.constant_chunks::<X, STATS, ABLATE, SHIFT>(c, options, stats, &mut clock);
+        let sum = match (&mut c.sums, self.plan) {
+            (Sums::Fixed(_), Plan::Fixed(e)) => exact::to_f64(fixed, e),
+            (Sums::Wide { wide, acc, .. }, _) => {
+                let (first, others) = acc.split_at_mut(wide.limbs());
+                for other in others.chunks_exact(wide.limbs()) {
+                    wide.add_acc(first, other);
+                }
+                wide.to_f64(first)
+            }
+            _ => unreachable!("sums follow the plan"),
+        };
+        results.fill(sum);
+        clock.lap(&mut stats.phases.finish);
     }
 
-    #[test]
-    fn test_sweep_f32_threshold_collisions() {
-        let t1: f64 = 1.0 + f64::from(2.0f32.powi(-24));
-        let t2: f64 = 1.0 + f64::from(2.0f32.powi(-25));
-        assert_eq!(
-            (t1 as f32).to_bits(),
-            (t2 as f32).to_bits(),
-            "precondition: same f32"
-        );
-        let forest = sweep_forest(
-            vec![num_pred(0, t1, false), num_pred(0, t2, false)],
-            vec![FeatureRange {
-                feature: 0,
-                num_start: 0,
-                num_end: 2,
-                cat_start: 2,
-                cat_end: 2,
-            }],
-        );
-        let mut cols = Box::new([[0.0f64; 32]; 64]);
-        cols[0][0] = 1.0;
-        cols[0][1] = 1.000_000_15;
-        let out = sweep::<true>(&forest, &cols, 2);
-        assert_eq!(out[0], out[1]);
+    /// The chunks of [`Self::constant_group`]: returns the `i128` sum, or adds a wide
+    /// model's to its accumulators.
+    #[inline(always)]
+    fn constant_chunks<X: Isa, const STATS: bool, const ABLATE: bool, const SHIFT: bool>(
+        &self,
+        c: &mut Common,
+        options: Options,
+        stats: &mut Stats,
+        clock: &mut Clock<STATS>,
+    ) -> i128 {
+        let p = self.pools(&c.bins);
+        let n_trees = c.roots.len() - MAX_PAD;
+        let walks = Walks::of::<ABLATE>(options, c.tuning.constant);
+        let mut fixed = 0i128;
+        for chunk in &c.constant {
+            let n = chunk.trees.1 - chunk.trees.0;
+            let (walks, pad) = walks.for_pass::<ABLATE, SHIFT>(n, false);
+            // The last chunk's roots are followed by the dummies; others are copied.
+            let roots: &[u32] = if chunk.trees.1 == n_trees {
+                &c.roots[chunk.trees.0..]
+            } else {
+                let roots = &mut c.constant_roots[..n + pad];
+                roots[..n].copy_from_slice(&c.roots[chunk.trees.0..chunk.trees.1]);
+                roots[n..].fill(p.dummy);
+                roots
+            };
+            // The roots' dummies are written when the scratch is made, and the prefix
+            // starts write trees only.
+            assert!(
+                roots.len() >= n + pad && c.words.len() > n + pad,
+                "chunk scratch"
+            );
+            debug_assert!(roots[n..n + pad].iter().all(|&r| r == p.dummy));
+            let mut steps = Steps::default();
+            let (stops, words) = (c.stops.as_mut_ptr(), c.words.as_mut_ptr());
+            // SAFETY: the assert above sizes the roots, with their dummies, and the
+            // words for the chunk; the walk writes no stops without varying ones; and
+            // the layout's children and slots are in range by construction.
+            unsafe {
+                let roots = roots.as_ptr();
+                walk_with!(ABLATE, walks, |K, D, R| walk::walk_at::<
+                    X,
+                    u32,
+                    K,
+                    false,
+                    D,
+                    R,
+                    STATS,
+                    SHIFT,
+                >(
+                    &p, roots, stops, words, &mut steps
+                ));
+            }
+            *clock = clock.lap(&mut stats.phases.walk);
+            // Every stop is a leaf, whose word 1 starts with its leaf-value index.
+            let leaves = c.words[..n].iter().map(|&w1| w1 as u32 as usize);
+            match (&self.layout.leaves, &mut c.sums) {
+                (LeafValues::Fixed(values), _) => {
+                    for leaf in leaves {
+                        fixed += values[leaf];
+                    }
+                }
+                (LeafValues::Wide(values), Sums::Wide { wide, acc, .. }) => {
+                    // Leaf i adds to sum i % WIDE_SUMS, as in WideRuns: consecutive
+                    // leaves mostly share their slots.
+                    let l = wide.limbs();
+                    assert!(acc.len() >= WIDE_SUMS * l, "the sums of a single row");
+                    let leaves = leaves.map(|leaf| values[leaf]);
+                    // SAFETY: the assert above holds the WIDE_SUMS accumulators, and the
+                    // model's leaf values are leaves of its layout.
+                    unsafe { exact::add_in_turns(acc.as_mut_ptr(), l, 0, leaves) };
+                }
+                _ => unreachable!("leaf values follow the plan"),
+            }
+            *clock = clock.lap(&mut stats.phases.leaf_pass);
+            if STATS {
+                let counters = &mut stats.counters;
+                counters.passes += 1;
+                counters.leaf_events += n as u64;
+                counters.runs_written += n as u64;
+                counters.walk_steps += steps.nodes;
+                counters.lane_slots += steps.slots;
+            }
+        }
+        fixed
     }
 }

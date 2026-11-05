@@ -5,7 +5,6 @@
 //! sweep_bench cell <CELL_DIR> --output-dir DIR [--set factorial] [--variant FLAGS]...
 //! sweep_bench preflight <EXECUTION_MANIFEST>
 //! sweep_bench validate <CELL_DIR>
-//! sweep_bench precision-order [CELL_DIR]... [--manifest M] --output FILE.json
 //! ```
 //!
 //! `treewalker-exp manifest --suite NAME` writes the execution manifest, and
@@ -100,30 +99,8 @@ enum Command {
         cell_dir: PathBuf,
         #[arg(long, default_value = "treewalker")]
         set: String,
-        /// Load every TreeWalker forest without exact leaf sums.
-        #[arg(long)]
-        no_exact_sums: bool,
         #[command(flatten)]
         libs: Libs,
-    },
-    /// Tree ordering's effect on f64 sums, exact sums off: each LightGBM cell's tree
-    /// sums and raw margins with ordering on against off, and both orderings'
-    /// outputs against the cell's GTIL reference. Untimed, over prepared cells.
-    PrecisionOrder {
-        /// Cell directories.
-        cell_dirs: Vec<PathBuf>,
-        /// Also every LightGBM cell of this execution manifest.
-        #[arg(long)]
-        manifest: Option<PathBuf>,
-        /// Override the manifest's artifacts directory.
-        #[arg(long)]
-        artifacts_dir: Option<PathBuf>,
-        /// Only the manifest's cells whose ID matches this glob.
-        #[arg(long)]
-        cells: Option<String>,
-        /// Where to write the JSON record.
-        #[arg(long)]
-        output: PathBuf,
     },
 }
 
@@ -182,9 +159,6 @@ struct ConfigArgs {
     /// Do not read hardware counters.
     #[arg(long)]
     no_hardware_counters: bool,
-    /// Load every TreeWalker forest without exact leaf sums (`exact_sums = false`).
-    #[arg(long)]
-    no_exact_sums: bool,
 }
 
 impl ConfigArgs {
@@ -203,7 +177,6 @@ impl ConfigArgs {
             max_rows_per_round
         );
         c.hardware_counters &= !self.no_hardware_counters;
-        c.exact_sums &= !self.no_exact_sums;
         c
     }
 }
@@ -327,40 +300,9 @@ fn real_main() -> Result<bool> {
             std::fs::write(&result, out.to_string())?;
             Ok(true)
         }
-        Command::PrecisionOrder {
-            mut cell_dirs,
-            manifest,
-            artifacts_dir,
-            cells,
-            output,
-        } => {
-            if let Some(path) = manifest {
-                let m = treewalker_bench::artifacts::Manifest::load(&path)?;
-                let root = artifacts_dir.unwrap_or(m.artifacts_dir);
-                cell_dirs.extend(
-                    m.cells
-                        .iter()
-                        .filter(|c| c.id.contains("/lightgbm/"))
-                        .filter(|c| cells.as_deref().is_none_or(|g| run::glob(g, &c.id)))
-                        .map(|c| root.join(&c.dir)),
-                );
-            }
-            anyhow::ensure!(!cell_dirs.is_empty(), "no cells to measure");
-            let rec = treewalker_bench::precision::run(&cell_dirs)?;
-            std::fs::write(&output, serde_json::to_string_pretty(&rec)? + "\n")
-                .with_context(|| format!("writing {}", output.display()))?;
-            let skipped = rec["skipped"].as_array().map_or(0, Vec::len);
-            eprintln!(
-                "{} cells measured, {skipped} skipped -> {}",
-                rec["cells"].as_array().map_or(0, Vec::len),
-                output.display()
-            );
-            Ok(skipped == 0)
-        }
         Command::Validate {
             cell_dir,
             set,
-            no_exact_sums,
             libs,
         } => {
             let both = ["serving".to_string(), "batch".to_string()];
@@ -370,7 +312,6 @@ fn real_main() -> Result<bool> {
                 hardware_counters: false,
                 // No cap: the sample, and with it validation, covers every group.
                 max_rows_per_round: 0,
-                exact_sums: !no_exact_sums,
                 ..RunConfig::default()
             };
             let mut ctx = run::context("validate", config, &Natives::default(), None, &opts)?;

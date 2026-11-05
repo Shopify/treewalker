@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -9,7 +10,7 @@ from treewalker_exp import formats as fm
 @pytest.fixture
 def probes(monkeypatch):
     """Fixed toolchain probes; tests change one field at a time."""
-    state = {
+    state: dict[str, Any] = {
         "compiler": {"path": "/usr/bin/gcc", "version": "gcc 13.3.0", "target": "x86_64-linux-gnu"},
         "host_cpu": "Intel(R) Xeon(R) Platinum 8581C",
         "versions": {"tl2cgen": "1.0.0", "treelite": "4.7.2"},
@@ -136,7 +137,7 @@ def test_compiles_run_largest_first_within_the_process_budget(tmp_path):
     import time
     from concurrent.futures import ThreadPoolExecutor
 
-    from treewalker_exp.cli import compile_order
+    from treewalker_exp.baselines import compile_order
 
     dirs = {}
     for name, nodes in [("small", 100), ("big", 90_000), ("mid", 5_000)]:
@@ -149,7 +150,8 @@ def test_compiles_run_largest_first_within_the_process_budget(tmp_path):
     assert bl.model_nodes(tmp_path / "none") == 0
 
     # 2-thread tl2cgen and 4-chunk lleaves compiles never exceed 6 processes.
-    lock, state = threading.Lock(), {"now": 0, "peak": 0, "started": []}
+    lock = threading.Lock()
+    state: dict[str, Any] = {"now": 0, "peak": 0, "started": []}
 
     def work(task, c):
         with lock:
@@ -221,7 +223,9 @@ def test_quickscorer_xml_is_exact_for_xgboost(tmp_path):
         left = np.float32(row[f]) <= t
         return walk(node.find(f"split[@pos='{'left' if left else 'right'}']"), row)
 
-    trees = ET.fromstring(xml.split("\n", 1)[1]).find("ensemble").findall("tree")
+    ensemble = ET.fromstring(xml.split("\n", 1)[1]).find("ensemble")
+    assert ensemble is not None
+    trees = ensemble.findall("tree")
     sums = [sum(walk(tree.find("split"), row) for tree in trees) for row in X[:50]]
     ref = treelite.gtil.predict_per_tree(tl, X[:50].astype(np.float32)).sum(axis=1).ravel()
     assert np.allclose(sums, ref, rtol=0, atol=1e-6)

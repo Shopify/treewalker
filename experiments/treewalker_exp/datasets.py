@@ -372,6 +372,26 @@ EXPEDIA_SESSION = [
 ]
 EXPEDIA_VARYING = [f for f in EXPEDIA_FEATURES if f not in EXPEDIA_SESSION]
 
+# The categorical scale recipe keeps one varying feature and the raw category
+# IDs (no dense recoding). Its split takes all eligible sessions and keeps
+# file-order candidates; the released numeric Expedia cells keep their rules.
+EXPEDIA_CAT = [
+    "site_id",
+    "visitor_location_country_id",
+    "srch_destination_id",
+    "srch_length_of_stay",
+    "srch_adults_count",
+    "srch_children_count",
+    "srch_room_count",
+]
+EXPEDIA_CAT_FEATURES = [
+    *EXPEDIA_CAT,
+    "srch_booking_window",
+    "srch_saturday_night_bool",
+    "random_bool",
+    "price_usd",
+]
+
 # Column order and dtypes of the parquet the paper was run on.
 EXPEDIA_SCHEMA: dict[str, pl.DataType] = {
     "srch_id": pl.UInt32(),
@@ -460,7 +480,9 @@ class RankingSplit:
     test_df: pl.DataFrame
 
 
-def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) -> RankingSplit:
+def split_expedia(
+    paths: Paths, seed: int, test_frac: float, max_sessions: int, *, source_order: bool = False
+) -> RankingSplit:
     """Sessions of 2-128 candidates whose search-level features are constant,
     subsampled to ``max_sessions`` and split by session."""
     if not paths.expedia.exists():
@@ -468,6 +490,8 @@ def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) 
     ds_seed = dataset_seed("expedia", seed)
     df = pl.read_parquet(paths.expedia)
     ok, fp = check_expedia(df)
+    if source_order:
+        df = df.with_row_index("_source_row")
     if not ok:
         log("  expedia: fingerprint MISMATCH, results will not reproduce the paper's")
 
@@ -493,7 +517,8 @@ def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) 
         df = df.filter(pl.col("srch_id").is_in([sids[i] for i in idx]))
         sids = df["srch_id"].unique().sort().to_list()
     n = len(sids)
-    df = df.sort("srch_id")
+    order = ["srch_id", "_source_row"] if source_order else ["srch_id"]
+    df = df.sort(order)
 
     n_test = max(1, int(n * test_frac))
     test_set = set(rng.permutation(n)[:n_test].tolist())
@@ -510,8 +535,8 @@ def split_expedia(paths: Paths, seed: int, test_frac: float, max_sessions: int) 
         max_sessions,
         fp,
         ok,
-        df.filter(~is_test).sort("srch_id"),
-        df.filter(is_test).sort("srch_id"),
+        df.filter(~is_test).sort(order),
+        df.filter(is_test).sort(order),
     )
 
 

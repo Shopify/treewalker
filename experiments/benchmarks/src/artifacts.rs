@@ -11,9 +11,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use serde_json::Value;
+use treewalker_gbdt::research::LoadAblation;
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, WalkerConfig};
 
 use crate::data;
+use crate::schedule::GroupOrder;
 
 /// The execution manifest's schema version this runner reads.
 pub const MANIFEST_SCHEMA: u64 = 3;
@@ -97,8 +99,8 @@ pub struct VariantSpec {
     /// Runtime flags, by `Ablation` field name.
     #[serde(default)]
     pub runtime: Vec<String>,
-    /// Load-time flags: `disable_tree_ordering`, `disable_prefix_grouping`,
-    /// `disable_bitset_intern`, `disable_predicate_dedup`.
+    /// Load-time flags: `disable_tree_ordering`, `disable_prefix_grouping` (prefix
+    /// depth 0), `disable_bitset_intern`, `disable_predicate_dedup`.
     #[serde(default)]
     pub load: Vec<String>,
 }
@@ -119,26 +121,19 @@ impl VariantSpec {
     }
 
     pub fn ablation(&self) -> Result<treewalker_gbdt::research::Ablation> {
-        let mut a = treewalker_gbdt::research::Ablation::default();
-        for flag in &self.runtime {
-            match flag.as_str() {
-                "disable_varying_precompute" => a.disable_varying_precompute = true,
-                "disable_predicate_sweep" => a.disable_predicate_sweep = true,
-                "disable_unsplit" => a.disable_unsplit = true,
-                "disable_monotonic" => a.disable_monotonic = true,
-                "disable_exact_sums" => a.disable_exact_sums = true,
-                other => bail!("unknown runtime flag {other}"),
-            }
-        }
-        Ok(a)
+        self.runtime
+            .iter()
+            .try_fold(treewalker_gbdt::research::Ablation::default(), |a, flag| {
+                a.with(flag).map_err(|e| anyhow::anyhow!(e))
+            })
     }
 
-    pub fn load_options(&self) -> Result<LoadOptions> {
-        let mut o = LoadOptions::default();
+    pub fn load_ablation(&self) -> Result<LoadAblation> {
+        let mut o = LoadAblation::default();
         for flag in &self.load {
             match flag.as_str() {
                 "disable_tree_ordering" => o.disable_tree_ordering = true,
-                "disable_prefix_grouping" => o.prefix_depth = 0,
+                "disable_prefix_grouping" => o.prefix_depth = Some(0),
                 "disable_bitset_intern" => o.disable_bitset_intern = true,
                 "disable_predicate_dedup" => o.disable_predicate_dedup = true,
                 other => bail!("unknown load flag {other}"),
@@ -196,9 +191,9 @@ pub struct RunConfig {
     /// Time each cell, and each sentinel, in a new process of the runner, so none
     /// runs in a heap that earlier cells' models have churned.
     pub fresh_process: bool,
-    /// Load every TreeWalker forest with exact leaf sums (`LoadOptions::exact_sums`),
-    /// the library's default; false sums each row's leaves in `f64`, as the paper's
-    /// algorithms do. A cell whose forests report otherwise is refused.
+    /// Exact leaf sums, grids.toml's `exact_sums`. 3.0 sums every model exactly, so
+    /// only true is accepted; the suites that set it false measure 2.x's per-row
+    /// `f64` sums, and run at their recorded ref.
     pub exact_sums: bool,
 }
 
@@ -238,6 +233,12 @@ impl Manifest {
             path.display(),
             m.schema_version
         );
+        ensure!(
+            m.run.exact_sums,
+            "{}: run.exact_sums = false: 3.0 sums every model exactly; this suite measures \
+             2.x's per-row f64 sums: run it at its recorded ref",
+            path.display()
+        );
         Ok(m)
     }
 }
@@ -268,7 +269,7 @@ impl Oracle {
     /// The model's link applied to a raw margin, as production applies it.
     pub fn link(&self, raw_margin: f64) -> f64 {
         if self.postprocessor == "sigmoid" {
-            1.0 / (1.0 + (-(raw_margin * self.sigmoid_alpha)).exp())
+            treewalker_gbdt::research::sigmoid(raw_margin * self.sigmoid_alpha)
         } else {
             raw_margin
         }
@@ -311,6 +312,24 @@ fn str_field<'a>(doc: &'a Value, key: &str) -> &'a str {
     doc.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
+/// Only explicitly recorded cell limits differ from the library defaults. A
+/// malformed override is an error, not a silent return to the default cap.
+fn cell_load_options(doc: &Value) -> Result<LoadOptions> {
+    let mut options = LoadOptions::default();
+    if let Some(overrides) = doc.get("load_options") {
+        let fields = overrides
+            .as_object()
+            .context("load_options must be an object")?;
+        for (name, value) in fields {
+            ensure!(name == "max_rank_table_bytes", "unknown load option {name}");
+            options.max_rank_table_bytes = value
+                .as_u64()
+                .context("max_rank_table_bytes must be an unsigned integer")?;
+        }
+    }
+    Ok(options)
+}
+
 impl Cell {
     /// The path of a file role, relative paths resolved against the cell directory.
     fn file(dir: &Path, doc: &Value, role: &str) -> Option<PathBuf> {
@@ -326,6 +345,7 @@ impl Cell {
                 .with_context(|| format!("reading {}", doc_path.display()))?,
         )
         .with_context(|| format!("parsing {}", doc_path.display()))?;
+        cell_load_options(&doc)?;
         let need = |role: &str| {
             Self::file(dir, &doc, role)
                 .with_context(|| format!("{}: no {role} file", doc_path.display()))
@@ -438,6 +458,11 @@ impl Cell {
         };
         let id = str_field(&doc, "id").to_string();
         Self::slug(&id).with_context(|| format!("{}", doc_path.display()))?;
+        match doc.get("row_order") {
+            None | Some(Value::Null) => {}
+            Some(Value::String(o)) if o == "independent" || o == "file" => {}
+            Some(o) => bail!("{}: unknown row order {o}", doc_path.display()),
+        }
         Ok(Self {
             id,
             dir: dir.to_path_buf(),
@@ -511,6 +536,16 @@ impl Cell {
         Ok(())
     }
 
+    /// The order the runner times the groups in. A cell with a row order (the
+    /// single-row cells) holds its rows in the order to time them, a fixed-seed
+    /// shuffle or the source's order; every other cell gets the seeded order.
+    pub fn group_order(&self) -> GroupOrder {
+        match self.doc.get("row_order") {
+            None | Some(Value::Null) => GroupOrder::Seeded,
+            Some(_) => GroupOrder::File,
+        }
+    }
+
     pub const fn n_groups(&self) -> usize {
         self.offsets.len() - 1
     }
@@ -528,18 +563,25 @@ impl Cell {
         &self.data[self.offsets[g] * self.n_features..self.offsets[g + 1] * self.n_features]
     }
 
-    /// Load the model with `options` at the configured maximum group width.
-    pub fn forest(&self, options: &LoadOptions) -> Result<Forest> {
-        Ok(Forest::load_with(
+    /// The load options the cell records: the library's defaults but for its
+    /// overrides.
+    pub fn load_options(&self) -> Result<LoadOptions> {
+        cell_load_options(&self.doc)
+    }
+
+    /// Load the model with the load-time `ablation` at the configured maximum group
+    /// width.
+    pub fn forest(&self, ablation: &LoadAblation) -> Result<Forest> {
+        Ok(Forest::load_ablated(
             &self.model_treelite,
             &self.walker_config,
-            options,
+            &self.load_options()?,
+            ablation,
         )?)
     }
 
-    /// Load the model with the cell's feature roles at another maximum group width,
-    /// with the default layout and `exact_sums` as given.
-    pub fn forest_at_width(&self, width: usize, exact_sums: bool) -> Result<Forest> {
+    /// Load the model with the cell's feature roles at another maximum group width.
+    pub fn forest_at_width(&self, width: usize) -> Result<Forest> {
         let file = WalkerConfig::from_file(&self.walker_config)?;
         let nf = file.n_features();
         let pick = |role: fn(&WalkerConfig, usize) -> bool| {
@@ -555,10 +597,7 @@ impl Cell {
             std::fs::File::open(&self.model_treelite)?,
             ModelFormat::TreeliteBinaryV4,
             config,
-            &LoadOptions {
-                exact_sums,
-                ..LoadOptions::default()
-            },
+            &self.load_options()?,
         )?)
     }
 
@@ -626,6 +665,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cell_caps_are_opt_in_and_checked() {
+        let defaults = LoadOptions::default();
+        assert_eq!(
+            cell_load_options(&serde_json::json!({}))
+                .unwrap()
+                .max_rank_table_bytes,
+            defaults.max_rank_table_bytes
+        );
+        let raised = cell_load_options(&serde_json::json!({
+            "load_options": {"max_rank_table_bytes": 4_294_967_296_u64}
+        }))
+        .unwrap();
+        assert_eq!(raised.max_rank_table_bytes, 4_294_967_296);
+        assert_eq!(raised.max_json_bytes, defaults.max_json_bytes);
+        for bad in [
+            serde_json::json!({"load_options": null}),
+            serde_json::json!({"load_options": {"max_rank_table_bytes": -1}}),
+            serde_json::json!({"load_options": {"max_rank_table_bytes": "4GiB"}}),
+            serde_json::json!({"load_options": {"max_rank_tables_bytes": 42}}),
+        ] {
+            assert!(cell_load_options(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn variant_ids_are_stable() {
         let v = |rt: &[&str], ld: &[&str]| VariantSpec {
             runtime: rt.iter().map(ToString::to_string).collect(),
@@ -647,10 +711,11 @@ mod tests {
         assert!(v(&["nope"], &[]).ablation().is_err());
         assert_eq!(
             v(&[], &["disable_prefix_grouping"])
-                .load_options()
+                .load_ablation()
                 .unwrap()
                 .prefix_depth,
-            0
+            Some(0)
         );
+        assert!(v(&[], &["prefix_depth=2"]).load_ablation().is_err());
     }
 }

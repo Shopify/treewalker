@@ -79,6 +79,33 @@ fn pinned_cpu() -> Value {
     }
 }
 
+/// The level 1 data cache of the cores that run the benchmark (the performance
+/// cores on Apple's hybrid CPUs), in bytes, from the OS; `None` where it says nothing.
+pub fn l1d_bytes() -> Option<u64> {
+    if cfg!(target_os = "macos") {
+        return ["hw.perflevel0.l1dcachesize", "hw.l1dcachesize"]
+            .iter()
+            .find_map(|k| command("sysctl", &["-n", k])?.parse().ok())
+            .filter(|&b| b > 0);
+    }
+    (0..8).find_map(|i| {
+        let dir = format!("/sys/devices/system/cpu/cpu0/cache/index{i}");
+        let level = read(&format!("{dir}/level"))?;
+        let kind = read(&format!("{dir}/type"))?;
+        if level != "1" || kind != "Data" {
+            return None;
+        }
+        let size = read(&format!("{dir}/size"))?;
+        let (n, unit) = size.split_at(size.find(|c: char| !c.is_ascii_digit())?);
+        let n: u64 = n.parse().ok()?;
+        match unit {
+            "K" => Some(n * 1024),
+            "M" => Some(n * 1024 * 1024),
+            _ => None,
+        }
+    })
+}
+
 /// Peak resident set size of this process, in bytes.
 pub fn peak_rss_bytes() -> u64 {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -111,6 +138,7 @@ pub fn host() -> Value {
         "cpu": cpu_model(),
         "cpu_id": cpu_id(),
         "logical_cpus": std::thread::available_parallelism().map_or(0, usize::from),
+        "l1d_bytes": l1d_bytes(),
         "pinned_cpus": pinned_cpu(),
         "governor": governor,
         "smt_active": read("/sys/devices/system/cpu/smt/active"),

@@ -1,21 +1,23 @@
 //! Predictor call contracts: group shapes, empty input, and the panics that reject
 //! invalid calls before any output is written.
+#![expect(clippy::float_cmp, reason = "the generator's exact category test")]
+
+mod common;
+
+use common::bits::bits;
+use common::fixtures;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use treewalker_gbdt::{Forest, LoadOptions, ModelFormat, Predictor, WalkerConfig};
 
 /// The two-feature sigmoid fixture: feature 0 varies, feature 1 is constant.
 fn forest(max_group_width: usize) -> Forest {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/import/sigmoid_f64.bin"
-    );
     let config = WalkerConfig::builder(2)
         .max_group_width(max_group_width)
         .varying([0])
         .build()
         .unwrap();
     Forest::from_bytes(
-        &std::fs::read(path).unwrap(),
+        &fixtures::bytes("sigmoid_f64.bin"),
         ModelFormat::TreeliteBinaryV4,
         config,
         &LoadOptions::default(),
@@ -29,10 +31,6 @@ fn rows(n: usize) -> Vec<f64> {
     (0..n)
         .flat_map(|r| [(r % 17) as f64 / 4.0 - 1.0, 0.25])
         .collect()
-}
-
-fn bits(values: &[f64]) -> Vec<u64> {
-    values.iter().map(|v| v.to_bits()).collect()
 }
 
 /// Run `call` on a NaN-filled output of `n` rows, require a panic whose message
@@ -58,30 +56,6 @@ fn rejects_with(
         .unwrap_or_default();
     assert!(msg.contains(expected), "{msg:?} lacks {expected:?}");
     assert!(out.iter().all(|v| v.is_nan()), "{expected}: output written");
-}
-
-#[test]
-fn the_three_calls_agree_on_every_grouping() {
-    let data = rows(100);
-    let mut p = forest(32).predictor();
-    let mut alone = vec![0.0; 100];
-    for (row, out) in data.chunks(2).zip(alone.chunks_mut(1)) {
-        p.predict_group(row, out);
-    }
-    for width in [1, 3, 16, 17, 32] {
-        // 100 rows: the last group is shorter unless width divides 100.
-        let mut fixed = vec![f64::NAN; 100];
-        p.predict_fixed(&data, width, &mut fixed);
-        assert_eq!(bits(&fixed), bits(&alone), "fixed {width}");
-        let offsets: Vec<usize> = (0..100).step_by(width).chain([100]).collect();
-        let mut grouped = vec![f64::NAN; 100];
-        p.predict_groups(&data, &offsets, &mut grouped);
-        assert_eq!(bits(&grouped), bits(&alone), "offsets {width}");
-    }
-    let offsets = [0, 1, 33, 34, 66, 98, 100];
-    let mut grouped = vec![f64::NAN; 100];
-    p.predict_groups(&data, &offsets, &mut grouped);
-    assert_eq!(bits(&grouped), bits(&alone), "uneven offsets");
 }
 
 #[test]
@@ -177,31 +151,102 @@ fn mismatched_lengths_are_rejected() {
     );
 }
 
+/// Debug builds check the constant-feature contract on the features that constant
+/// splits read, the fixture's feature 1, missing values (NaN) equal to each other.
+#[cfg(debug_assertions)]
+#[test]
+fn constant_features_that_differ_within_a_group_are_rejected_in_debug_builds() {
+    let mut data = rows(8);
+    data[2 * 7 + 1] = 0.5;
+    let message = "constant feature 1 differs within a group: 0.25 in its first row, 0.5 in row 7";
+    rejects(message, 8, |p, out| p.predict_fixed(&data, 4, out));
+    rejects(message, 8, |p, out| {
+        p.predict_groups(&data, &[0, 3, 8], out);
+    });
+    // Row 7 begins a group of its own.
+    let mut out = vec![0.0; 8];
+    forest(32)
+        .predictor()
+        .predict_groups(&data, &[0, 7, 8], &mut out);
+    for r in 0..8 {
+        data[2 * r + 1] = f64::NAN;
+    }
+    forest(32).predictor().predict_group(&data, &mut out);
+}
+
 #[test]
 fn bounds_near_usize_max_do_not_overflow() {
-    // Fixed groups of usize::MAX rows: the last group's end is clamped to the row
+    // Fixed groups wider than the input: the last group's end is clamped to the row
     // count instead of computed as start + width.
-    let unbounded = forest(usize::MAX);
+    const MAX: usize = 1 << 20;
+    let wide = forest(MAX);
     let data = rows(1500);
-    let mut p = unbounded.predictor();
+    let mut p = wide.predictor();
     let (mut whole, mut fixed) = (vec![0.0; 1500], vec![f64::NAN; 1500]);
     p.predict_group(&data, &mut whole);
-    p.predict_fixed(&data, usize::MAX, &mut fixed);
+    p.predict_fixed(&data, MAX, &mut fixed);
     assert_eq!(bits(&fixed), bits(&whole));
-    p.predict_fixed(&data, usize::MAX - 1, &mut fixed);
+    p.predict_fixed(&data, MAX - 1, &mut fixed);
     assert_eq!(bits(&fixed), bits(&whole));
+    rejects_with(
+        MAX,
+        &format!("group width {} exceeds max_group_width {MAX}", usize::MAX),
+        4,
+        |p, out| p.predict_fixed(&rows(4), usize::MAX, out),
+    );
     // Offsets past the row count fail their check rather than overflow a bound.
-    for max in [32, usize::MAX] {
+    for max in [32, MAX] {
         rejects_with(max, "offsets must end at the row count 4", 4, |p, out| {
             p.predict_groups(&rows(4), &[0, usize::MAX], out);
         });
     }
-    rejects_with(usize::MAX, "offsets must strictly increase", 4, |p, out| {
-        p.predict_groups(&rows(4), &[0, usize::MAX, 4], out);
+    // A decreasing pair fails before its width, which would underflow, is taken.
+    rejects_with(MAX, "offsets must strictly increase", 4, |p, out| {
+        p.predict_groups(&rows(4), &[0, MAX, 4], out);
     });
-    rejects("group of 18446744073709551615 rows exceeds", 4, |p, out| {
-        p.predict_groups(&rows(4), &[0, usize::MAX, 4], out);
-    });
+    rejects(
+        &format!("group of {} rows exceeds", usize::MAX),
+        4,
+        |p, out| {
+            p.predict_groups(&rows(4), &[0, usize::MAX, 4], out);
+        },
+    );
+}
+
+/// The panic message of creating a predictor for groups of up to `max` rows.
+fn predictor_panic(max: usize) -> String {
+    let forest = forest(max);
+    let err = catch_unwind(AssertUnwindSafe(|| forest.predictor())).unwrap_err();
+    err.downcast_ref::<String>()
+        .cloned()
+        .or_else(|| err.downcast_ref::<&str>().map(ToString::to_string))
+        .expect("a panic message")
+}
+
+#[test]
+fn scratch_beyond_memory_is_rejected_when_the_predictor_is_made() {
+    // Scratch grows with max_group_width: past what memory can address, or past what
+    // the allocator grants, creating the predictor panics instead of aborting.
+    let msg = predictor_panic(usize::MAX);
+    assert!(
+        msg.contains(&format!(
+            "max_group_width {} needs more scratch",
+            usize::MAX
+        )),
+        "{msg}"
+    );
+    // Past what the allocator grants: a width of 2^56, which only a 64-bit `usize`
+    // holds.
+    #[cfg(target_pointer_width = "64")]
+    {
+        let max = 1 << 56;
+        let msg = predictor_panic(max);
+        assert!(
+            msg.contains(&format!("max_group_width {max} needs"))
+                && msg.contains("bytes of scratch, which cannot be allocated"),
+            "{msg}"
+        );
+    }
 }
 
 #[test]

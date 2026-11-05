@@ -1,25 +1,16 @@
 //! Public import contract, independent Treelite/GTIL fixtures, and malformed input guards.
 #![expect(clippy::float_cmp, reason = "exact hand-computable expectations")]
+
+mod common;
+
+use common::bits::same;
+use common::fixtures::{self, bytes, values};
 use serde::Deserialize;
 use simd_json::{OwnedValue as Value, prelude::*};
-use std::{io::Cursor, path::PathBuf};
+use std::io::Cursor;
 use treewalker_gbdt::research::Ablation;
 use treewalker_gbdt::{Forest, LoadError, LoadOptions, ModelFormat, WalkerConfig};
 
-fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/import")
-        .join(name)
-}
-fn bytes(name: &str) -> Vec<u8> {
-    std::fs::read(fixture(name)).unwrap()
-}
-fn raw(name: &str) -> Vec<f64> {
-    bytes(name)[16..]
-        .chunks_exact(8)
-        .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
-        .collect()
-}
 fn config(width: usize) -> WalkerConfig {
     WalkerConfig::builder(2)
         .max_group_width(width)
@@ -86,10 +77,10 @@ struct Case {
 #[test]
 fn independent_oracles_all_formats_paths_and_workspace_widths() {
     let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
-    let data = raw("data.bin");
+    let data = values("data.bin");
     let rows = data.len() / 2;
     for case in manifest.models {
-        let expected = raw(&format!("{}_reference.bin", case.name));
+        let expected = values(&format!("{}_reference.bin", case.name));
         for (extension, format) in [
             ("bin", ModelFormat::TreeliteBinaryV4),
             ("json", ModelFormat::TreeliteJson),
@@ -116,7 +107,8 @@ fn independent_oracles_all_formats_paths_and_workspace_widths() {
                         ..Default::default()
                     },
                     Ablation {
-                        disable_exact_sums: true,
+                        disable_g1_constant: true,
+                        disable_width_dispatch: true,
                         ..Default::default()
                     },
                 ] {
@@ -129,209 +121,9 @@ fn independent_oracles_all_formats_paths_and_workspace_widths() {
 }
 
 #[test]
-fn groups_of_any_width_match_single_rows() {
-    // A row's prediction depends only on its own features, so a row predicted in a
-    // group of any width, whole or in pieces, equals the row predicted alone.
-    let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
-    let data = raw("data.bin");
-    let rows = data.len() / 2;
-    for case in manifest.models {
-        let name = format!("{}.bin", case.name);
-        let mut single = load(&name, ModelFormat::TreeliteBinaryV4, 1)
-            .unwrap()
-            .predictor();
-        for width in [129, 300, 1024, 1025, 2500] {
-            let forest = load(&name, ModelFormat::TreeliteBinaryV4, width).unwrap();
-            for block in [0, rows / 128 - 1] {
-                // Varying feature cycles through every test value; the constant
-                // feature is the block's.
-                let constant = data[block * 128 * 2 + 1];
-                let group: Vec<f64> = (0..width)
-                    .flat_map(|r| [data[(r % rows) * 2], constant])
-                    .collect();
-                let mut alone = vec![0.0; width];
-                single.predict_fixed(&group, 1, &mut alone);
-                for ablation in [
-                    None,
-                    Some(Ablation::default()),
-                    Some(Ablation {
-                        disable_varying_precompute: true,
-                        ..Default::default()
-                    }),
-                    Some(Ablation {
-                        disable_predicate_sweep: true,
-                        ..Default::default()
-                    }),
-                ] {
-                    let mut wide = vec![f64::NAN; width];
-                    match ablation {
-                        None => forest.predictor().predict_group(&group, &mut wide),
-                        Some(a) => forest
-                            .research_predictor(a)
-                            .predict_group(&group, &mut wide),
-                    }
-                    for r in 0..width {
-                        assert_eq!(
-                            wide[r].to_bits(),
-                            alone[r].to_bits(),
-                            "{name} width {width} block {block} row {r}: {} != {}",
-                            wide[r],
-                            alone[r]
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn exact_sums_make_layout_invisible() {
-    // Tree order, prefix sharing and bitset interning change the order in which
-    // leaves are added; exact sums make the predictions bit-identical anyway.
-    let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
-    let data = raw("data.bin");
-    let rows = data.len() / 2;
-    for case in manifest.models {
-        let name = format!("{}.bin", case.name);
-        let predict_with = |parse: &LoadOptions| {
-            let forest = Forest::from_bytes(
-                &bytes(&name),
-                ModelFormat::TreeliteBinaryV4,
-                config(128),
-                parse,
-            )
-            .unwrap();
-            assert!(forest.exact_sums(), "{name}");
-            let mut out = vec![0.0; rows];
-            forest.predictor().predict_fixed(&data, 128, &mut out);
-            out
-        };
-        let reference = predict_with(&LoadOptions::default());
-        for parse in [
-            LoadOptions {
-                disable_tree_ordering: true,
-                ..Default::default()
-            },
-            LoadOptions {
-                prefix_depth: 0,
-                ..Default::default()
-            },
-            LoadOptions {
-                disable_tree_ordering: true,
-                disable_bitset_intern: true,
-                prefix_depth: 0,
-                ..Default::default()
-            },
-        ] {
-            let out = predict_with(&parse);
-            for r in 0..rows {
-                assert_eq!(out[r].to_bits(), reference[r].to_bits(), "{name} row {r}");
-            }
-        }
-    }
-}
-
-#[test]
-fn without_exact_sums_production_is_the_full_walk_bit_for_bit() {
-    // exact_sums = false: every layout, width and piece split adds each row's leaves
-    // in f64 in the loaded tree order, exactly as the full walk of the same forest.
-    let manifest: Manifest = simd_json::serde::from_slice(&mut bytes("manifest.json")).unwrap();
-    let data = raw("data.bin");
-    let rows = data.len() / 2;
-    let layouts = [
-        LoadOptions::default(),
-        LoadOptions {
-            disable_tree_ordering: true,
-            ..Default::default()
-        },
-        LoadOptions {
-            prefix_depth: 0,
-            disable_bitset_intern: true,
-            ..Default::default()
-        },
-        LoadOptions {
-            disable_predicate_dedup: true,
-            ..Default::default()
-        },
-    ];
-    for case in manifest.models {
-        for (extension, format) in [
-            ("bin", ModelFormat::TreeliteBinaryV4),
-            ("json", ModelFormat::TreeliteJson),
-        ] {
-            if extension == "json" && !case.json {
-                continue;
-            }
-            let name = format!("{}.{extension}", case.name);
-            for layout in layouts {
-                let parse = LoadOptions {
-                    exact_sums: false,
-                    ..layout
-                };
-                for width in [1, 16, 17, 64, 65, 128] {
-                    let forest =
-                        Forest::from_bytes(&bytes(&name), format, config(width), &parse).unwrap();
-                    assert!(!forest.exact_sums(), "{name}");
-                    let (mut full, mut prod, mut research) =
-                        (vec![0.0; rows], vec![0.0; rows], vec![0.0; rows]);
-                    forest.predict_full_walk(&data, &mut full);
-                    predict_blocks(&forest, &data, width, &mut prod);
-                    predict_blocks_ablated(
-                        &forest,
-                        Ablation::default(),
-                        &data,
-                        width,
-                        &mut research,
-                    );
-                    for r in 0..rows {
-                        assert_eq!(prod[r].to_bits(), full[r].to_bits(), "{name} w{width} {r}");
-                        assert_eq!(research[r].to_bits(), full[r].to_bits(), "{name} {r}");
-                    }
-                    // Within the independent oracle's tolerance too.
-                    let expected = raw(&format!("{}_reference.bin", case.name));
-                    check(&prod, &expected, case.atol, case.rtol, &name);
-                }
-            }
-        }
-        // Groups wider than a 1,024-row piece: the split stays invisible.
-        let name = format!("{}.bin", case.name);
-        let parse = LoadOptions {
-            exact_sums: false,
-            ..Default::default()
-        };
-        let width = 2500;
-        let forest = Forest::from_bytes(
-            &bytes(&name),
-            ModelFormat::TreeliteBinaryV4,
-            config(width),
-            &parse,
-        )
-        .unwrap();
-        let constant = data[1];
-        let group: Vec<f64> = (0..width)
-            .flat_map(|r| [data[(r % rows) * 2], constant])
-            .collect();
-        let (mut wide, mut full) = (vec![0.0; width], vec![0.0; width]);
-        forest.predictor().predict_group(&group, &mut wide);
-        forest.predict_full_walk(&group, &mut full);
-        for r in 0..width {
-            assert_eq!(wide[r].to_bits(), full[r].to_bits(), "{name} wide row {r}");
-        }
-    }
-}
-
-#[test]
-fn exact_sums_are_the_default_and_survive_every_layout() {
-    assert!(LoadOptions::default().exact_sums);
-    let forest = load("sigmoid_f64.bin", ModelFormat::TreeliteBinaryV4, 128).unwrap();
-    assert!(forest.exact_sums());
-}
-
-#[test]
-fn leaves_without_a_common_scale_add_in_tree_order() {
-    // Leaf exponents 2^-997 apart leave no 126-bit fixed point: prediction adds in
-    // f64 in tree order, exactly as the full walk does.
+fn leaves_past_the_126_bit_rule_sum_exactly() {
+    // Leaf exponents 2^-997 apart leave no 126-bit fixed point: prediction and the full
+    // walk sum in the wide accumulator, so the two agree bit for bit.
     let mut model = simd_json::to_owned_value(&mut bytes("identity.json")).unwrap();
     model["trees"][0]["nodes"][1]["leaf_value"] = 1e300.into();
     model["trees"][1]["nodes"][1]["leaf_value"] = 1e-300.into();
@@ -343,23 +135,24 @@ fn leaves_without_a_common_scale_add_in_tree_order() {
         &LoadOptions::default(),
     )
     .unwrap();
-    assert!(!forest.exact_sums());
-    let data = raw("data.bin");
+    // The wide accumulator's leaf table holds each leaf's first slot and three
+    // digits, 16 bytes, as an i128 leaf takes.
+    let leaves = forest.nodes().iter().filter(|n| n.is_leaf()).count();
+    assert_eq!(forest.layout_stats().leaf_bytes, 16 * leaves);
+    let data = values("data.bin");
     let rows = data.len() / 2;
     let (mut partial, mut full) = (vec![0.0; rows], vec![0.0; rows]);
     forest.predictor().predict_fixed(&data, 128, &mut partial);
     forest.predict_full_walk(&data, &mut full);
     assert!(partial.iter().any(|&v| v == 1e300));
-    for r in 0..rows {
-        assert_eq!(partial[r].to_bits(), full[r].to_bits(), "row {r}");
-    }
+    same(&partial, &full, "prediction against the full walk");
 }
 
 #[test]
 fn native_random_forest_and_hand_computable_aggregation() {
     let forest = load("random_forest.bin", ModelFormat::TreeliteBinaryV4, 128).unwrap();
-    let data = raw("rf_native_data.bin");
-    let expected = raw("rf_native_reference.bin");
+    let data = values("rf_native_data.bin");
+    let expected = values("rf_native_reference.bin");
     let mut actual = vec![0.0; expected.len()];
     forest.predict_full_walk(&data, &mut actual);
     check(&actual, &expected, 1e-14, 1e-14, "sklearn");
@@ -371,8 +164,8 @@ fn native_random_forest_and_hand_computable_aggregation() {
 
 #[test]
 fn file_reader_and_memory_loaders() {
-    let cfg = fixture("walker_config.json");
-    let a = Forest::load(fixture("sigmoid_f64.bin"), &cfg).unwrap();
+    let cfg = fixtures::path("walker_config.json");
+    let a = Forest::load(fixtures::path("sigmoid_f64.bin"), &cfg).unwrap();
     let b = Forest::from_reader(
         Cursor::new(bytes("sigmoid_f64.bin")),
         ModelFormat::TreeliteBinaryV4,
@@ -380,10 +173,15 @@ fn file_reader_and_memory_loaders() {
         &LoadOptions::default(),
     )
     .unwrap();
-    let c = Forest::load(fixture("sigmoid_f64.json"), &cfg).unwrap();
-    let d = Forest::load_with(fixture("sigmoid_f64.bin"), &cfg, &LoadOptions::default()).unwrap();
-    let input = raw("data.bin");
-    let expected = raw("sigmoid_f64_reference.bin");
+    let c = Forest::load(fixtures::path("sigmoid_f64.json"), &cfg).unwrap();
+    let d = Forest::load_with(
+        fixtures::path("sigmoid_f64.bin"),
+        &cfg,
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let input = values("data.bin");
+    let expected = values("sigmoid_f64_reference.bin");
     for f in [a, b, c, d] {
         let mut output = vec![0.0; expected.len()];
         f.predict_full_walk(&input, &mut output);
@@ -442,9 +240,35 @@ fn grouping_schema_and_configuration_validation() {
         .unwrap();
     assert_eq!(roles(&all), [inc, varying, varying, constant]);
     let builder = |nf: usize| WalkerConfig::builder(nf).max_group_width(1).varying([]);
-    for nf in [0, 65, 128, usize::MAX] {
+    // Treelite's num_feature is a 32-bit signed integer.
+    for nf in [0, i32::MAX as usize + 1, usize::MAX] {
         assert!(builder(nf).build().is_err());
     }
+    for nf in [65, 128, 300, i32::MAX as usize] {
+        let c = builder(nf)
+            .varying([nf - 1])
+            .increasing([0])
+            .build()
+            .unwrap();
+        assert!(c.is_varying(nf - 1) && c.is_varying(0) && c.is_increasing(0));
+        assert!(!c.is_varying(nf / 2) && !c.is_varying(nf) && !c.is_decreasing(0));
+    }
+    // Equal role sets compare equal however they were declared.
+    let listed = builder(130).varying(0..130).build().unwrap();
+    let all = WalkerConfig::builder(130)
+        .max_group_width(1)
+        .all_varying()
+        .build()
+        .unwrap();
+    assert_eq!(listed, all);
+    assert_eq!(
+        builder(300).varying([5, 299]).build().unwrap(),
+        builder(300).varying([299, 5]).build().unwrap()
+    );
+    assert_ne!(
+        builder(300).varying([299]).increasing([5]).build().unwrap(),
+        builder(300).varying([5, 299]).build().unwrap()
+    );
     assert!(builder(1).max_group_width(0).build().is_err());
     for width in [129, 1_000_000, usize::MAX] {
         assert!(builder(1).max_group_width(width).build().is_ok());
@@ -632,9 +456,57 @@ fn rejects_bad_json_nodes_and_topology() {
         )
         .is_err()
     );
+    // Any u32 category ID loads and routes like the full walk.
     let mut v = simd_json::to_owned_value(&mut bytes("categories_left.json")).unwrap();
-    v["trees"][0]["nodes"][0]["category_list"] = Value::Array(Box::new(vec![u32::MAX.into()]));
-    assert!(matches!(parse_json(&v), Err(LoadError::Limit(_))));
+    v["trees"][0]["nodes"][0]["category_list"] =
+        Value::Array(Box::new(vec![(u32::MAX - 1).into(), u32::MAX.into()]));
+    let forest = parse_json(&v).unwrap();
+    let rows: Vec<f64> = [
+        4_294_967_295.0,
+        4_294_967_295.9,
+        4_294_967_294.0,
+        4_294_967_296.0,
+    ]
+    .iter()
+    // Feature 1 is constant, so the same in every row of the group.
+    .flat_map(|&x| [x, 0.0])
+    .collect();
+    let (mut out, mut reference) = (vec![0.0; 4], vec![0.0; 4]);
+    forest.predictor().predict_group(&rows, &mut out);
+    forest.predict_full_walk(&rows, &mut reference);
+    assert_eq!(out, reference);
+}
+
+/// A tree whose splits share children is malformed in every build. Below the root,
+/// both nodes of each of 31 pairs split to the next pair, the last pair leaves, so
+/// subtree sizes double at each pair to `u32::MAX` at the root's children, and their
+/// positions pass it before the check of the children's parents fails the tree.
+#[test]
+fn shared_children_are_malformed() {
+    let mut v = model_json();
+    let (split, leaf) = (
+        v["trees"][0]["nodes"][0].clone(),
+        v["trees"][0]["nodes"][1].clone(),
+    );
+    let nodes: Vec<Value> = (0..65u64)
+        .map(|i| {
+            let mut node = if i < 63 { split.clone() } else { leaf.clone() };
+            node["node_id"] = i.into();
+            if i < 63 {
+                let left = if i == 0 { 1 } else { 2 * i.div_ceil(2) + 1 };
+                node["left_child"] = left.into();
+                node["right_child"] = (left + 1).into();
+            }
+            node
+        })
+        .collect();
+    v["trees"][0]["nodes"] = Value::Array(Box::new(nodes));
+    v["trees"][0]["num_nodes"] = 65.into();
+    let error = parse_json(&v).unwrap_err();
+    assert!(
+        matches!(&error, LoadError::MalformedModel(m) if m.contains("shared child")),
+        "{error}"
+    );
 }
 
 // Offset map for mutating *real Treelite-generated* checkpoints. Not a serializer.
@@ -808,6 +680,40 @@ fn binary_truncation_lengths_extensions_metadata_and_nodes() {
     }
 }
 
+/// Both formats validate only the node statistic they take as the training weight,
+/// the data count if present, else the hessian sum, with the same error; gain is
+/// not read.
+#[test]
+fn only_the_statistic_taken_as_the_weight_is_validated() {
+    let forest_json = || simd_json::to_owned_value(&mut bytes("random_forest.json")).unwrap();
+    let mut bin = bytes("random_forest.bin");
+    let fields = binary_fields(&bin);
+    let mut write = |field: &str, value: f64| {
+        bin[fields[field]..][..8].copy_from_slice(&value.to_le_bytes());
+    };
+    // Gain, and a hessian sum beside a data count, are not taken.
+    let mut v = forest_json();
+    let root = v["trees"][0]["nodes"][0].as_object_mut().unwrap();
+    root.insert("gain".into(), "not a number".into());
+    root.insert("sum_hess".into(), (-1.0).into());
+    assert!(parse_json(&v).is_ok());
+    write("gain", f64::NAN);
+    write("sum_hess", -1.0);
+    assert!(binary_result(&bin).is_ok());
+    // Without the data count, the hessian sum is.
+    v["trees"][0]["nodes"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("data_count");
+    bin[fields["data_count_present"]] = 0;
+    let json = parse_json(&v).unwrap_err();
+    assert!(matches!(json, LoadError::MalformedModel(_)), "{json}");
+    assert_eq!(
+        json.to_string(),
+        binary_result(&bin).unwrap_err().to_string()
+    );
+}
+
 #[test]
 fn real_unsupported_exports_return_capability_errors() {
     for name in [
@@ -832,15 +738,17 @@ fn real_unsupported_exports_return_capability_errors() {
 }
 
 #[test]
-fn deep_trees_and_deep_json_are_bounded() {
+fn deep_trees_load_and_json_nesting_is_bounded() {
+    // A chain of 300 splits, past the old 256-edge depth limit.
     let mut model = model_json();
     let split = model["trees"][0]["nodes"][0].clone();
     let leaf = model["trees"][0]["nodes"][1].clone();
-    let depth = 258usize;
+    let depth = 300usize;
     let mut nodes = Vec::new();
     for i in 0..depth {
         let mut n = split.clone();
         n["node_id"] = (i as i64).into();
+        n["threshold"] = (i as f64).into();
         n["left_child"] = (if i + 1 == depth { 2 * depth } else { i + 1 } as i64).into();
         n["right_child"] = ((depth + i) as i64).into();
         nodes.push(n);
@@ -848,11 +756,25 @@ fn deep_trees_and_deep_json_are_bounded() {
     for i in depth..=2 * depth {
         let mut n = leaf.clone();
         n["node_id"] = (i as i64).into();
+        n["leaf_value"] = (i as f64).into();
         nodes.push(n);
     }
     model["trees"][0]["num_nodes"] = (nodes.len() as i64).into();
     model["trees"][0]["nodes"] = Value::Array(Box::new(nodes));
-    assert!(matches!(parse_json(&model), Err(LoadError::Limit(_))));
+    let forest = parse_json(&model).unwrap();
+    let feature = split["split_feature_id"].as_u64().unwrap() as usize;
+    let rows: Vec<f64> = (0..128)
+        .flat_map(|r: i32| {
+            let mut row = [0.5; 2];
+            row[feature] = f64::from(r).mul_add(2.5, -10.0);
+            row
+        })
+        .collect();
+    let (mut out, mut reference) = (vec![0.0; 128], vec![0.0; 128]);
+    forest.predictor().predict_group(&rows, &mut out);
+    forest.predict_full_walk(&rows, &mut reference);
+    assert_eq!(out, reference);
+
     let nested = format!("{}0{}", "[".repeat(1000), "]".repeat(1000));
     assert!(matches!(
         Forest::from_bytes(
@@ -864,4 +786,119 @@ fn deep_trees_and_deep_json_are_bounded() {
         Err(LoadError::Limit(_))
     ));
     assert!(WalkerConfig::from_json(nested.as_bytes()).is_err());
+}
+
+#[test]
+fn input_caps_are_options() {
+    let json = bytes("categories_left.json");
+    let bin = bytes("categories_left.bin");
+    let with = |options: LoadOptions, model: &[u8], format| {
+        Forest::from_bytes(model, format, config(128), &options)
+    };
+    let limit = |options: LoadOptions, model: &[u8], format| {
+        matches!(with(options, model, format), Err(LoadError::Limit(_)))
+    };
+    let defaults = LoadOptions::default();
+    let (json_format, binary_format) = (ModelFormat::TreeliteJson, ModelFormat::TreeliteBinaryV4);
+    assert!(
+        with(defaults, &json, json_format).is_ok() && with(defaults, &bin, binary_format).is_ok()
+    );
+    let n = json.len() as u64;
+    assert!(limit(
+        LoadOptions {
+            max_json_bytes: n - 1,
+            ..defaults
+        },
+        &json,
+        json_format
+    ));
+    assert!(
+        with(
+            LoadOptions {
+                max_json_bytes: n,
+                ..defaults
+            },
+            &json,
+            json_format
+        )
+        .is_ok()
+    );
+    assert!(limit(
+        LoadOptions {
+            max_json_nesting: 2,
+            ..defaults
+        },
+        &json,
+        json_format
+    ));
+    let n = bin.len() as u64;
+    assert!(limit(
+        LoadOptions {
+            max_binary_bytes: n - 1,
+            ..defaults
+        },
+        &bin,
+        binary_format
+    ));
+    assert!(
+        with(
+            LoadOptions {
+                max_binary_bytes: n,
+                ..defaults
+            },
+            &bin,
+            binary_format
+        )
+        .is_ok()
+    );
+    assert!(limit(
+        LoadOptions {
+            max_binary_array_bytes: 8,
+            ..defaults
+        },
+        &bin,
+        binary_format
+    ));
+    // A split on 41 categories with missing sent left takes, in its one chain, a
+    // default rank, the bounds of its 43 codes' exceptions (the categories, no
+    // category and missing), 44 of 4 bytes, and 42 exceptions of 8 bytes: 516 bytes.
+    let mut v = simd_json::to_owned_value(&mut json.clone()).unwrap();
+    v["trees"][0]["nodes"][0]["category_list"] =
+        Value::Array(Box::new((0..=40).map(Value::from).collect()));
+    let pooled = simd_json::to_vec(&v).unwrap();
+    assert!(with(defaults, &pooled, json_format).is_ok());
+    let capped = LoadOptions {
+        max_rank_table_bytes: 4 + 4 * 44 + 8 * 42 - 1,
+        ..defaults
+    };
+    assert!(limit(capped, &pooled, json_format));
+    assert!(with(capped, &json, json_format).is_ok());
+    // A configuration past 64 KiB loads once its cap is raised.
+    let list: Vec<String> = (0..20_000).map(|f| f.to_string()).collect();
+    let config = format!(
+        r#"{{"n_features":20001,"max_group_width":4,"varying_features":[{}],"mono_inc_features":[],"mono_dec_features":[]}}"#,
+        list.join(",")
+    );
+    assert!(config.len() > 64 << 10);
+    assert!(matches!(
+        WalkerConfig::from_json(config.as_bytes()),
+        Err(LoadError::Limit(_))
+    ));
+    let raised = LoadOptions {
+        max_config_bytes: 1 << 20,
+        ..defaults
+    };
+    let c = WalkerConfig::from_json_with(config.as_bytes(), &raised).unwrap();
+    assert!(c.is_varying(19_999) && !c.is_varying(20_000));
+    // A configuration nested past its cap is a Limit, as a model is.
+    let config = br#"{"n_features":2,"max_group_width":4,"varying_features":[0],"mono_inc_features":[],"mono_dec_features":[]}"#;
+    let flat = LoadOptions {
+        max_json_nesting: 1,
+        ..defaults
+    };
+    assert!(WalkerConfig::from_json_with(config, &defaults).is_ok());
+    match WalkerConfig::from_json_with(config, &flat) {
+        Err(LoadError::Limit(msg)) => assert!(msg.starts_with("JSON nesting exceeds 1"), "{msg}"),
+        other => panic!("{other:?}"),
+    }
 }

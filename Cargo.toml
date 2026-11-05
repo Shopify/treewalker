@@ -40,13 +40,13 @@ redundant_pub_crate = "allow"       # pub(crate) in private modules states that 
 
 [package]
 name = "treewalker-gbdt"
-version = "2.0.0"
+version = "3.1.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "Grouped tree-ensemble inference via recursive partial evaluation"
+description = "Grouped tree-ensemble inference via partial evaluation"
 license.workspace = true
 repository.workspace = true
-include = ["/src/**", "/tests/**", "/docs/treelite-loading.md", "/docs/treelite-loading-validation.md", "/Cargo.toml", "/README.md", "/CHANGELOG.md", "/LICENSE"]
+include = ["/build.rs", "/src/**", "/tests/**", "/docs/treelite-loading.md", "/docs/treelite-loading-validation.md", "/Cargo.toml", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 
 [features]
 research = []  # ablations, work counters, prediction stages, full walk, introspection
@@ -76,6 +76,22 @@ required-features = ["research"]
 
 [[test]]
 name = "research"
+required-features = ["research"]
+
+[[test]]
+name = "property"
+required-features = ["research"]
+
+[[test]]
+name = "vectors"
+required-features = ["research"]
+
+[[test]]
+name = "miri"
+required-features = ["research"]
+
+[[test]]
+name = "limits"
 required-features = ["research"]
 
 # Developer benchmarks over the committed fixtures: cargo bench.

@@ -11,6 +11,9 @@
 //! Method order follows a seeded base order, forward in even rounds and reversed in
 //! odd ones: A B, then B A. Over each pair of rounds every method's mean position is
 //! the same.
+//!
+//! A cell whose prepared data fixes its row order (the single-row cells) keeps its
+//! groups in file order instead: each batch is a contiguous run of groups.
 
 /// SplitMix64: a small, well-mixed generator for seeded orders.
 #[derive(Debug, Clone)]
@@ -49,6 +52,15 @@ impl Rng {
     }
 }
 
+/// The order a schedule times a cell's groups in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupOrder {
+    /// One seeded order.
+    Seeded,
+    /// The groups' own order.
+    File,
+}
+
 /// The schedule of one cell and mode.
 #[derive(Debug, Clone)]
 pub struct Schedule {
@@ -59,13 +71,32 @@ pub struct Schedule {
 }
 
 impl Schedule {
-    /// `n_groups` groups and `n_methods` methods, in `target_batches` batches, or one
-    /// per group when there are fewer groups.
+    /// `n_groups` groups in one seeded order and `n_methods` methods, in
+    /// `target_batches` batches, or one per group when there are fewer groups.
     pub fn new(n_groups: usize, n_methods: usize, target_batches: usize, seed: u64) -> Self {
+        Self::ordered(
+            n_groups,
+            n_methods,
+            target_batches,
+            seed,
+            GroupOrder::Seeded,
+        )
+    }
+
+    /// [`Schedule::new`], with the groups in `group_order`.
+    pub fn ordered(
+        n_groups: usize,
+        n_methods: usize,
+        target_batches: usize,
+        seed: u64,
+        group_order: GroupOrder,
+    ) -> Self {
         assert!(n_groups > 0 && n_methods > 0);
         let mut rng = Rng::new(seed);
         let mut order: Vec<usize> = (0..n_groups).collect();
-        rng.shuffle(&mut order);
+        if group_order == GroupOrder::Seeded {
+            rng.shuffle(&mut order);
+        }
         let b = target_batches.clamp(1, n_groups);
         let (base, extra) = (n_groups / b, n_groups % b);
         let mut batches = Vec::with_capacity(b);
@@ -417,6 +448,18 @@ mod tests {
         // 1,000 groups of 1,008 rows: 200 by the minimum.
         let s = sample_groups(&vec![1008usize; 1000], 65_536, 200, 3).unwrap();
         assert_eq!((s.groups.len(), s.rows), (200, 201_600));
+    }
+
+    #[test]
+    fn file_order_keeps_the_groups_in_order() {
+        let s = Schedule::ordered(103, 3, 12, 1, GroupOrder::File);
+        let seen: Vec<usize> = s.batches.iter().flatten().copied().collect();
+        assert_eq!(seen, (0..103).collect::<Vec<_>>());
+        assert_eq!(s.blocks_per_round(), 12);
+        assert_eq!(s.warm_batch(), 11);
+        let seeded = Schedule::ordered(103, 3, 12, 1, GroupOrder::Seeded);
+        assert_eq!(seeded.batches, Schedule::new(103, 3, 12, 1).batches);
+        assert_ne!(seeded.batches, s.batches);
     }
 
     #[test]

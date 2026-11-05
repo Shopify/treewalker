@@ -70,8 +70,11 @@ fn source(repo: &Path) -> (String, bool, &'static str) {
     let Some(commit) = git(&["rev-parse", "HEAD"]) else {
         return (String::new(), false, "git");
     };
-    // Build again on a new commit, a checkout, or a change to what is compiled.
-    let mut watched = vec!["HEAD".to_string(), "index".to_string()];
+    // Build again on a new commit, a checkout, or a change to what is compiled. Not on
+    // the index: any `git status` rewrites it, this script's own included, so every
+    // build in another target directory would rebuild this one; staging a change
+    // leaves what is compiled as it was, and the files themselves are watched below.
+    let mut watched = vec!["HEAD".to_string(), "packed-refs".to_string()];
     watched.extend(git(&["symbolic-ref", "-q", "HEAD"]));
     for name in &watched {
         if let Some(p) = git(&["rev-parse", "--path-format=absolute", "--git-path", name]) {

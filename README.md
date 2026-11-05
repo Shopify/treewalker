@@ -14,7 +14,9 @@ and the cloud setup used for them.
 The measurements here are the 2.0 engine's final run (October 2026). The
 paper as submitted, its engine, its result CSVs and the scripts that read them
 are preserved under the `neurips2026-submission` tag; the camera-ready paper's code,
-measurements and figure code are under `neurips2026-final`.
+measurements and figure code are under `neurips2026-final`. Since 3.0 the library
+has a new prediction kernel that sums every model's leaves exactly; the
+measurements here predate it.
 
 This repository serves two purposes: as a source for the library and as a
 permanent archive of the code at time of submission. The latter can always be
@@ -24,7 +26,8 @@ found [under the neurips2026-submission tag](https://github.com/Shopify/treewalk
 
 | Path | Contents |
 |---|---|
-| `src/` | inference library and treelite model parser |
+| `src/` | inference library: the public API (`forest.rs`, `predictor.rs`, `config.rs`, `error.rs`); loading (`load/`: the Treelite decoders in `parse/`, tree order, varying predicates, the prediction layout in `layout/`); prediction (`predict/`: precompute, walk, resolve, leaf pass, finish, row masks in `mask/`); exact sums (`exact/`); the kernel's rules and the machine model (`rules/`); and the `research` API (`research/`) |
+| `tests/` | the library's integration tests: import fixtures and their GTIL references, recorded output vectors (`fixtures/vectors.bin`), property tests on generated models, and small cases for Miri |
 | `experiments/benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
 | `experiments/treewalker_exp/` | `treewalker-exp`: dataset preparation, workloads, training, compiled baselines |
 | `experiments/grids.toml` | the benchmark suites, resolved by `treewalker-exp` into execution manifests |
@@ -45,8 +48,9 @@ cargo package
 ```
 
 `cargo test` also runs the research API's tests: the crate's dev-dependency on
-itself turns the `research` feature on. Version 2.0 changed the API; the
-[changelog](CHANGELOG.md) maps every 1.x call to its replacement.
+itself turns the `research` feature on. Versions 2.0 and 3.0 changed the API; the
+[changelog](CHANGELOG.md) maps every 1.x call and every 2.x research call to its
+replacement.
 
 The package includes the Rust library sources, loading documentation, README,
 license, and small independent compatibility fixtures with their optional Python
@@ -67,13 +71,75 @@ The `external-bench` feature enables the C baselines and QuickScorer;
 counters. `cargo bench` runs small divan benchmarks of the library on the
 committed fixtures.
 
+### Instruction-set levels and CPU flags
+
+A build without CPU flags runs the kernel at the CPU's level on x86-64. It compiles the
+kernel for the SSE2 baseline, for x86-64-v3 and for x86-64-v4 with VPOPCNTDQ, BITALG
+and BF16, and each predictor runs the highest level the CPU has, detected when the
+predictor is made. `TREEWALKER_ISA=base`, `v3` or `v4` asks for a lower level, never a
+higher one. Outputs are the same at every level. A build whose features include AVX2
+and FMA, such as `-C target-cpu=x86-64-v3` or `-C target-cpu=native` on a CPU that has
+them, compiles only its own level and does not read `TREEWALKER_ISA`, and so do builds
+for other architectures. With the `research` feature, `ResearchPredictor::isa()` names
+the level a predictor runs. A project that depends on `treewalker-gbdt` builds it with
+its own flags; this repository's `.cargo/config.toml`, which the package excludes,
+builds natively.
+
+On the seven Google Cloud families of 3.1.0's measurements ([changelog](CHANGELOG.md)),
+a default build took, against a `-C target-cpu=native` build, over the 90 cells at
+both function alignments:
+
+| | Emerald Rapids | Ice Lake | Milan | Genoa | Turin | Axion | Altra |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Level the default build runs | v4 | v3 | v3 | v4 | v4 | native | native |
+| Time against native | 1.006 | 0.976 | 1.022 | 1.021 | 1.027 | 1.008 | 0.991 |
+
+- On AMD, build with `-C target-cpu=native` for the best speed. The default build
+  took 2.1 to 2.7% longer on Milan, Genoa and Turin, and 3.4 to 4.3% on Genoa's and
+  Turin's single rows. Its dispatched code has LLVM's generic tuning, under which the
+  walk loops differ from the native ones in instruction order and registers; why
+  that costs on these cores is not established (the changelog's known gaps).
+- On Intel, the default build is as fast as a native one: within 1% on Emerald
+  Rapids, and 2.4% faster on Ice Lake, whose AVX-512 lacks BF16, so that it runs v3.
+- On AArch64 every build compiles only its own level; the default one was within 1%
+  of native on Neoverse V2 and N1.
+- A native build runs only on CPUs with the build machine's features; a default one
+  runs on any CPU of its architecture.
+
 ### Development checks
 
-Every commit passes `cargo fmt --check`, `cargo clippy --workspace --all-targets
--- -D warnings` and `cargo test`. The Linux-only code (the timestamp counter's
-calibration, `perf_event`) is checked by cross clippy. Parquet's zstd is C, so
-without a Linux cross toolchain the check compiles it with clang and the macOS
-SDK headers; nothing builds or links for Linux:
+`experiments/scripts/checks.sh` runs the checks as concurrent lanes, each building in
+its own target directory under `target/checks`, and writes every step's log and a
+summary of their status, test counts and times to `target/checks/logs`:
+
+```bash
+PYTHON=.venv/bin/python experiments/scripts/checks.sh fast   # every commit
+PYTHON=.venv/bin/python experiments/scripts/checks.sh full   # before a pull request or a release
+```
+
+The fast checks are `cargo fmt --check`, `cargo clippy --workspace --all-targets --
+-D warnings` with and without the research features, `cargo test --workspace`, and the
+Python tests, ruff and mypy: 44 s on an M4 Pro once built. The full checks, 4 to 5
+minutes, add the release tests with the research API, the bench crate's tests, the
+property tests at their full counts (`TW_PROPTEST_FULL=1`), cross clippy, Miri, the
+spill checks and the bench crate's suite on the core artifacts (`TEST_ARTIFACTS_BASE`).
+
+What guards what. The property tests (`tests/property.rs`) check production, each call
+and the research predictor against an exact oracle and the full walk, bit for bit, on
+random models in both formats with random layouts, and groups of 1 to 2,049 rows: the
+widths around every mask boundary, more than 64 features, and category IDs anywhere in
+`u32`. The artifact suite checks real XGBoost and LightGBM models against the frameworks'
+own outputs, `tests/import.rs` the exported fixtures against them, and
+`tests/vectors.rs` every output against recorded vectors, so that a release that changes
+one fails. Unit tests localize the hard algorithms: exact rounding, the bins and
+category chains, the precompute's sweep, the masks' runs and the rules. A bad model or
+data input gives an error; a violated calling contract panics, as documented (see
+[Treelite loading](docs/treelite-loading.md)). Each instruction set's paths run the same
+tests natively on their machines.
+
+The Linux-only code (the timestamp counter's calibration, `perf_event`) is checked by
+cross clippy. Parquet's zstd is C, so without a Linux cross toolchain the check compiles
+it with clang and the macOS SDK headers; nothing builds or links for Linux:
 
 ```bash
 SDK=$(xcrun --show-sdk-path)
@@ -82,12 +148,64 @@ export CC_x86_64_unknown_linux_gnu=clang \
   CC_aarch64_unknown_linux_gnu=clang \
   CFLAGS_aarch64_unknown_linux_gnu="--target=aarch64-unknown-linux-gnu -isystem $SDK/usr/include -D__arm64__"
 for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids" \
-         "x86_64-unknown-linux-gnu x86-64" "aarch64-unknown-linux-gnu neoverse-v2"; do
+         "x86_64-unknown-linux-gnu x86-64-v4" "x86_64-unknown-linux-gnu x86-64" \
+         "aarch64-unknown-linux-gnu neoverse-v2"; do
   set -- $t
-  for f in "" "--features treewalker-bench/external-bench,treewalker-bench/pmu"; do
+  for f in "" "--features treewalker-bench/external-bench,treewalker-bench/pmu" \
+           "--features treewalker-bench/research"; do
     RUSTFLAGS="-C target-cpu=$2" cargo clippy --target $1 --workspace --all-targets $f -- -D warnings
   done
 done
+```
+
+Miri checks the unsafe code on small production-shaped cases (`tests/miri.rs` and the
+lib's `prefetching_walks` and `production_scratch_holds_a_leaf_per_row`, the latter in
+buffers sized as production builds size them), each of which runs every kind of unsafe operation of its
+path once, with a nightly toolchain (`rustup +nightly component add miri`). The x86-64
+runs take the SSE2 and AVX2 masks, the RISC-V run the plain-word fallback; on AArch64,
+Miri lacks a NEON intrinsic the masks use. The walks link nodes by byte offset on x86-64
+and by index elsewhere (`src/load/layout`), so the x86-64 run also takes the layout's
+tests of x86-64's encoding, which an AArch64 machine's native tests do not. An empty
+`RUSTFLAGS` replaces the repository's `target-cpu=native`:
+
+```bash
+for cpu in x86-64 x86-64-v3; do
+  RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- \
+    prefetching_walks production_scratch
+  RUSTFLAGS="-C target-cpu=$cpu" cargo +nightly miri test --target x86_64-unknown-linux-gnu --test miri
+done
+RUSTFLAGS="-C target-cpu=x86-64" cargo +nightly miri test --target x86_64-unknown-linux-gnu --lib -- \
+  load::layout::tests::split_bounds load::layout::tests::heavy_right_splits \
+  load::layout::tests::signed_zero load::layout::tests::nested_heavy
+RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --lib -- prefetching_walks \
+  production_scratch
+RUSTFLAGS= cargo +nightly miri test --target riscv64gc-unknown-linux-gnu --test miri
+```
+
+The walk's lane count comes from a model of its step (`src/rules/lanes.rs`): on AArch64
+the most lanes that fit the registers, on x86-64 the fewest that reach the issue bound,
+whose lanes beyond the registers spill. `experiments/scripts/walk_spills.py` builds
+`examples/walk_asm.rs` for a target and CPU, emits its post-LTO assembly and counts each
+walk loop's stack stores and loads. It fails if a loop stores to the stack (a spilled
+lane value) although the lanes, a step's temporaries and the loop's invariants all fit
+the registers, or stores nothing although they do not; `--lanes K` builds every walk at
+K lanes to see where the registers run out:
+
+```bash
+python3 experiments/scripts/walk_spills.py                       # this machine
+python3 experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu emeraldrapids
+```
+
+`experiments/scripts/asm_identity.py` compares the production functions of two commits
+on a target and CPU. It builds each commit's post-LTO assembly of `examples/walk_asm.rs`
+(or, with `--bench`, of `sweep_bench`, whose timed regions it reports apart), demangles
+and normalizes it, and lists the functions that differ or that one side lacks. A change
+meant to leave the generated code alone, such as a refactoring, should show none; `--map`
+renames the paths of code that moved between modules:
+
+```bash
+python3 experiments/scripts/asm_identity.py HEAD~1 HEAD --cpu apple-m4
+python3 experiments/scripts/asm_identity.py HEAD~1 HEAD --target x86_64-unknown-linux-gnu --cpu emeraldrapids
 ```
 
 ## Using the library
@@ -121,10 +239,52 @@ rather than every feature silently treated as constant.
 The supported subset includes scalar regression, ranking and binary
 classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base
 scores. Binary Treelite v4 is recommended; native XGBoost JSON must first be
-converted through Treelite. Inputs have up to 64 features; groups can have any
-number of rows.
+converted through Treelite. Inputs have up to `i32::MAX` features, Treelite's own
+limit; trees, nodes, depth and category IDs are bounded only by the input caps of
+`LoadOptions`, memory and a node pool below 4 GiB (2^28 − 2 nodes in all, on every
+target); groups can have any number of rows.
 See [Treelite loading](docs/treelite-loading.md) for export examples, the exact
-output and precision policy, errors, limits, and the caller's grouping contract.
+output and precision policy, errors, limits, prediction scratch, and the caller's
+grouping contract.
+
+### Research API
+
+The `research` feature adds `treewalker_gbdt::research`, which the benchmark harness
+uses to measure the kernel. Serving needs none of it.
+
+- `forest.research_predictor(ablation)` runs the kernel with runtime ablations, each
+  disabling one optimization or forcing one choice: `disable_predicate_sweep`,
+  `disable_varying_precompute`, `disable_monotonic`, `disable_unsplit`,
+  `disable_g1_constant`, `disable_width_dispatch`, `disable_restart_prefetch` and
+  `lanes` (1 to 12, for every walk, instead of the rule's per walk). An ablation's
+  tokens are its flags' names and `lanes=N`; `Ablation::id()` joins them with `+`
+  (`all-on` for production), `from_id` parses an ID, and `with(token)` sets one
+  field.
+- `Forest::load_ablated`, `from_bytes_ablated` and `from_reader_ablated` take a
+  `LoadAblation`, the load-time choices turned off or forced:
+  `disable_tree_ordering`, `disable_bitset_intern`, `disable_predicate_dedup` and
+  `prefix_depth` (every run of trees sharing that many constant splits, instead of
+  the rule's groups; 0 for none) and `pack` (`Some(true)` or `Some(false)` to pack
+  the categorical chains' rank fields or not, instead of the packing rule).
+- `predict_group` and `predict_groups` are the timed build; `predict_group_counted`
+  returns `WorkCounters` (`COUNTERS_VERSION` 6: groups, single rows, bins, precompute,
+  event scans, prefix and walk steps, lane slots, passes, events, splits, runs and
+  arena slots; `fields()` lists them) and adds its phase times to `take_phases()`
+  (`Phases`: bins, precompute, prefix, walk, resolve, leaf pass and finish).
+- `predict_group_stages` keeps each row's `tree_sum`, `raw_margin` and `output`.
+- `forest.layout_stats()` gives what the kernel's rules chose for the model on this
+  machine and their inputs, and the size of its layout: the lanes per walk and the
+  registers they were counted from, the cache sizes and their source, the chunk
+  budget, the expected walk steps per tree, the cache level holding the nodes with
+  its probed latency and the prefetch distances, the prefix groups with the steps
+  they save and cost, and the bytes of the node pool, leaf table, categorical
+  rank tables (with their slots, the chains, whether their rank fields are packed,
+  and the heavy sets the chains cover) and the varying categorical features' flip
+  lists.
+- `forest.predict_full_walk(rows, out)` walks every tree for every row and sums
+  exactly: an independent reference that production matches bit for bit.
+- `nodes()`, `trees()`, `tree_nodes()`, `bitset_bytes()`, `threshold_type()` and
+  `predicate_masks()` expose the parsed model.
 
 ## Datasets
 
@@ -147,6 +307,12 @@ run `treewalker-exp fetch-expedia --train-csv data.zip`; extracting the zip need
 `experiments/data/expedia.parquet` and checks its content fingerprint
 against the file the paper used.
 
+The separate `categorical-scale` suite prepares a public-data model with very
+large categorical features, which 3.0 and 3.1 fail to load at the default limits,
+`expedia-cat/nt600_md32_nl4096/lightgbm/cohort16-n16-g40000`.
+It does not change the paper's numeric Expedia cells or enter their factorial.
+See [the recipe, load-cap expectation and reproduction commands](docs/categorical-scale.md).
+
 The factorial suite also prepares two kinds of derived models
 (`experiments/grids.toml`), neither of which changes an existing model or cell:
 
@@ -168,6 +334,17 @@ The factorial suite also prepares two kinds of derived models
   on the features the released model splits on most) and `expedia/nt500_md8`
   (sessions). A model's `model.json` records the sample (`replicate`) or the
   encoding (`missing_values`).
+- What-if grids (`whatif-grid-v1`, in the kernel suite), groups of more than 1,024
+  rows, on the kernel's runtime-width masks, which no panel reaches (FLCHAIN realizes at most 1,008 steps,
+  SUPPORT 104). Each of 64 seeded base entities over an ICE grid of its model's two
+  most-split covariates, at 64 x 32 or 64 x 64 levels: training values at evenly
+  spaced quantiles, so levels repeat where values tie. On `credit/nt500_md8` and
+  `flchain/nt50_md4_h16`, groups of 2,048 and 4,096 rows; they validate the kernel
+  and tune nothing.
+- Scattered leaves (`kernel-whatif-credit`, whatif-v2 in the kernel suite): credit
+  what-ifs at `credit/nt500_md8`, k = 1 and 8, G = 128, where most runs of a leaf's
+  rows are one row long. They check the leaf pass on fragmented masks and tune
+  nothing.
 
 ## Released results
 
@@ -202,7 +379,7 @@ camera-ready ones, are in the history at `2562892`.
 
 `experiments/data/precision/{intel,arm}/` holds App. A.3's measurements, taken
 on the campaign's machine types (2026-10-13, the `precision` diagnostic):
-`precision_order.json`, `sweep_bench precision-order` over every
+`precision_order.json`, 2.0's `sweep_bench precision-order` over every
 camera-ready LightGBM cell (tree ordering on against off with exact sums off,
 and both against prepare's GTIL reference); `audit_f32.md`, `audit-f32` with
 native XGBoost's margins from the library the campaign timed
@@ -365,6 +542,10 @@ The protocol, per cell (settings in `grids.toml [run]`):
   slower by the end of an earlier factorial, with the same instructions: a model
   loaded into a glibc heap that hundreds of models had churned. A new process, or
   jemalloc, showed none.
+- A cell with a row order, the kernel suite's single-row cells, is timed in its
+  prepared order, independent rows (a fixed-seed shuffle) or file order, the same
+  rows in the same order for every method; every other cell's groups are timed in
+  a seeded order.
 - A sentinel, SUPPORT's acceptance cell, runs at the start of each run
   invocation (a warm-up, then a measure) and after every 25 measured cells,
   under `sentinel/`, its ticks and rows in `run.json`. It measures the machine;
@@ -400,12 +581,14 @@ over any index in a user's uv configuration. Relock with `uv lock`,
 
 ### The camera-ready rerun
 
-The camera-ready reruns the paper's cells with the algorithm as reviewed: every
-TreeWalker forest loads with exact sums off (`exact_sums = false`), so each row's
-leaves add in f64 in tree order, as Algorithms 1 and 2 describe, and production
-`predict` equals `predict_full_walk` bit for bit. The library's default stays on
-(`LoadOptions::exact_sums`, true by default: the leaves add as exact fixed-point
-integers rounded once; see `docs/treelite-loading.md`). In the final run's
+The camera-ready reruns the paper's cells with the algorithm as reviewed, on the
+2.0 engine (the `neurips2026-final` tag): every TreeWalker forest loads with exact
+sums off (`exact_sums = false`), so each row's leaves add in f64 in tree order, as
+Algorithms 1 and 2 describe, and production `predict` equals `predict_full_walk`
+bit for bit. 2.0's default was on (`LoadOptions::exact_sums`: the leaves add as
+exact fixed-point integers rounded once), and since 3.0 every model sums exactly
+(`docs/treelite-loading.md`), so this runner refuses `exact_sums = false`: the
+commands below run at the tag. In the final run's
 ablation suites (`ablation-{x86_64,aarch64}`, measured 2026-10-09/10, `numbers`
 item README), turning exact sums off (`disable_exact_sums`, research build, serving,
 T=500, L=8) took 1.26-1.29x the default's latency at G=128 on Intel and 1.59-1.60x
@@ -430,8 +613,8 @@ run with `--set exact_sums=false`:
 
 ```bash
 cd infra
-terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse HEAD) -var 'suites=["acceptance"]' -var layout_check=true -var 'run_settings=["exact_sums=false"]'
-terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse HEAD) -var-file=camera-ready.tfvars
+terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse 'neurips2026-final^{commit}') -var 'suites=["acceptance"]' -var layout_check=true -var 'run_settings=["exact_sums=false"]'
+terraform apply -var project=YOUR_PROJECT -var git_ref=$(git rev-parse 'neurips2026-final^{commit}') -var-file=camera-ready.tfvars
 ```
 
 The runs land as `camera-ready-ARCH`, `camera-ready-ablation-1-ARCH`,
@@ -451,11 +634,11 @@ cargo run --release --manifest-path experiments/benchmarks/Cargo.toml --features
 
 `audit-f32 --suite camera-ready` reads TreeWalker's f32 margins from each run's
 packed `stages.parquet` and compares them, and native XGBoost's, with the same f64
-oracle. `sweep_bench precision-order` runs offline over prepared LightGBM cells
+oracle. `sweep_bench precision-order`, a 2.0 command (at the tag; under 3.0's exact
+sums tree order cannot change a sum), runs offline over prepared LightGBM cells
 (cell directories, or `--manifest` with `--cells` and `--artifacts-dir`): with
 exact sums off it compares tree ordering on against off on the tree sums and raw
-margins, and both orderings' outputs with the cell's GTIL reference
-(`experiments/benchmarks/src/precision.rs`, `docs/treelite-loading.md`).
+margins, and both orderings' outputs with the cell's GTIL reference.
 
 `check-run` exits non-zero when a validity gate fails, and fails closed: the
 run's tables missing, a failed cell or sentinel attempt that no later attempt of
@@ -466,7 +649,8 @@ did not pass, a required method not timed, a timed interface without a passing
 check on the timed rows, process 0's samples not covering the timed groups in
 every round, or a forest whose `exact_sums` differs from the run's, which the
 camera-ready suites must set off (pass `--exact-sums off` for the campaign's
-acceptance and layout runs). It prints the warnings (sentinel drift, the layout
+acceptance and layout runs); from output schema 7 (3.0) every forest sums exactly,
+no forest's record is written, and the gate passes when the setting is on. It prints the warnings (sentinel drift, the layout
 check, G=1 at the survival anchors, E1 against the released numbers).
 
 Re-timing runs on each machine, from that machine's own execution manifest (the
@@ -555,19 +739,28 @@ intervals; the sentinel measures the machine's drift over the run, which
 
 A prediction has three stages: `tree_sum`, the sum of the row's leaf values;
 `raw_margin`, `tree_sum / divisor + base_score`; and the output, after the
-identity or the sigmoid. When `Forest::exact_sums()` is true, as it is for the
-12 models of the cells measured below, the leaves are added as exact fixed-point
-integers and rounded once: `tree_sum` is the `f64` nearest to the true sum, and tree
-order, layout and every ablation except `disable_exact_sums` leave it unchanged.
-The margin and the link are ordinary rounded `f64` operations.
+identity or the sigmoid. The leaves of every model are added as exact fixed-point
+integers and rounded once: `tree_sum` is the `f64` nearest to the true sum, and
+tree order, layout, lanes, group width, chunking, platform and every ablation leave
+it unchanged. Leaves whose scaled sums fit in 126 bits add as `i128`; others, with
+exponents too far apart, add in a wider accumulator of 29-bit digits. The margin and
+the link are ordinary rounded `f64` operations.
 
 LightGBM (f64) predictions match Treelite GTIL within 1e-13, and XGBoost (f32)
-predictions match native XGBoost within 1e-5 (`experiments/benchmarks/tests/correctness.rs`).
-GTIL and the full walk add leaves in `f64` in tree order, so they differ from the
-exact sum by their rounding, which grows with the partial sums. Measured on
-2026-10-04, the full walk's outputs differ by at most 2.2e-15 on the FLCHAIN and
-SUPPORT LightGBM cells at horizons 16 and 128, 7.2e-16 on Expedia and 1.1e-14 on
-FLCHAIN at horizon 1,024; the XGBoost models' outputs are bit-identical.
+predictions match native XGBoost within 1e-5 (`experiments/benchmarks/tests/correctness.rs`);
+`tree_sum` and `raw_margin` match `math.fsum` of GTIL's per-tree outputs bit for bit.
+GTIL adds leaves in `f64` in tree order, so it differs from the exact sum by its
+rounding, which grows with the partial sums.
+
+The library's tests check production bit for bit against `predict_full_walk`, which
+walks every tree for every row on its own and sums exactly, and against output
+vectors recorded for the import fixtures and for generated models
+(`tests/vectors.rs`). Property tests generate Treelite models, configurations and
+groups across every mask width and piece boundary and compare production and the
+full walk with an independent evaluator and a big-integer sum (`tests/property.rs`;
+`TW_PROPTEST_CASES` widens the sweep). Lane counts, width dispatch, single rows
+with and without the constant walk, and chunk sizes are checked to give identical
+outputs.
 
 ## Citation
 

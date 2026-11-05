@@ -231,3 +231,44 @@ def test_whatif_v1_matches_released_loop():
                 want[b * G + v, fi] = base[b, fi] * mult[b, v - 1, j]
     assert np.array_equal(got.view("<u8"), want.view("<u8"))
     assert offsets.tolist() == list(range(0, 6 * G + 1, G))
+
+
+def test_whatif_grid_crosses_two_features_at_training_quantiles():
+    d = draws(n_cov=4)
+    before = d.base.copy()
+    w = wl.whatif_grid(d, [2, 0], 2048)
+    n_base = min(wl.N_GRID_BASE, len(d.base))
+    X = w.X.reshape(n_base, 2048, -1)
+    assert w.config["max_group_width"] == 2048 and w.config["varying_features"] == [0, 2]
+    assert np.array_equal(w.group_offsets, np.arange(n_base + 1, dtype=np.uint64) * 2048)
+    first, second = (np.asarray(lv) for lv in w.meta["grid"]["levels"])
+    assert (len(first), len(second)) == (64, 32)
+    # Levels are training values at the quantiles (i + 1/2) / n, in order.
+    assert np.all(np.isin(first, d.donors[:, 2])) and np.all(np.diff(first) >= 0)
+    assert np.all(np.isin(second, d.donors[:, 0])) and np.all(np.diff(second) >= 0)
+    assert first[0] == np.sort(d.donors[:, 2])[0]
+    # The first feature is the outer loop; every combination appears once per group.
+    assert np.array_equal(X[0, :, 2], np.repeat(first, 32))
+    assert np.array_equal(X[0, :, 0], np.tile(second, 64))
+    # Other features keep their base entity's value, which the draws keep.
+    assert np.all(X[:, :, [1, 3]] == X[:, :1, [1, 3]])
+    assert np.array_equal(d.base, before)
+    assert wl.contracts(w)["ok"] and w.meta["generator"] == "whatif-grid-v1"
+    assert np.array_equal(wl.whatif_grid(d, [2, 0], 2048).X, w.X)  # seeded
+
+
+def test_whatif_grid_sizes_and_survival_time_features():
+    d = draws(horizon=16, n_cov=4)
+    w = wl.whatif_grid(d, [0, 3], 4096)
+    assert [len(lv) for lv in w.meta["grid"]["levels"]] == [64, 64]
+    inter = 4 + ds.INTERACTION
+    assert w.config["varying_features"] == [0, 3, inter]
+    X = w.X.reshape(-1, 4096, w.X.shape[1])
+    for col in range(4, 4 + ds.N_TV):  # the time step is fixed within a group
+        if col != inter:
+            assert np.all(X[:, :, col] == X[:, :1, col])
+    assert wl.contracts(w)["ok"]
+    with pytest.raises(ValueError):
+        wl.whatif_grid(d, [0], 2048)
+    with pytest.raises(ValueError):
+        wl.whatif_grid(d, [0, 3], 2000)

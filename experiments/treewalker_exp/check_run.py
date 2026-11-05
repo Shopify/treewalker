@@ -19,7 +19,8 @@ one fails):
   must set off: per cell and sentinel cell, the ``exact_sums`` record (every
   forest off when the setting is off; every forest as production reports when it
   is on). A run older than output schema 6 has no record, which is said, not
-  gated, unless a setting is required.
+  gated, unless a setting is required. From output schema 7 (3.0) every forest
+  sums exactly and no record is written: the gate passes iff the setting is on.
 
 Warnings, which only print (`warnings`): the sentinel (a method's median drift
 above 2%, or two consecutive sentinels above 2%); the layout check (the median
@@ -63,6 +64,9 @@ PAPER_SUITES = {"camera-ready", "camera-ready-ablation", "scenario-v1"}
 # The output schema from which runs record the exact_sums setting per forest and
 # write the stages table.
 EXACT_SUMS_SCHEMA = STAGES_SCHEMA = 6
+# The output schema from which every forest sums exactly (3.0), so runs record the
+# setting, always on, and no forest's.
+ALWAYS_EXACT_SCHEMA = 7
 TABLES = ("samples", "groups", "counters", "hw")
 
 
@@ -528,6 +532,15 @@ def gates(run: Path, expect_exact_sums: bool | None = None) -> tuple[list[str], 
             f"  FAIL exact sums: the run sets {setting}; suite {info.get('suite')} needs "
             f"{expect_exact_sums}"
         )
+    if schema >= ALWAYS_EXACT_SCHEMA:
+        if setting is True:
+            lines.append(f"  ok   every TreeWalker forest sums exactly (output schema {schema})")
+        else:
+            ok = False
+            lines.append(
+                f"  FAIL exact sums: the run sets {setting}; output schema {schema} sums exactly"
+            )
+        return lines, ok
     bad = {
         cell: f
         for cell, m in {**cells, **sentinel_cells}.items()

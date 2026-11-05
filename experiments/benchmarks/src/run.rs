@@ -25,9 +25,11 @@ use crate::{data, system, timer};
 /// 5: the manifest's `stop` loses `instructions` and each conversion pass its
 /// `share`, and `xgboost_processes` its instruction totals (the `hw` table
 /// holds every block's counters).
-/// 6: each cell gains `stages.parquet`, TreeWalker's tree sum, raw margin and
-/// output on the stage oracle's rows; resuming requires it.
-pub const OUTPUT_SCHEMA: u32 = 6;
+/// 6 (2.x): each cell gains `stages.parquet`, TreeWalker's tree sum, raw margin
+/// and output on the stage oracle's rows, and records the `exact_sums` its
+/// forests report; resuming requires the table.
+/// 7: as 6, without the `exact_sums` record: every forest sums exactly.
+pub const OUTPUT_SCHEMA: u32 = 7;
 
 /// Options shared by `run`, `cell` and `preflight`.
 #[derive(Debug, Clone, Default)]
@@ -606,26 +608,23 @@ pub fn cell_process(request: &Path, result: &Path) -> Result<()> {
 
 /// Shell-style `*` matching, enough for cell IDs.
 pub fn glob(pattern: &str, s: &str) -> bool {
-    let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.len() == 1 {
-        return pattern == s;
-    }
-    let mut rest = s;
-    for (i, p) in parts.iter().enumerate() {
-        if i == 0 {
-            let Some(r) = rest.strip_prefix(p) else {
-                return false;
-            };
-            rest = r;
-        } else if i == parts.len() - 1 {
-            return rest.ends_with(p);
-        } else if let Some(at) = rest.find(p) {
-            rest = &rest[at + p.len()..];
-        } else {
+    let mut parts = pattern.split('*');
+    let head = parts.next().unwrap_or_default();
+    let Some(mut rest) = s.strip_prefix(head) else {
+        return false;
+    };
+    let mut middle: Vec<&str> = parts.collect();
+    // Without a `*` the pattern is the whole ID.
+    let Some(tail) = middle.pop() else {
+        return rest.is_empty();
+    };
+    for part in middle {
+        let Some(at) = rest.find(part) else {
             return false;
-        }
+        };
+        rest = &rest[at + part.len()..];
     }
-    true
+    rest.ends_with(tail)
 }
 
 /// Check that a required native library exists, has its recorded hash, loads and
@@ -776,13 +775,16 @@ pub fn preflight(manifest_path: &Path, artifacts: Option<&Path>, opts: &Options)
             if load.is_empty() || !seen.insert(load.clone()) {
                 continue;
             }
-            let exact_sums = manifest.run.exact_sums;
-            let options = v
-                .load_options()
-                .map(|o| treewalker_gbdt::LoadOptions { exact_sums, ..o });
-            if let Err(e) = options.and_then(|o| cell.forest(&o)) {
+            if let Err(e) = v.load_ablation().and_then(|o| cell.forest(&o)) {
                 unsupported.push(format!("load {}: {e:#}", load.join("+")));
             }
+        }
+        // A cell that records load options loads its model with them, so that a cap
+        // too small for it fails here rather than in the run.
+        if cell.doc.get("load_options").is_some()
+            && let Err(e) = cell.forest(&treewalker_gbdt::research::LoadAblation::default())
+        {
+            missing.push(format!("treewalker (load at the recorded options: {e:#})"));
         }
         if !missing.is_empty() {
             ok = false;
@@ -810,4 +812,31 @@ pub fn preflight(manifest_path: &Path, artifacts: Option<&Path>, opts: &Options)
         if ok { "OK" } else { "FAILED" }
     );
     Ok(ok)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glob;
+
+    #[test]
+    fn glob_matches_cell_ids_as_the_shell_would() {
+        let id = "support/nt500_md8_h16/lightgbm/panel";
+        for (pattern, want) in [
+            (id, true),
+            ("support/nt500_md8_h16/lightgbm/pane", false),
+            ("*", true),
+            ("support/*", true),
+            ("*/panel", true),
+            ("*lightgbm*", true),
+            ("support/*/xgboost/*", false),
+            ("support/*_h16/*/panel", true),
+            ("support/*h16*h16*", false),
+            ("flchain/*", false),
+            ("**", true),
+        ] {
+            assert_eq!(glob(pattern, id), want, "{pattern}");
+        }
+        assert!(glob("", ""));
+        assert!(!glob("", id));
+    }
 }

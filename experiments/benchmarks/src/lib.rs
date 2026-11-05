@@ -13,16 +13,15 @@
 //! - [`schedule`] plans the batches and the method order, [`timer`] reads the
 //!   timestamp counter, [`pmu`] the hardware counters.
 //! - [`output`] writes the run directory, [`sentinel`] times the drift cell.
-//! - [`precision`] measures tree ordering's effect on `f64` sums, offline.
 
 pub mod artifacts;
 pub mod data;
 pub mod driver;
 pub mod external;
+pub mod memory;
 pub mod methods;
 pub mod output;
 pub mod pmu;
-pub mod precision;
 pub mod run;
 pub mod schedule;
 pub mod sentinel;

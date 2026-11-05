@@ -52,8 +52,8 @@ def test_cell_and_predictions_round_trip(tmp_path):
     fm.write_cell(tmp_path / "cell.json", doc)
     assert fm.read_cell(tmp_path / "cell.json") == doc
     preds = np.linspace(0, 1, 7)
-    fm.write_predictions(tmp_path / "predictions.npy", preds)
-    assert np.array_equal(fm.read_predictions(tmp_path / "predictions.npy"), preds)
+    fm.write_npy(tmp_path / "predictions.npy", preds)
+    assert np.array_equal(fm.read_npy(tmp_path / "predictions.npy"), preds)
 
 
 def test_atomic_write_leaves_no_temp_files(tmp_path):
