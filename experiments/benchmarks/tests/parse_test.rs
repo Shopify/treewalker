@@ -236,11 +236,16 @@ fn test_tree_ordering_changes_order_but_not_output() {
     let n_features = config.n_features();
     let n_obs = 2;
     let n_rows = n_obs * pl;
+    // Constant features take a value per group and varying ones a value per row, as
+    // the predictor's contract requires.
     let mut data = vec![0.5f64; n_rows * n_features];
     for r in 0..n_rows {
-        data[r * n_features] = r as f64 * 0.1;
-        if n_features > 1 {
-            data[r * n_features + 1] = (r % 3) as f64;
+        for f in 0..n_features {
+            data[r * n_features + f] = if config.is_varying(f) {
+                ((r % pl) as f64).mul_add(0.1, f as f64)
+            } else {
+                ((r / pl) as f64).mul_add(0.7, (f % 3) as f64)
+            };
         }
     }
 
