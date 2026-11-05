@@ -10,6 +10,11 @@
   exceptions, whatever the predicates: two predicates on N unlisted rows counted N
   rather than 2N. `COUNTERS_VERSION` is 7, rather than 6, so that recorded counters
   say which count they hold; predictions are unchanged.
+- `docs/treelite-loading.md` says that Treelite GTIL, given float32 input, adds a
+  model's leaves in float32 and rounds the division, the base score's addition and
+  the sigmoid to float32, so that its outputs can differ from TreeWalker's, which
+  finalizes in float64, even where the sum is exact. 3.0 to 3.2.0's said the two
+  could differ only through the sum, which holds for float64 input.
 
 ### Performance
 
