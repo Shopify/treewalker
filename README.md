@@ -308,7 +308,8 @@ run `treewalker-exp fetch-expedia --train-csv data.zip`; extracting the zip need
 against the file the paper used.
 
 The separate `categorical-scale` suite prepares a public-data model with very
-large categorical features, which 3.0 and 3.1 fail to load at the default limits,
+large categorical features, which 3.0 and 3.1 fail to load at the default limits
+and 3.2 loads,
 `expedia-cat/nt600_md32_nl4096/lightgbm/cohort16-n16-g40000`.
 It does not change the paper's numeric Expedia cells or enter their factorial.
 See [the recipe, load-cap expectation and reproduction commands](docs/categorical-scale.md).

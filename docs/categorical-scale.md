@@ -57,7 +57,7 @@ inclusion graph of a feature's categorical splits exceeds the cap. On a GCP
 c3d-standard-90, 3.1 rejected the reference model in about 1.3 s; with a 4 GiB
 cap it loaded in about 4.7 s, with 190,335 chains in 31 MB of rank tables.
 
-Packed fields close the gap (the changelog's Unreleased section): the chain
+Packed fields close the gap in 3.2.0 (see the changelog): the chain
 cover keeps no inclusion graph, and its 325,899 chains pack their rank fields
 into 10,688 words, 25 MB of rank tables, so the model loads at the default
 limits in about 1.1 s, with the same outputs. The cell records no load options,

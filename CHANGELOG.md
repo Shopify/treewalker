@@ -2,15 +2,16 @@
 
 ## 3.2.0
 
-In 3.2, models with a categorical feature of hundreds of thousands of distinct
-heavy sets load at the default limits, which they did not in 3.0 and 3.1, and trees
-of many leaves share chunks. On Genoa (c3d-standard-90), the chunking took the 1,190
-serving cells 0.949 of 3.1.0's time, geometric mean, and the depth-16 models 0.826;
-the categorical change, measured after it, 0.999 to 1.001. Malformed models
-that panicked 3.1's debug builds fail to load with `LoadError::MalformedModel`, and a
-binary model past `LoadOptions::max_binary_bytes` fails before it reserves its nodes.
-The serving API is unchanged, a layout holds at most 2^27 slots rather than 2^30, and
-the research API's `LoadAblation` gains a field. Outputs are unchanged.
+In 3.2, a model whose categorical splits take hundreds of thousands of distinct heavy
+sets on one feature loads at the default limits, which 3.0 and 3.1 failed to (3.1's
+known gap), and trees of thousands of leaves share chunks, so that their passes fill
+the lanes: against 3.1.0 on Genoa, over 1,190 serving cells, that takes 0.949 of the
+time, geometric mean, and 0.826 on the depth-16 models. The serving API is unchanged;
+a layout holds at most 2^27 slots rather than 2^30, and the research API's
+`LoadAblation` gains `pack`. Two kinds of malformed model that panicked debug builds
+fail with `LoadError::MalformedModel`, a binary model past `max_binary_bytes` fails
+without reserving its nodes, and a predictor whose arena would pass its 32-bit offsets
+panics rather than truncating them. Outputs are unchanged.
 
 ### Changes
 
@@ -39,9 +40,9 @@ the research API's `LoadAblation` gains a field. Outputs are unchanged.
   bring the field to the top; the walks shift only for a model that packs, which
   packs its varying categorical features too. The shifting walk with varying stops
   takes 8 lanes on Apple's AArch64 rather than 9, at which it spilled.
-- A layout holds at most 2^27 slots, rather than 2^30: word 0 gives a packed field's
-  shift 5 bits. A model that needs more (4 per feature with numeric splits, one per
-  chain or word of packed fields) is a `LoadError::Limit`.
+- Compatibility: a layout holds at most 2^27 slots, rather than 2^30: word 0 gives a
+  packed field's shift 5 bits. A model that needs more (4 per feature with numeric
+  splits, one per chain or word of packed fields) is a `LoadError::Limit`.
 - Research: `LoadAblation` gains `pack`, `Some(true)` or `Some(false)` to pack the
   rank fields or not instead of the rule, which code that names every field of
   `LoadAblation` must add (`..LoadAblation::default()` takes the default);
