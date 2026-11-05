@@ -1,10 +1,16 @@
-//! The memory a small input can make the loader take: a counting allocator measures
-//! the heap bytes a call holds at its peak, on the calling thread, so that the other
-//! tests' allocations on their threads do not count.
+//! The memory a small input, or an input past a small limit, can make the loader
+//! take: a counting allocator measures the heap bytes a call holds at its peak, on
+//! the calling thread, so that the other tests' allocations on their threads do not
+//! count.
+#![expect(clippy::float_cmp, reason = "the generator's exact category test")]
 
+mod common;
+
+use common::model::{Model, Node, Op, Precision, Task, Tree};
+use common::rng::Rng;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use treewalker_gbdt::WalkerConfig;
+use treewalker_gbdt::{Forest, LoadError, LoadOptions, ModelFormat, WalkerConfig};
 
 /// The system allocator, counting the calling thread's bytes in [`BYTES`].
 struct Counting;
@@ -84,5 +90,58 @@ fn configurations_take_memory_by_their_declarations() {
     });
     assert!(config.is_varying(last) && config.is_increasing(last - 1));
     assert!(config.is_varying(0) && config.is_decreasing(0) && !config.is_varying(1));
+    assert!(bytes < 64 << 10, "{bytes} bytes at the peak");
+}
+
+/// A binary model longer than `LoadOptions::max_binary_bytes` fails at the limit
+/// without reserving its nodes. The guess of the node count read a tree that began
+/// below the limit to the input's end, and the decoder reserved 16 bytes a node
+/// before it read past the limit: 4 MiB for this tree of 262,143 nodes under a
+/// 4 KiB limit.
+#[test]
+fn binary_models_past_the_byte_limit_reserve_no_nodes() {
+    let internal = (1 << 17) - 1;
+    let nodes = (0..=2 * internal)
+        .map(|i| {
+            if i < internal {
+                Node::Numeric {
+                    feature: 0,
+                    op: Op::Le,
+                    threshold: i as f64,
+                    default_left: true,
+                    left: 2 * i + 1,
+                    right: 2 * i + 2,
+                    count: Some(1),
+                }
+            } else {
+                Node::Leaf {
+                    value: 1.0,
+                    count: Some(1),
+                }
+            }
+        })
+        .collect();
+    let model = Model {
+        precision: Precision::F64,
+        n_features: 1,
+        trees: vec![Tree { nodes }],
+        average: false,
+        base_score: 0.0,
+        sigmoid: None,
+        task: Task::Regressor,
+    };
+    let binary = model.to_binary(&mut Rng::new(1));
+    let config = WalkerConfig::builder(1)
+        .max_group_width(1)
+        .varying([0])
+        .build()
+        .unwrap();
+    let options = LoadOptions {
+        max_binary_bytes: 4096,
+        ..LoadOptions::default()
+    };
+    let (result, bytes) =
+        peak(|| Forest::from_bytes(&binary, ModelFormat::TreeliteBinaryV4, config, &options));
+    assert!(matches!(result, Err(LoadError::Limit(_))));
     assert!(bytes < 64 << 10, "{bytes} bytes at the peak");
 }

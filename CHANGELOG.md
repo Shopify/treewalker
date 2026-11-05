@@ -49,6 +49,12 @@
   to within 4 bytes of `u64::MAX` fails to load with `LoadError::MalformedModel` in
   every build. 3.1's debug builds panicked with an overflow in the guess of the node
   count, before the decoder read the length; 116 bytes did it.
+- A binary model longer than `LoadOptions::max_binary_bytes` fails with
+  `LoadError::Limit` without reserving its nodes. 3.1 guessed the node count of a
+  model whose last tree began below the limit, and reserved 16 bytes a node before
+  the decoder read past the limit: a model of a million nodes took 16 MiB under a
+  4 KiB limit, and one at the 2^28-node bound would take 4 GiB. Models within the
+  limit load as before.
 
 ### Performance
 

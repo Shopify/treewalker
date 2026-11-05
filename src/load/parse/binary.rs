@@ -555,8 +555,9 @@ impl Lengths {
 }
 
 /// The node count of the checkpoint in `input`, from its trees' node counts, so
-/// that the decoder allocates the nodes once; `None` if the input ends early, or
-/// passes `max_bytes`, before the last tree.
+/// that the decoder allocates the nodes once; `None` if the input ends before the
+/// last tree, or is longer than `max_bytes`, which the decoder fails at the limit,
+/// so that its nodes are not reserved first.
 ///
 /// It reads the header's and each tree's lengths, in [`parse_source`]'s and
 /// [`read_tree`]'s field order, and skips the fields' contents. Reading all of a
@@ -574,11 +575,11 @@ pub(super) fn count_nodes(input: &(impl At + ?Sized), max_bytes: u64) -> Option<
 /// [`count_nodes`], guessing each tree's optional fields from the tree before with
 /// `guess`.
 fn count_trees(input: &(impl At + ?Sized), max_bytes: u64, guess: bool) -> Option<usize> {
-    let length = input.length()?;
+    let length = input.length().filter(|&length| length <= max_bytes)?;
     let (start, trees, value) = trees_at(input)?;
     let (mut at, mut total, mut last) = (start, 0usize, None::<Lengths>);
     for _ in 0..trees {
-        if at > max_bytes.min(length) {
+        if at > length {
             return None;
         }
         // num_nodes, has_categorical_split and node_type's length.
@@ -1216,7 +1217,8 @@ mod tests {
     }
 
     /// The node count from the trees' headers is the decoder's, from the bytes and
-    /// from the file, and no count comes from a truncated input.
+    /// from the file, and no count comes from a truncated input or from one longer
+    /// than the byte limit.
     #[test]
     fn count_nodes_matches_the_decoder() {
         let config = WalkerConfig::builder(2)
@@ -1236,6 +1238,14 @@ mod tests {
             );
             assert_eq!(count_nodes(&bytes[..bytes.len() - 1], u64::MAX), None);
             assert_eq!(count_nodes(bytes.as_slice(), 64), None);
+            let length = bytes.len() as u64;
+            assert_eq!(count_nodes(bytes.as_slice(), length), counted);
+            assert_eq!(count_nodes(bytes.as_slice(), length - 1), None);
+            #[cfg(unix)]
+            assert_eq!(
+                count_nodes(&std::fs::File::open(&path).unwrap(), length - 1),
+                None
+            );
             if let Ok(parsed) = parse_bytes(&bytes, &config, &options, &choices) {
                 let nodes = parsed.decoded.trees.iter().map(|t| t.count as usize).sum();
                 assert_eq!(counted, Some(nodes), "{}", path.display());
