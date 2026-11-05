@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The development checks, as concurrent lanes. `fast` is every commit's: formatting,
 # clippy, the debug tests and the Python checks. `full` adds the release, research and
-# bench tests, the property tests at their full counts, cross clippy, Miri, the spill
+# bench tests, the property tests at their full counts, cross clippy, generic x86-64
+# dispatch tests (native or Rosetta, at the detected and base levels), Miri, the spill
 # checks and the bench crate on the core artifacts (TEST_ARTIFACTS_BASE, as its tests
 # read it).
 #
@@ -62,7 +63,8 @@ lane_cross() {
     CC_aarch64_unknown_linux_gnu=clang \
     CFLAGS_aarch64_unknown_linux_gnu="--target=aarch64-unknown-linux-gnu -isystem $sdk/usr/include -D__arm64__"
   for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids" \
-           "x86_64-unknown-linux-gnu x86-64-v4" "x86_64-unknown-linux-gnu x86-64" \
+           "x86_64-unknown-linux-gnu x86-64-v4" "x86_64-unknown-linux-gnu x86-64-v3" \
+           "x86_64-unknown-linux-gnu x86-64" \
            "aarch64-unknown-linux-gnu neoverse-v2"; do
     set -- $t
     for f in "" "--features treewalker-bench/external-bench,treewalker-bench/pmu" "--features treewalker-bench/research"; do
@@ -72,17 +74,31 @@ lane_cross() {
   done
 }
 
+lane_dispatch() {
+  export CARGO_TARGET_DIR=$OUT/dispatch
+  set --
+  case "$(uname -sm)" in
+    "Darwin arm64") set -- --target x86_64-apple-darwin ;;
+    *" x86_64") ;;
+    *) return 0 ;;
+  esac
+  step 26 dispatch-detected env -u TREEWALKER_ISA RUSTFLAGS="-C target-cpu=x86-64" \
+    cargo test -p treewalker-gbdt --release --features research "$@"
+  step 27 dispatch-base env TREEWALKER_ISA=base RUSTFLAGS="-C target-cpu=x86-64" \
+    cargo test -p treewalker-gbdt --release --features research "$@"
+}
+
 lane_python() {
   if [ "$MODE" = full ]; then
-    step 23 spills-m4 "$PY" experiments/scripts/walk_spills.py
-    step 24 spills-x86 "$PY" experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu emeraldrapids
-    step 25 spills-x86-v4 "$PY" experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu x86-64-v4
-    step 26 spills-v2 "$PY" experiments/scripts/walk_spills.py --target aarch64-unknown-linux-gnu --cpu neoverse-v2
+    step 28 spills-m4 "$PY" experiments/scripts/walk_spills.py
+    step 29 spills-x86 "$PY" experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu emeraldrapids
+    step 30 spills-x86-v4 "$PY" experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu x86-64-v4
+    step 31 spills-v2 "$PY" experiments/scripts/walk_spills.py --target aarch64-unknown-linux-gnu --cpu neoverse-v2
   fi
-  step 27 pytest "$PY" -m pytest -q
-  step 28 ruff "$PY" -m ruff check
-  step 29 ruff-format "$PY" -m ruff format --check
-  step 30 mypy "$PY" -m mypy
+  step 32 pytest "$PY" -m pytest -q
+  step 33 ruff "$PY" -m ruff check
+  step 34 ruff-format "$PY" -m ruff format --check
+  step 35 mypy "$PY" -m mypy
 }
 
 # The layout's tests of x86-64's node encoding, byte-offset links and the bounds k + 1,
@@ -102,14 +118,14 @@ miri() {
 
 lane_artifacts() {
   export CARGO_TARGET_DIR=$OUT/artifacts
-  step 37 artifacts-core cargo test --manifest-path experiments/benchmarks/Cargo.toml --release --features research
+  step 42 artifacts-core cargo test --manifest-path experiments/benchmarks/Cargo.toml --release --features research
 }
 
 echo "checks ($MODE) of $(git rev-parse --short HEAD), $(date '+%F %T')" | tee "$L/summary.txt"
 lane_native & lane_python &
 if [ "$MODE" = full ]; then
-  lane_property & lane_cross & lane_artifacts &
-  n=30
+  lane_property & lane_cross & lane_dispatch & lane_artifacts &
+  n=35
   for t in "x86-64 x86_64-unknown-linux-gnu -Ctarget-cpu=x86-64" \
            "x86-64-v3 x86_64-unknown-linux-gnu -Ctarget-cpu=x86-64-v3" "riscv64 riscv64gc-unknown-linux-gnu"; do
     set -- $t

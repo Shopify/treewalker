@@ -125,9 +125,11 @@ and at `base`, so that the levels a default build dispatches to run on x86-64 ha
 The fast checks are `cargo fmt --check`, `cargo clippy --workspace --all-targets --
 -D warnings` with and without the research features, `cargo test --workspace`, and the
 Python tests, ruff and mypy: 44 s on an M4 Pro once built. The full checks, 4 to 5
-minutes, add the release tests with the research API, the bench crate's tests, the
-property tests at their full counts (`TW_PROPTEST_FULL=1`), cross clippy, Miri, the
-spill checks and the bench crate's suite on the core artifacts (`TEST_ARTIFACTS_BASE`).
+minutes, add the release tests with the research API, the same tests in a generic
+x86-64 build at the detected level and at `TREEWALKER_ISA=base` (natively on x86-64,
+under Rosetta on Apple silicon), the bench crate's tests, the property tests at their
+full counts (`TW_PROPTEST_FULL=1`), cross clippy, Miri, the spill checks and the bench
+crate's suite on the core artifacts (`TEST_ARTIFACTS_BASE`).
 
 What guards what. The property tests (`tests/property.rs`) check production, each call
 and the research predictor against an exact oracle and the full walk, bit for bit, on
@@ -153,8 +155,8 @@ export CC_x86_64_unknown_linux_gnu=clang \
   CC_aarch64_unknown_linux_gnu=clang \
   CFLAGS_aarch64_unknown_linux_gnu="--target=aarch64-unknown-linux-gnu -isystem $SDK/usr/include -D__arm64__"
 for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids" \
-         "x86_64-unknown-linux-gnu x86-64-v4" "x86_64-unknown-linux-gnu x86-64" \
-         "aarch64-unknown-linux-gnu neoverse-v2"; do
+         "x86_64-unknown-linux-gnu x86-64-v4" "x86_64-unknown-linux-gnu x86-64-v3" \
+         "x86_64-unknown-linux-gnu x86-64" "aarch64-unknown-linux-gnu neoverse-v2"; do
   set -- $t
   for f in "" "--features treewalker-bench/external-bench,treewalker-bench/pmu" \
            "--features treewalker-bench/research"; do

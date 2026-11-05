@@ -955,13 +955,15 @@ mod tests {
         check_lists(None);
     }
 
-    #[cfg(all(
-        target_arch = "x86_64",
-        target_feature = "avx512f",
-        target_feature = "avx512vl"
-    ))]
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn compressed_lists_match_the_loop_item_by_item() {
+        if !(is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512vl")
+            && is_x86_feature_detected!("avx512dq"))
+        {
+            return;
+        }
         check_lists(Some(super::list_avx512::<Handle>));
     }
 
@@ -995,7 +997,9 @@ mod tests {
                 let start = (next() % 9) as usize;
                 let a = lists(&words, &items, start, list_scalar::<Handle>, 0);
                 let Some(f) = compressed else { continue };
-                let b = lists(&words, &items, start, f, super::LISTED_SLACK);
+                // The direct call needs AVX-512's slack even when this build's
+                // native level does not use compression (for example x86-64-v3).
+                let b = lists(&words, &items, start, f, 7);
                 assert_eq!(
                     (a.n_leaves, a.n_listed),
                     (b.n_leaves, b.n_listed),
