@@ -58,6 +58,7 @@ module-root = "experiments"
 
 [tool.pytest.ini_options]
 testpaths = ["experiments/tests"]
+pythonpath = ["experiments/scripts"]
 
 [tool.ruff]
 target-version = "py314"
