@@ -628,11 +628,10 @@ fn trees_at(input: &(impl At + ?Sized)) -> Option<(u64, u64, u64)> {
     // num_class, leaf_vector_shape, target_id, class_id and postprocessor; then
     // sigmoid_alpha and ratio_c; base_scores; attributes.
     for (size, after) in [(4, 0), (4, 0), (4, 0), (4, 0), (1, 8), (8, 0), (1, 0)] {
-        let len = integer_at(input, at, 8)?;
-        at = len.checked_mul(size)?.checked_add(at + 8 + after)?;
+        at = skip(at, integer_at(input, at, 8)?, size)?.checked_add(after)?;
     }
     // num_opt_field_per_model.
-    Some((at + 4, trees, value))
+    Some((at.checked_add(4)?, trees, value))
 }
 
 /// The offset after an array of `len` entries of `size` bytes at `at`.
@@ -1244,5 +1243,32 @@ mod tests {
             }
         }
         assert!(decoded >= 10);
+    }
+
+    /// A header length that takes the trees' offset past `u64::MAX`, or to within 4
+    /// bytes of it, gives no node count, and the decoder rejects it.
+    #[test]
+    fn header_lengths_near_u64_max_give_no_count() {
+        let bytes = checkpoint(&[tree(3, &[])]);
+        let attributes = bytes
+            .windows(10)
+            .position(|w| w == [2, 0, 0, 0, 0, 0, 0, 0, b'{', b'}'])
+            .unwrap();
+        let config = WalkerConfig::builder(2)
+            .max_group_width(16)
+            .varying([0])
+            .build()
+            .unwrap();
+        let (options, choices) = (LoadOptions::default(), Choices::default());
+        for below in 0..attributes as u64 + 16 {
+            let mut bytes = bytes.clone();
+            bytes[attributes..attributes + 8].copy_from_slice(&(u64::MAX - below).to_le_bytes());
+            assert_eq!(count_nodes(bytes.as_slice(), u64::MAX), None, "{below}");
+            let parsed = parse_bytes(&bytes, &config, &options, &choices);
+            assert!(
+                matches!(parsed, Err(LoadError::MalformedModel(_))),
+                "{below}"
+            );
+        }
     }
 }
