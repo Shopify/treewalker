@@ -107,18 +107,19 @@ def test_version_4_counts_single_rows_in_leaf_events(tmp_path):
     assert r["constant_steps"] == 2 * (200 + 3 - 20) - 2 * 40
 
 
-def test_versions_4_5_and_6_read_alike(tmp_path):
-    # Version 5 changes only `pieces`, which no column reads, and version 6 drops it.
+def test_versions_4_to_7_read_alike(tmp_path):
+    # Version 5 changes only `pieces`, which no column reads, and version 6 drops it;
+    # version 7 changes what `precompute_row_evals` counts, not how it is read.
     terms = {}
-    for version in (4, 5, 6):
+    for version in (4, 5, 6, 7):
         (tmp_path / str(version)).mkdir()
         r = work(tmp_path / str(version), version, ["all-on"])["all-on"]
         terms[version] = {k: r[k] for k in counters.COUNTERS}
-    assert terms[4] == terms[5] == terms[6]
+    assert terms[4] == terms[5] == terms[6] == terms[7]
 
 
 def test_unknown_versions_are_refused(tmp_path):
-    with pytest.raises(ValueError, match="version 7"):
-        work(tmp_path, 7, ["all-on"])
+    with pytest.raises(ValueError, match="version 8"):
+        work(tmp_path, 8, ["all-on"])
     with pytest.raises(ValueError, match="version 1"):
         counters.terms(1, V2, 10)

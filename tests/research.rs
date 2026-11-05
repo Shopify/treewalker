@@ -179,7 +179,7 @@ fn counted(forest: &Forest, variant: Ablation, rows: &[f64]) -> WorkCounters {
 
 #[test]
 fn counters_count_the_work_of_a_group() {
-    assert_eq!(COUNTERS_VERSION, 6);
+    assert_eq!(COUNTERS_VERSION, 7);
     let data = values("data.bin");
     let rows = &data[..64];
     let forest = load("sigmoid_f64.bin", &LoadOptions::default());

@@ -3,10 +3,10 @@
 The released stats (grid3_stats_*.csv, scenario_credit_stats_*.csv) hold the
 version 1 counters of treewalker-gbdt 1.x, and the paper's cost terms are defined
 on their columns. A run's counters.parquet records counters_version: 2 for the
-2.x recursive kernel, 3 to 6 for the 3.x kernel. `terms` maps one cell and
+2.x recursive kernel, 3 to 7 for the 3.x kernel. `terms` maps one cell and
 variant's counters, summed over its groups, onto those columns:
 
-    CSV column            version 2               versions 3 to 6
+    CSV column            version 2               versions 3 to 7
     constant_steps        constant_steps          walk_steps + prefix_steps
                                                   - varying_events - leaf events
     varying_splits        varying_splits          varying_events
@@ -19,9 +19,12 @@ variant's counters, summed over its groups, onto those columns:
 Version 3's leaf events are the masked path's leaf_events plus one per tree
 for each single row, whose walk steps through its leaf too; version 4's
 leaf_events count single rows' leaves already, version 5 changes only
-``pieces``, which no column reads, and version 6 drops it. The counted constant
-steps are the walk's and the prefix's node steps that end in neither event; at
-G = 1 the varying splits are constant ones.
+``pieces``, which no column reads, and version 6 drops it. Version 7 counts
+precompute_row_evals for a categorical feature as one evaluation per row for
+each of its predicates, as version 2 does; versions 3 to 6 counted a code per
+row plus its rank exceptions. The counted constant steps are the walk's and
+the prefix's node steps that end in neither event; at G = 1 the varying splits
+are constant ones.
 """
 
 from collections.abc import Mapping
@@ -43,7 +46,7 @@ def terms(version: int, c: Mapping[str, int], trees: int) -> dict[str, int | Non
     counter columns; ``trees`` is the model's tree count."""
     if version == 2:
         return {k: c[k] for k in COUNTERS}
-    if version in (3, 4, 5, 6):
+    if version in (3, 4, 5, 6, 7):
         leaves = c["leaf_events"] + (c["single_rows"] * trees if version == 3 else 0)
         return {
             "constant_steps": c["walk_steps"] + c["prefix_steps"] - c["varying_events"] - leaves,

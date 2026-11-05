@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixes
+
+- Research: `WorkCounters::precompute_row_evals` counts one evaluation per row for each
+  categorical predicate of a varying feature, as its documentation defines it and as
+  2.x counted. 3.0 to 3.2.0 counted a row's code once, plus the code's rank
+  exceptions, whatever the predicates: two predicates on N unlisted rows counted N
+  rather than 2N. `COUNTERS_VERSION` is 7, rather than 6, so that recorded counters
+  say which count they hold; predictions are unchanged.
+
 ### Performance
 
 - The prefix rule values each run of trees that a deeper group leaves on either side

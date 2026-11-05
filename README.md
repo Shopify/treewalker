@@ -272,7 +272,7 @@ uses to measure the kernel. Serving needs none of it.
   the rule's groups; 0 for none) and `pack` (`Some(true)` or `Some(false)` to pack
   the categorical chains' rank fields or not, instead of the packing rule).
 - `predict_group` and `predict_groups` are the timed build; `predict_group_counted`
-  returns `WorkCounters` (`COUNTERS_VERSION` 6: groups, single rows, bins, precompute,
+  returns `WorkCounters` (`COUNTERS_VERSION` 7: groups, single rows, bins, precompute,
   event scans, prefix and walk steps, lane slots, passes, events, splits, runs and
   arena slots; `fields()` lists them) and adds its phase times to `take_phases()`
   (`Phases`: bins, precompute, prefix, walk, resolve, leaf pass and finish).
