@@ -145,8 +145,10 @@ data input gives an error; a violated calling contract panics, as documented (se
 tests natively on their machines.
 
 The Linux-only code (the timestamp counter's calibration, `perf_event`) is checked by
-cross clippy. Parquet's zstd is C, so without a Linux cross toolchain the check compiles
-it with clang and the macOS SDK headers; nothing builds or links for Linux:
+cross clippy, and the library's fallbacks for other architectures (the plain-word
+masks, the empty prefetch) by its RISC-V run. Parquet's zstd is C, so without a Linux
+cross toolchain the check compiles it with clang and the macOS SDK headers; nothing
+builds or links for Linux:
 
 ```bash
 SDK=$(xcrun --show-sdk-path)
@@ -162,6 +164,10 @@ for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids
            "--features treewalker-bench/research"; do
     RUSTFLAGS="-C target-cpu=$2" cargo clippy --target $1 --workspace --all-targets $f -- -D warnings
   done
+done
+for f in "" "--features research"; do
+  RUSTFLAGS= cargo clippy --target riscv64gc-unknown-linux-gnu -p treewalker-gbdt --all-targets $f \
+    -- -D warnings
 done
 ```
 

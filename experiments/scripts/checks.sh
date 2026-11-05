@@ -72,6 +72,11 @@ lane_cross() {
       step $n "cross $1 $2 $f" env RUSTFLAGS="-C target-cpu=$2" cargo clippy --target "$1" --workspace --all-targets $f -- -D warnings
     done
   done
+  for f in "" "--features research"; do
+    n=$((n + 1))
+    step $n "cross riscv64gc-unknown-linux-gnu $f" env RUSTFLAGS="" \
+      cargo clippy --target riscv64gc-unknown-linux-gnu -p treewalker-gbdt --all-targets $f -- -D warnings
+  done
 }
 
 lane_dispatch() {
@@ -82,23 +87,23 @@ lane_dispatch() {
     *" x86_64") ;;
     *) return 0 ;;
   esac
-  step 26 dispatch-detected env -u TREEWALKER_ISA RUSTFLAGS="-C target-cpu=x86-64" \
+  step 28 dispatch-detected env -u TREEWALKER_ISA RUSTFLAGS="-C target-cpu=x86-64" \
     cargo test -p treewalker-gbdt --release --features research "$@"
-  step 27 dispatch-base env TREEWALKER_ISA=base RUSTFLAGS="-C target-cpu=x86-64" \
+  step 29 dispatch-base env TREEWALKER_ISA=base RUSTFLAGS="-C target-cpu=x86-64" \
     cargo test -p treewalker-gbdt --release --features research "$@"
 }
 
 lane_python() {
   if [ "$MODE" = full ]; then
-    step 28 spills-m4 "$PY" experiments/scripts/walk_spills.py
-    step 29 spills-x86 "$PY" experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu emeraldrapids
-    step 30 spills-x86-v4 "$PY" experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu x86-64-v4
-    step 31 spills-v2 "$PY" experiments/scripts/walk_spills.py --target aarch64-unknown-linux-gnu --cpu neoverse-v2
+    step 30 spills-m4 "$PY" experiments/scripts/walk_spills.py
+    step 31 spills-x86 "$PY" experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu emeraldrapids
+    step 32 spills-x86-v4 "$PY" experiments/scripts/walk_spills.py --target x86_64-unknown-linux-gnu --cpu x86-64-v4
+    step 33 spills-v2 "$PY" experiments/scripts/walk_spills.py --target aarch64-unknown-linux-gnu --cpu neoverse-v2
   fi
-  step 32 pytest "$PY" -m pytest -q
-  step 33 ruff "$PY" -m ruff check
-  step 34 ruff-format "$PY" -m ruff format --check
-  step 35 mypy "$PY" -m mypy
+  step 34 pytest "$PY" -m pytest -q
+  step 35 ruff "$PY" -m ruff check
+  step 36 ruff-format "$PY" -m ruff format --check
+  step 37 mypy "$PY" -m mypy
 }
 
 # The layout's tests of x86-64's node encoding, byte-offset links and the bounds k + 1,
@@ -118,14 +123,14 @@ miri() {
 
 lane_artifacts() {
   export CARGO_TARGET_DIR=$OUT/artifacts
-  step 42 artifacts-core cargo test --manifest-path experiments/benchmarks/Cargo.toml --release --features research
+  step 44 artifacts-core cargo test --manifest-path experiments/benchmarks/Cargo.toml --release --features research
 }
 
 echo "checks ($MODE) of $(git rev-parse --short HEAD), $(date '+%F %T')" | tee "$L/summary.txt"
 lane_native & lane_python &
 if [ "$MODE" = full ]; then
   lane_property & lane_cross & lane_dispatch & lane_artifacts &
-  n=35
+  n=37
   for t in "x86-64 x86_64-unknown-linux-gnu -Ctarget-cpu=x86-64" \
            "x86-64-v3 x86_64-unknown-linux-gnu -Ctarget-cpu=x86-64-v3" "riscv64 riscv64gc-unknown-linux-gnu"; do
     set -- $t
