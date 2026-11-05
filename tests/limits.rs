@@ -37,17 +37,32 @@ const fn model(trees: Vec<Tree>, n_features: usize) -> Model {
     }
 }
 
-/// A complete binary tree in breadth-first order, `internal` splits on feature 0 at
-/// distinct thresholds, and leaves valued by position.
+/// A complete binary tree in breadth-first order, `internal` splits on feature 0, and
+/// leaves valued by position. The splits' thresholds are `k + 0.5` for their in-order
+/// rank `k`, a binary search tree, so that inputs from 0 to `internal` reach every
+/// split.
 fn complete(internal: usize) -> Tree {
     let total = 2 * internal + 1;
+    let mut rank = vec![0usize; internal];
+    // In order: down the left children, then each split, then its right subtree.
+    let (mut stack, mut at, mut k) = (Vec::new(), 0usize, 0usize);
+    while at < internal || !stack.is_empty() {
+        while at < internal {
+            stack.push(at);
+            at = 2 * at + 1;
+        }
+        let i = stack.pop().unwrap();
+        rank[i] = k;
+        k += 1;
+        at = 2 * i + 2;
+    }
     let nodes = (0..total)
         .map(|i| {
             if i < internal {
                 Node::Numeric {
                     feature: 0,
                     op: Op::Le,
-                    threshold: i as f64 + 0.5,
+                    threshold: rank[i] as f64 + 0.5,
                     default_left: i % 3 == 0,
                     left: 2 * i + 1,
                     right: 2 * i + 2,
@@ -124,6 +139,33 @@ fn more_than_65535_varying_predicates() {
         let forest = check(&m, config, &ablation, &rows);
         assert_eq!(predicates(&forest), 70_000);
     }
+    // The rows' paths pass the splits numbered past 65,535, the old IDs' bound.
+    let past = rows
+        .chunks_exact(2)
+        .filter(|r| path(&m.trees[0], r[0]).any(|i| i > 65_535))
+        .count();
+    assert!(past >= 10, "{past} rows pass a split past 65,535");
+}
+
+/// The splits a row of feature 0 at `x` passes in `tree`, of splits on feature 0.
+fn path(tree: &Tree, x: f64) -> impl Iterator<Item = usize> + '_ {
+    std::iter::successors(Some(0), move |&i| match tree.nodes[i] {
+        Node::Numeric {
+            threshold,
+            default_left,
+            left,
+            right,
+            ..
+        } => Some(if x.is_nan() {
+            if default_left { left } else { right }
+        } else if x <= threshold {
+            left
+        } else {
+            right
+        }),
+        _ => None,
+    })
+    .filter(move |&i| matches!(tree.nodes[i], Node::Numeric { .. }))
 }
 
 #[test]
