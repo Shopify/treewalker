@@ -884,15 +884,10 @@ unsafe fn list_avx512<C: Copy>(
     (n_leaves, n_listed)
 }
 
-/// `list_avx512` against [`list_scalar`]. These run only where the build enables
-/// AVX-512F and VL (`-C target-cpu=x86-64-v4`, or `native` on such a CPU): first run
-/// on GCE, since neither Rosetta nor Miri executes AVX-512.
-#[cfg(all(
-    test,
-    target_arch = "x86_64",
-    target_feature = "avx512f",
-    target_feature = "avx512vl"
-))]
+/// `list_avx512` against [`list_scalar`]. These build on every x86-64 target, the
+/// generic one that dispatches to `list_avx512` among them, and run where the CPU has
+/// AVX-512F, VL and DQ: on GCE, since neither Rosetta nor Miri executes AVX-512.
+#[cfg(all(test, target_arch = "x86_64"))]
 mod tests {
     use super::{FLAG_LEAF, Handle, Item, LISTED_SLACK, list_avx512, list_scalar};
 
@@ -907,9 +902,11 @@ mod tests {
     }
 
     /// Both loops over the same input, each into buffers sized as [`super::list`]
-    /// requires, with a guard past them.
+    /// requires, with a guard past them: the leaf entries past `n_leaves` plus 1 +
+    /// [`LISTED_SLACK`], and `n_items` + [`LISTED_SLACK`] positions.
     fn lists(words: &[u64], items: &[Item<Handle>], n_leaves: usize, avx512: bool) -> Lists {
         let n = words.len();
+        let leaf_words = words.iter().filter(|&&w| w & FLAG_LEAF != 0).count();
         let guard = Item {
             node: GUARD,
             carry: Handle(GUARD),
@@ -932,7 +929,7 @@ mod tests {
                 listed.as_mut_ptr(),
             )
         };
-        let written = n_leaves + n + 1 + LISTED_SLACK;
+        let written = n_leaves + leaf_words + 1 + LISTED_SLACK;
         assert!(
             leaves[written..]
                 .iter()
@@ -949,6 +946,18 @@ mod tests {
 
     #[test]
     fn compressed_lists_match_the_loop_item_by_item() {
+        // A build that neither compresses nor dispatches, x86-64-v3 say, gives no slack.
+        if LISTED_SLACK == 0 {
+            eprintln!("Skipping: this build never lists 8 items at a time");
+            return;
+        }
+        if !(is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512vl")
+            && is_x86_feature_detected!("avx512dq"))
+        {
+            eprintln!("Skipping: the CPU lacks AVX-512F, VL or DQ");
+            return;
+        }
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
         let mut next = move || {
             state ^= state << 13;
