@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 3.2.0
+
+In 3.2, models with a categorical feature of hundreds of thousands of distinct
+heavy sets load at the default limits, which they did not in 3.0 and 3.1, and trees
+of many leaves share chunks. On Genoa (c3d-standard-90), the chunking took the 1,190
+serving cells 0.949 of 3.1.0's time, geometric mean, and the depth-16 models 0.826;
+the categorical change, measured after it, 0.999 to 1.001. Malformed models
+that panicked 3.1's debug builds fail to load with `LoadError::MalformedModel`, and a
+binary model past `LoadOptions::max_binary_bytes` fails before it reserves its nodes.
+The serving API is unchanged, a layout holds at most 2^27 slots rather than 2^30, and
+the research API's `LoadAblation` gains a field. Outputs are unchanged.
 
 ### Changes
 
