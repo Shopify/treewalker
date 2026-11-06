@@ -13,8 +13,8 @@ use std::collections::{BTreeSet, HashMap};
 use super::chains::{self, Cover, Sets};
 use super::{
     BOUND_BIAS, BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, ExceptionSlots,
-    FIRST_CATEGORY, FLAG_LEAF, FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT,
-    MAX_PREDICATES, MAX_SLOTS, MISSING, NO_CATEGORY, Need, SHIFT_AT, SLOT_SHIFT, node_link,
+    FIRST_CATEGORY, FLAG_LEAF, FeatureBins, Layout, LayoutNode, MASK_SHIFT, MAX_PREDICATES,
+    MAX_SLOTS, MISSING, NO_CATEGORY, Need, SHIFT_AT, SLOT_SHIFT, node_link,
 };
 use crate::LoadError;
 use crate::config::WalkerConfig;
@@ -899,11 +899,10 @@ fn encode_trees(
     // node's kind, which is unpredictable: its light children and its leaves and
     // splits listed apart, its expected steps, then its leaves and its splits,
     // each rewritten in place after it is read.
-    let leaf_total: usize = trees.iter().map(|t| t.leaves as usize).sum();
-    let mut leaves = match plan {
-        Plan::Fixed(_) => LeafValues::Fixed(Vec::with_capacity(leaf_total)),
-        Plan::Wide(_) => LeafValues::Wide(Vec::with_capacity(leaf_total)),
-    };
+    let mut leaves = Vec::with_capacity(match plan {
+        Plan::Fixed(_) => 0,
+        Plan::Wide(_) => trees.iter().map(|t| t.leaves as usize).sum(),
+    });
     #[cfg(any(test, feature = "research"))]
     let mut parsed = vec![
         crate::model::Node {
@@ -958,25 +957,16 @@ fn encode_trees(
         for &local in &kinds.leaves {
             let at = start + local as usize;
             let value = Packed::of(nodes[at]).value();
-            let leaf = match &mut leaves {
-                LeafValues::Fixed(values) => {
-                    let Plan::Fixed(scale) = plan else {
-                        unreachable!()
-                    };
-                    values.push(crate::exact::FixedLeaf::new(value, scale));
-                    values.len() - 1
+            nodes[at] = match plan {
+                Plan::Fixed(scale) => LayoutNode::fixed(crate::exact::FixedLeaf::new(value, scale)),
+                Plan::Wide(wide) => {
+                    leaves.push(wide.leaf(value));
+                    let leaf = (leaves.len() - 1) as u64;
+                    LayoutNode {
+                        w0: leaf,
+                        w1: leaf | FLAG_LEAF,
+                    }
                 }
-                LeafValues::Wide(values) => {
-                    let Plan::Wide(wide) = plan else {
-                        unreachable!()
-                    };
-                    values.push(wide.leaf(value));
-                    values.len() - 1
-                }
-            } as u64;
-            nodes[at] = LayoutNode {
-                w0: leaf,
-                w1: leaf | FLAG_LEAF,
             };
             #[cfg(any(test, feature = "research"))]
             {

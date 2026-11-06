@@ -31,6 +31,24 @@ fn choices(rng: &mut Rng) -> Choices {
 // Checks
 // ---------------------------------------------------------------------------
 
+#[test]
+fn inline_fixed_leaves_round_trip() {
+    let check = |value: f64, scale: i32| {
+        let fixed = FixedLeaf::new(value, scale);
+        let node = LayoutNode::fixed(fixed);
+        assert_eq!(LayoutNode::fixed_value(node.w1), fixed);
+        assert!(node.w0 == 0 && node.is_leaf());
+    };
+    for odd in [1u64, 3, (1 << 52) - 1, (1 << 53) - 1] {
+        let width = u64::BITS - odd.leading_zeros();
+        for shift in 0..=125 - width {
+            check(odd as f64, shift as i32);
+            check(-(odd as f64), shift as i32);
+        }
+    }
+    check(0.0, 0);
+}
+
 /// Every split of `model` takes the same child through the layout as through the
 /// parsed nodes, for
 /// bins of every feature and, on constant splits, bins of the constant features.
@@ -128,7 +146,8 @@ fn check_bins(bins: &BinMap, row: &[f64], reused: &mut [Vec<u32>; 2]) {
 }
 
 /// The heavy child is next, light children lie later in the same tree, slots and
-/// leaf-value indices are in range, the dummy loops on itself, and the fields match
+/// Wide table indices are in range, Fixed values round trip, the dummy loops on
+/// itself, and the fields match
 /// the parsed nodes.
 fn check_structure(model: &Model) {
     let layout = &model.layout;
@@ -163,23 +182,23 @@ fn check_structure(model: &Model) {
             assert!(new.slot() < layout.bins.n_slots(), "node {i}");
             assert_eq!(new.is_leaf(), old.is_leaf(), "node {i}");
             if new.is_leaf() {
-                let leaf = new.child() as usize;
-                assert_eq!(new.w0, leaf as u64);
-                assert!(leaf < n_leaves && !seen[leaf], "leaf {leaf}");
-                seen[leaf] = true;
                 assert!(!new.is_varying());
-                assert_eq!(new.mask_field(), 0, "leaves read the all-rows mask");
-                match (&layout.leaves, model.plan) {
-                    (LeafValues::Fixed(values), crate::exact::Plan::Fixed(e)) => {
+                match model.plan {
+                    crate::exact::Plan::Fixed(e) => {
+                        assert_eq!(new.w0, 0);
                         assert_eq!(
-                            i128::from(values[leaf]),
+                            i128::from(LayoutNode::fixed_value(new.w1)),
                             crate::exact::to_fixed(old.value, e)
                         );
                     }
-                    (LeafValues::Wide(values), crate::exact::Plan::Wide(wide)) => {
-                        assert_eq!(values[leaf], wide.leaf(old.value));
+                    crate::exact::Plan::Wide(wide) => {
+                        let leaf = new.child() as usize;
+                        assert_eq!(new.w0, leaf as u64);
+                        assert!(leaf < n_leaves && !seen[leaf], "leaf {leaf}");
+                        seen[leaf] = true;
+                        assert_eq!(new.mask_field(), 0);
+                        assert_eq!(layout.leaves[leaf], wide.leaf(old.value));
                     }
-                    _ => panic!("leaf values differ from the plan"),
                 }
                 continue;
             }
@@ -230,10 +249,9 @@ fn check_structure(model: &Model) {
         f64::from(varying) / f64::from(internal)
     };
     assert_eq!(layout.varying_share.to_bits(), share.to_bits());
-    assert_eq!(
-        matches!(layout.leaves, LeafValues::Fixed(_)),
-        matches!(model.plan, crate::exact::Plan::Fixed(_))
-    );
+    if matches!(model.plan, crate::exact::Plan::Fixed(_)) {
+        assert!(layout.leaves.is_empty());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -545,9 +563,9 @@ fn generated_models_decide_like_the_parsed_nodes() {
         categorical += usize::from(slots > 0);
         chained += usize::from(layout.chain_sets > layout.chains);
         bits += usize::from(layout.bins.has_shifts());
-        match layout.leaves {
-            LeafValues::Fixed(_) => fixed += 1,
-            LeafValues::Wide(_) => float += 1,
+        match forest.model.plan {
+            crate::exact::Plan::Fixed(_) => fixed += 1,
+            crate::exact::Plan::Wide(_) => float += 1,
         }
         check_model(&mut rng, &forest, 200);
     }

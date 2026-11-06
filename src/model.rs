@@ -437,8 +437,6 @@ pub(crate) struct Model {
     pub(crate) steps: crate::rules::Steps,
     /// How the leaf values are summed exactly.
     pub(crate) plan: Plan,
-    /// The kernel's nodes, bins, pooled regions and leaf values, the trees' nodes in
-    /// input order and their leaf values in tree order.
     pub(crate) layout: crate::load::layout::Layout,
     /// What each tree's passes need of a predictor's scratch.
     pub(crate) needs: Vec<crate::load::layout::Need>,
