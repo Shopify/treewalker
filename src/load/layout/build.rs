@@ -489,6 +489,9 @@ fn category_slots(
         tables.defaults[f.slot + word as usize] |= (listed as u32) << low;
     }
     tables.slots += n_words;
+    // The no-category code is in no list, so it has no exceptions and fresh bins
+    // hold its words, as [`BinMap::fill_with`] needs.
+    debug_assert_eq!(bounds[NO_CATEGORY as usize + 1], 0);
     let too_many = || LoadError::Limit("the rank tables exceed u32 exceptions".into());
     let base = tables.exceptions.len();
     bounds[0] = base as u32;

@@ -598,6 +598,51 @@ fn fixtures_decide_like_the_parsed_nodes() {
 // Hand-checked encodings
 // ---------------------------------------------------------------------------
 
+#[test]
+fn reused_fills_match_fresh_bins_across_the_restore_boundary() {
+    let mut bins = Layout::empty().bins;
+    bins.n_features = 1;
+    bins.n_slots = 22;
+    bins.n_categorical = 1;
+    bins.defaults.resize(22, 99);
+    bins.thresholds = vec![0.5];
+    let c = CategoryBins {
+        codes: CategoryCodes::new(&mut bins.books, &[0, 1, 2, 3]).unwrap(),
+        slot: 5,
+        slots: 16,
+        offsets: 0,
+        held: 0,
+    };
+    bins.offsets = vec![0, 0, 0, 1, 3, 6, 6];
+    bins.exceptions = vec![
+        [5, 100],
+        [10, 101],
+        [20, 102],
+        [5, 103],
+        [10, 104],
+        [20, 105],
+    ];
+    bins.constant.push(FeatureBins {
+        feature: 0,
+        thresholds: 0..1,
+        slot: 1,
+        categories: Some(c),
+    });
+    let boundary = c.slots() / RESTORE_DENSITY;
+    for (code, count) in [(2, boundary - 1), (3, boundary), (4, boundary + 1)] {
+        assert_eq!(bins.exceptions(c, code).len(), count);
+    }
+    let mut reused = bins.new_bins();
+    for x in [0.25, 0.75, 1.0, 2.0, 0.25, 2.0, 3.0, -1.0, f64::NAN] {
+        let mut fresh = bins.new_bins();
+        bins.fill(&[x], &mut fresh, true);
+        bins.fill(&[x], &mut reused, true);
+        assert_eq!(reused, fresh);
+        bins.fill(&[x], &mut reused, true);
+        assert_eq!(reused, fresh);
+    }
+}
+
 fn one_split(test: &str, default_left: bool, f32: bool) -> Forest {
     let json = json::regressor(f32, 1, &[json::stump(test, default_left, (1, 5))]);
     let config = WalkerConfig::builder(1)
