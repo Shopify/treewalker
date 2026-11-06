@@ -485,6 +485,10 @@ pub(crate) struct BinMap {
 /// The dummy's slot.
 const DUMMY_SLOT: usize = 0;
 
+/// Restore a feature's slots in one copy from the defaults, rather than one
+/// exception at a time, when its held code has more exceptions than its slots / this.
+const RESTORE_DENSITY: usize = 8;
+
 impl BinMap {
     /// Slots in a bins buffer.
     #[inline]
@@ -610,8 +614,7 @@ impl BinMap {
     /// with `F32`, else a float64 model: the constant features' slots, and with `all`
     /// the varying features' too, as a single row needs. Slots of features without
     /// splits are left as they are. A categorical feature's chain slots hold the
-    /// defaults but for its held code's exceptions, so it restores those and writes
-    /// its code's: work in the exceptions, not the words.
+    /// defaults but for its held code's exceptions.
     #[inline]
     pub(crate) fn fill_with<const F32: bool>(&self, row: &[f64], bins: &mut [u32], all: bool) {
         debug_assert_eq!(F32, self.f32);
@@ -636,8 +639,17 @@ impl BinMap {
             if let Some(c) = b.categories {
                 let code = c.codes.code::<F32>(&self.books, x);
                 let held = self.n_slots + c.held;
-                for &[s, _] in self.exceptions(c, bins[held]) {
-                    bins[s as usize] = self.defaults[s as usize];
+                if code == bins[held] {
+                    continue;
+                }
+                let previous = self.exceptions(c, bins[held]);
+                if previous.len() > c.slots() / RESTORE_DENSITY {
+                    let range = c.slot..c.slot + c.slots();
+                    bins[range.clone()].copy_from_slice(&self.defaults[range]);
+                } else {
+                    for &[s, _] in previous {
+                        bins[s as usize] = self.defaults[s as usize];
+                    }
                 }
                 for &[s, word] in self.exceptions(c, code) {
                     bins[s as usize] = word;
