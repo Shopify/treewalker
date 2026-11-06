@@ -281,28 +281,40 @@ fn densely_nested_heavy_sets_pack() {
         pack: Some(false),
         ..LoadAblation::default()
     };
-    let config = WalkerConfig::builder(1)
-        .max_group_width(3)
-        .varying([])
-        .build()
-        .unwrap();
-    let unpacked = Forest::from_bytes_ablated(
-        &bytes,
-        ModelFormat::TreeliteBinaryV4,
-        config,
-        &LoadOptions::default(),
-        &chains,
-    )
-    .unwrap_or_else(|e| panic!("load unpacked: {e}"));
-    let u = unpacked.layout_stats();
-    assert_eq!(
-        (u.chains, u.chain_slots, u.packed),
-        (s.chains, s.chains, false)
-    );
-    assert!(u.rank_table_bytes > s.rank_table_bytes);
-    let mut out = vec![f64::NAN; tripled.len()];
-    unpacked.predictor().predict_fixed(&tripled, 3, &mut out);
-    same(&out, &expected, "unpacked groups");
+    for varying in [false, true] {
+        let config = WalkerConfig::builder(1)
+            .max_group_width(3)
+            .varying(if varying { vec![0] } else { vec![] })
+            .build()
+            .unwrap();
+        let unpacked = Forest::from_bytes_ablated(
+            &bytes,
+            ModelFormat::TreeliteBinaryV4,
+            config,
+            &LoadOptions::default(),
+            &chains,
+        )
+        .unwrap_or_else(|e| panic!("load unpacked: {e}"));
+        let u = unpacked.layout_stats();
+        assert_eq!(
+            (u.chains, u.chain_slots, u.packed),
+            (s.chains, s.chains, false)
+        );
+        assert!(u.chain_slots > 65_536);
+        assert!(u.rank_table_bytes > s.rank_table_bytes);
+        let mut out = vec![f64::NAN; tripled.len()];
+        unpacked.predictor().predict_fixed(&tripled, 3, &mut out);
+        same(&out, &expected, "unpacked groups");
+        unpacked.predictor().predict_fixed(&tripled, 1, &mut out);
+        same(&out, &expected, "unpacked single rows");
+        if varying {
+            let mixed: Vec<f64> = rows.windows(3).flatten().copied().collect();
+            let expected: Vec<f64> = mixed.iter().map(|&x| m.predict(&[x])).collect();
+            let mut out = vec![f64::NAN; mixed.len()];
+            unpacked.predictor().predict_fixed(&mixed, 3, &mut out);
+            same(&out, &expected, "unpacked varying groups");
+        }
+    }
 }
 
 #[test]

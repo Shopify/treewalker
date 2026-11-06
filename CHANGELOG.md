@@ -10,6 +10,9 @@ unchanged.
 
 ### Memory
 
+- The rank tables' exceptions keep their slots relative to their feature, separate
+  from their words: entries take 6 bytes rather than 8, or 8 throughout when a
+  feature has more than 65,536 slots.
 - The rank tables' exceptions are counted, then written in place in a table of
   their exact size, so the build no longer holds every (code, chain, rank) triple
   and a sorted copy, and the loaded model keeps no spare capacity. The cap on the

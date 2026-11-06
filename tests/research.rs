@@ -424,7 +424,7 @@ fn layout_stats_describe_the_kernel_choices() {
     let s = categories.layout_stats();
     assert_eq!(
         (s.rank_table_bytes, s.chain_slots, s.chain_sets),
-        (2 * (4 + 4 * 5) + 8 * (3 + 2), 2, 2)
+        (2 * (4 + 4 * 5) + 6 * (3 + 2), 2, 2)
     );
 }
 
