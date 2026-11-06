@@ -46,6 +46,14 @@ unchanged.
   codes up by table and collects the distinct categories in bits, rather than by
   binary search and a sort of every split's list.
 
+### Formats
+
+- Load native LightGBM text models directly with `.txt` paths or
+  `ModelFormat::LightGbmText`, without exporting through Treelite. The reader
+  matches Treelite 4.7.2's frontend, including its NaN-as-zero routing for None
+  and Zero missing types, rather than LightGBM's zero-as-missing policy. Linear
+  trees and objectives outside the supported identity/sigmoid subset are rejected.
+
 ## 3.2.2
 
 3.2.2 closes a denial of service in the loader found by a security review: a model

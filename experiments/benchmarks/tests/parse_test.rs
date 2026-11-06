@@ -312,7 +312,7 @@ fn test_reject_non_json() {
     let err = Forest::load("model.csv", temp_config("reject_non_json")).unwrap_err();
     assert!(matches!(err, LoadError::Unsupported(_)), "{err}");
     assert!(
-        err.to_string().contains("must end in .bin or .json"),
+        err.to_string().contains("must end in .bin, .json or .txt"),
         "{err}"
     );
 }
