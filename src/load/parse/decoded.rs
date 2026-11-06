@@ -11,6 +11,7 @@
 use crate::exact::Extent;
 use crate::load::layout::LayoutNode;
 use crate::model::{FLAG_CATEGORICAL, FLAG_DEFAULT_LEFT, FLAG_INLINE_CAT, FLAG_VARYING};
+use std::hash::{BuildHasher, RandomState};
 
 /// The tag of a packed split: a quiet NaN's exponent and top fraction bit. Leaf values
 /// are finite, so they never carry it.
@@ -130,17 +131,78 @@ impl Split {
 /// The forest's distinct splits, by (value bits, feature, flags).
 ///
 /// The lookup is an open-addressing table of split IDs, at most half full, probed
-/// linearly from a multiplicative hash of the key: models have few distinct splits
-/// against their nodes (thousands against millions for binned GBDTs), so the table
-/// stays in cache and a lookup is a hash, a load and a compare.
-#[derive(Default)]
+/// linearly from a hash of the key: models have few distinct splits against their
+/// nodes (thousands against millions for binned GBDTs), so the table stays in cache
+/// and a lookup is a hash, a load and a compare.
+///
+/// The hash is drawn at random for each table ([`Tabulation`]), so that a model
+/// cannot choose thresholds that probe one cluster: 3.2.1 and before hashed with
+/// fixed constants, which a file's splits could be made to collide under, so that
+/// decoding took time quadratic in their number. IDs are given in order of first
+/// appearance, so the draw changes no ID.
 pub(crate) struct Splits {
     pub(crate) all: Vec<Split>,
     /// `EMPTY` or an index in `all`.
     table: Vec<u32>,
+    hash: Tabulation,
 }
 
 const EMPTY: u32 = u32::MAX;
+
+impl Default for Splits {
+    fn default() -> Self {
+        Self {
+            all: Vec::new(),
+            table: Vec::new(),
+            hash: Tabulation::new(),
+        }
+    }
+}
+
+/// Simple tabulation hashing of a split's key, its 13 bytes: a random word per
+/// position and byte value, XORed. Pătrașcu and Thorup ("The power of simple
+/// tabulation hashing", J. ACM 2012) prove that linear probing with it takes
+/// constant expected time per operation on any set of keys, so the split table
+/// stays linear whatever thresholds a model chooses. The words come from the
+/// standard library's randomly keyed hash. A hash takes 13 loads from 26 KiB and
+/// 12 XORs, 1.6 ns against the fixed hash's 0.5 and SipHash's 8 on an M-series core;
+/// a cheaper hash with secret multipliers was measured and rejected, as under linear
+/// probing it clusters natural thresholds, such as small integers, for some of its
+/// draws.
+struct Tabulation(Box<[[u64; 256]; 13]>);
+
+impl Tabulation {
+    fn new() -> Self {
+        let state = RandomState::new();
+        let mut tables = vec![[0u64; 256]; 13];
+        for (i, table) in tables.iter_mut().enumerate() {
+            for (b, word) in table.iter_mut().enumerate() {
+                *word = state.hash_one((i as u8, b as u8));
+            }
+        }
+        Self(tables.into_boxed_slice().try_into().expect("13 tables"))
+    }
+
+    #[inline]
+    fn hash(&self, bits: u64, feature: u32, flags: u8) -> u64 {
+        let t = &*self.0;
+        let b = bits.to_le_bytes();
+        let f = feature.to_le_bytes();
+        t[0][b[0] as usize]
+            ^ t[1][b[1] as usize]
+            ^ t[2][b[2] as usize]
+            ^ t[3][b[3] as usize]
+            ^ t[4][b[4] as usize]
+            ^ t[5][b[5] as usize]
+            ^ t[6][b[6] as usize]
+            ^ t[7][b[7] as usize]
+            ^ t[8][f[0] as usize]
+            ^ t[9][f[1] as usize]
+            ^ t[10][f[2] as usize]
+            ^ t[11][f[3] as usize]
+            ^ t[12][flags as usize]
+    }
+}
 
 impl Splits {
     /// The ID of a split, added if new. IDs fit 32 bits: there are fewer splits than
@@ -152,7 +214,7 @@ impl Splits {
         }
         let mask = self.table.len() - 1;
         let bits = value.to_bits();
-        let mut at = Self::slot(bits, feature, flags, mask);
+        let mut at = self.slot(bits, feature, flags, mask);
         loop {
             let id = self.table[at];
             if id == EMPTY {
@@ -174,16 +236,10 @@ impl Splits {
         }
     }
 
-    /// The first slot of a key: the top bits of a multiplicative hash, which depend
-    /// on every bit of the key. (Low bits would not: a product's low bits see only
-    /// the factors' low bits, where round thresholds are all zero.)
+    /// The first slot of a key.
     #[inline]
-    fn slot(bits: u64, feature: u32, flags: u8, mask: usize) -> usize {
-        const K: u64 = 0x9E37_79B9_7F4A_7C15;
-        let key = u64::from(feature) << 8 | u64::from(flags);
-        let h = (bits ^ key.rotate_left(40)).wrapping_mul(K);
-        let h = (h ^ h >> 29).wrapping_mul(K);
-        (h >> (u64::BITS - mask.count_ones())) as usize
+    fn slot(&self, bits: u64, feature: u32, flags: u8, mask: usize) -> usize {
+        self.hash.hash(bits, feature, flags) as usize & mask
     }
 
     /// Double the table, at least 64 slots.
@@ -193,12 +249,32 @@ impl Splits {
         self.table = vec![EMPTY; len];
         let mask = len - 1;
         for (id, s) in self.all.iter().enumerate() {
-            let mut at = Self::slot(s.value.to_bits(), s.feature, s.flags, mask);
+            let mut at = self.slot(s.value.to_bits(), s.feature, s.flags, mask);
             while self.table[at] != EMPTY {
                 at = (at + 1) & mask;
             }
             self.table[at] = id as u32;
         }
+    }
+
+    /// The longest run of taken slots in the table: what a lookup can probe.
+    #[cfg(test)]
+    pub(crate) fn longest_run(&self) -> usize {
+        // Runs wrap around the end: start the count after the first empty slot.
+        let n = self.table.len();
+        let Some(start) = self.table.iter().position(|&id| id == EMPTY) else {
+            return n;
+        };
+        let (mut longest, mut run) = (0, 0);
+        for i in 1..=n {
+            if self.table[(start + i) % n] == EMPTY {
+                longest = longest.max(run);
+                run = 0;
+            } else {
+                run += 1;
+            }
+        }
+        longest
     }
 
     /// Record that a node of categorical split `id` has its heavy child on the left
@@ -489,4 +565,73 @@ pub(crate) struct LayoutSource {
     pub(crate) trees: Vec<DecodedTree>,
     pub(crate) splits: Vec<Split>,
     pub(crate) nodes: Vec<LayoutNode>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Splits;
+    use crate::flood::colliding_thresholds;
+    use crate::rng::Rng;
+
+    /// 3.2.1's fixed hash, whose top 32 bits the colliding thresholds share.
+    fn fixed(bits: u64) -> u64 {
+        const K: u64 = 0x9E37_79B9_7F4A_7C15;
+        let h = bits.wrapping_mul(K);
+        (h ^ h >> 29).wrapping_mul(K) >> 32
+    }
+
+    /// Intern `values` on feature 0 with flags 0, checking that every value gets its
+    /// own ID, in order, and the same one again.
+    fn intern(splits: &mut Splits, values: &[f64]) {
+        for (i, &v) in values.iter().enumerate() {
+            assert_eq!(splits.intern(v, 0, 0), i as u32);
+        }
+        for (i, &v) in values.iter().enumerate() {
+            assert_eq!(splits.intern(v, 0, 0), i as u32);
+        }
+        assert_eq!(splits.all.len(), values.len());
+    }
+
+    #[test]
+    fn each_table_draws_its_own_hash() {
+        let (a, b) = (Splits::default(), Splits::default());
+        assert_ne!(
+            a.hash.hash(1.5f64.to_bits(), 2, 3),
+            b.hash.hash(1.5f64.to_bits(), 2, 3)
+        );
+        // Every byte of the key reaches the hash.
+        let h = a.hash.hash(0, 0, 0);
+        for i in 0..8 {
+            assert_ne!(a.hash.hash(1 << (8 * i), 0, 0), h, "value byte {i}");
+        }
+        for i in 0..4 {
+            assert_ne!(a.hash.hash(0, 1 << (8 * i), 0), h, "feature byte {i}");
+        }
+        assert_ne!(a.hash.hash(0, 0, 1), h, "flags");
+    }
+
+    /// Thresholds that all probed one cluster of 3.2.1's fixed hash spread as random
+    /// ones do: a run of taken slots stays short against the 2^16 keys, where the
+    /// fixed hash made one run of them all.
+    #[test]
+    fn colliding_thresholds_spread() {
+        let n = 1 << 16;
+        let values = colliding_thresholds(n, 0, 0);
+        assert!(
+            values
+                .iter()
+                .all(|v| fixed(v.to_bits()) == fixed(values[0].to_bits()))
+        );
+        let mut rng = Rng::new(7);
+        let random: Vec<f64> = (0..n)
+            .map(|_| f64::from_bits(rng.next_u64() >> 2))
+            .collect();
+        let bound = 512;
+        for values in [&values, &random] {
+            let mut splits = Splits::default();
+            intern(&mut splits, values);
+            let run = splits.longest_run();
+            assert!(run < bound, "a run of {run} taken slots against {n} keys");
+        }
+    }
 }

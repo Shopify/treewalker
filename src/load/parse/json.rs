@@ -8,9 +8,9 @@ use super::tree::{
 use super::validation::{self, Metadata, ParsedModel};
 use crate::config::Choices;
 use crate::{LoadError, LoadOptions, WalkerConfig};
-use rustc_hash::FxHashMap;
 use simd_json::prelude::*;
 use simd_json::tape::{Array, Value};
+use std::collections::HashMap;
 use std::io::Read;
 
 /// The value of `key` in object `v`: the last one, as a map built from the object
@@ -169,7 +169,7 @@ pub(super) fn parse(
         .map(|tree| array(tree, "nodes").ok().map(|nodes| nodes.len()))
         .try_fold(0usize, |total, n| total.checked_add(n?));
     let mut decoded = Decoded::new(nodes)?;
-    let mut intern = FxHashMap::default();
+    let mut intern = HashMap::new();
     let mut ctx = ParseContext {
         decoded: &mut decoded,
         list_intern: choices.bitset_intern.then_some(&mut intern),
@@ -191,11 +191,12 @@ pub(super) fn parse(
     })
 }
 
-/// Per-tree scratch, reused.
+/// Per-tree scratch, reused. The node IDs are keyed by the standard library's hash,
+/// whose keys are random per process, so that a file cannot choose IDs that collide.
 #[derive(Default)]
 struct TreeScratch<'t, 'i> {
     nodes: Vec<NodeFields<'t, 'i>>,
-    ids: FxHashMap<i64, u32>,
+    ids: HashMap<i64, u32>,
     temp: Vec<TempNode>,
     categories: Vec<u32>,
 }
@@ -345,7 +346,7 @@ impl<'t, 'i> NodeFields<'t, 'i> {
 /// A node's fields as a [`TempNode`], validated, its children numbered by `ids`.
 fn decode_node(
     node: &NodeFields<'_, '_>,
-    ids: &FxHashMap<i64, u32>,
+    ids: &HashMap<i64, u32>,
     ctx: &mut ParseContext<'_>,
     categories: &mut Vec<u32>,
 ) -> Result<TempNode, LoadError> {

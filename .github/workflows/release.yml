@@ -1,0 +1,119 @@
+# Publishes treewalker-gbdt to crates.io from a `v*` tag, with no long-lived token:
+# the job proves its identity to crates.io with GitHub's OIDC token (Trusted
+# Publishing), and crates.io hands back a publish token that lives for the job.
+#
+# One-time setup, by a crate owner: on crates.io, the crate's settings → Trusted
+# Publishing → GitHub, repository `Shopify/treewalker`, workflow `release.yml`,
+# environment `crates-io`; in this repository, Settings → Environments → `crates-io`
+# with the maintainers as required reviewers and `v*` as its deployment tag rule.
+#
+# A release is then: bump `Cargo.toml` and add the CHANGELOG section on a pull
+# request; merge; `git tag -s vX.Y.Z && git push origin vX.Y.Z`; when the `publish`
+# job pauses, inspect the `verify` job's crate artifact and approve the environment.
+
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Everything the tag claims is checked before anything leaves the runner.
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the ancestry check below walks the history
+      - name: the tag is on main, and its version is Cargo.toml's and the changelog's
+        id: version
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          set -eu
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::tag $REF is not on main"; exit 1; }
+          tag="${REF#v}"
+          manifest=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "treewalker-gbdt") | .version')
+          [ "$tag" = "$manifest" ] \
+            || { echo "::error::tag $REF but Cargo.toml says $manifest"; exit 1; }
+          grep -q "^## $tag\$" CHANGELOG.md \
+            || { echo "::error::CHANGELOG.md has no '## $tag' section"; exit 1; }
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+      - name: the version is not on crates.io yet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          if curl -fsSL -A "treewalker release (github actions)" \
+               "https://crates.io/api/v1/crates/treewalker-gbdt/$VERSION" >/dev/null 2>&1; then
+            echo "::error::treewalker-gbdt $VERSION is already on crates.io"; exit 1
+          fi
+      - name: the release tests, in the generic x86-64 build at every level
+        env:
+          # Overrides .cargo/config.toml's target-cpu=native: the build dispatches.
+          RUSTFLAGS: -C target-cpu=x86-64
+        run: |
+          cargo test --locked --release --features research
+          TREEWALKER_ISA=v3 cargo test --locked --release --features research
+          TREEWALKER_ISA=base cargo test --locked --release --features research
+      - name: the crate, built from what it ships
+        run: cargo package --locked -p treewalker-gbdt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: crate
+          path: target/package/treewalker-gbdt-${{ steps.version.outputs.version }}.crate
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # The environment's required reviewers are the human gate, and its tag rule keeps
+    # the environment's trust to `v*` refs.
+    environment: crates-io
+    permissions:
+      contents: write # the GitHub release below
+      id-token: write # the OIDC token Trusted Publishing exchanges
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+        id: auth
+      # `cargo publish` packages the crate again from the same commit; `cargo package`
+      # is deterministic, so it is the artifact the approver inspected.
+      - name: publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked -p treewalker-gbdt
+      - name: GitHub release from the changelog section, with the crate file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -eu
+          awk -v v="$VERSION" '$0 == "## " v {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+          gh release create "$REF" --verify-tag --title "treewalker-gbdt $VERSION" --notes-file notes.md
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: crate
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref_name }}
+        run: gh release upload "$REF" treewalker-gbdt-*.crate

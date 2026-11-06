@@ -115,6 +115,11 @@ mod rules;
 #[allow(dead_code, reason = "the unit tests use a part")]
 #[path = "../tests/common/rng.rs"]
 mod rng;
+// The tests' colliding keys for the loader's hash tables, shared likewise.
+#[cfg(test)]
+#[allow(dead_code, reason = "the unit tests use a part")]
+#[path = "../tests/common/flood.rs"]
+mod flood;
 
 pub use config::{LoadOptions, WalkerConfig, WalkerConfigBuilder};
 pub use error::LoadError;

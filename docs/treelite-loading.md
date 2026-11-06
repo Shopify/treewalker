@@ -220,7 +220,11 @@ with the `research` feature.
 The caps on untrusted input are fields of `LoadOptions`, with these defaults; a
 file past one fails with `LoadError::Limit`, and trusted inputs may raise them.
 They bound input, representation, and decoding work; they are not a promise about
-peak process RSS. Large legitimate forests should use binary.
+peak process RSS. Large legitimate forests should use binary. The loader's hash
+tables (the forest's distinct splits, a JSON tree's node IDs, interned category
+lists) hash with keys drawn at random for each load, so a file cannot choose
+thresholds or IDs that collide: decoding work stays linear in the input whatever
+its values.
 
 | Cap (`LoadOptions` field) | Default | Protects against |
 |---|---:|---|

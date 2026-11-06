@@ -1,7 +1,7 @@
 //! Tree order: the decoded trees sorted by their heavy paths, and the category lists
 //! renumbered in that order.
 
-use rustc_hash::FxHashMap as HashMap;
+use std::collections::HashMap;
 
 use super::parse::decoded::{Decoded, Packed};
 use crate::model::FLAG_HEAVY_IS_LEFT;
@@ -126,7 +126,7 @@ pub(crate) fn repack_categories(decoded: &mut Decoded, order: &[u32]) -> (Vec<u3
     let old = std::mem::take(&mut decoded.categories);
     let mut pool = Vec::with_capacity(old.len());
     let mut starts = Vec::with_capacity(order.len());
-    let mut remap: HashMap<u32, u32> = HashMap::default();
+    let mut remap: HashMap<u32, u32> = HashMap::new();
     let mut moved = vec![false; decoded.splits.all.len()];
     for &t in order {
         starts.push(pool.len() as u32);

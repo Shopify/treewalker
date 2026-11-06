@@ -5,6 +5,7 @@
 
 pub mod bits;
 pub mod fixtures;
+pub mod flood;
 pub mod groups;
 pub mod json;
 pub mod model;

@@ -809,6 +809,16 @@ impl Model {
     ///
     /// If a threshold is infinite: JSON cannot hold it.
     pub fn to_json(&self, rng: &mut Rng) -> Vec<u8> {
+        self.to_json_with(rng, None)
+    }
+
+    /// [`Self::to_json`] with each tree's node IDs given, `ids[t][i]` for node `i` of
+    /// tree `t`, instead of drawn; the node order is still drawn.
+    pub fn to_json_with_ids(&self, rng: &mut Rng, ids: &[Vec<u64>]) -> Vec<u8> {
+        self.to_json_with(rng, Some(ids))
+    }
+
+    fn to_json_with(&self, rng: &mut Rng, given: Option<&[Vec<u64>]>) -> Vec<u8> {
         use std::fmt::Write;
         let ty = match self.precision {
             Precision::F64 => "float64",
@@ -837,16 +847,22 @@ impl Model {
             if t > 0 {
                 s.push_str(", ");
             }
-            // Node IDs: a permutation of 0..n, or of spaced-out IDs.
-            let mut ids: Vec<usize> = (0..tree.nodes.len()).collect();
-            if rng.chance(0.7) {
-                rng.shuffle(&mut ids);
-            }
-            if rng.chance(0.2) {
-                for id in &mut ids {
-                    *id = *id * 3 + 7;
-                }
-            }
+            // Node IDs: those given, or a permutation of 0..n, or of spaced-out IDs.
+            let ids: Vec<u64> = given.map_or_else(
+                || {
+                    let mut ids: Vec<u64> = (0..tree.nodes.len() as u64).collect();
+                    if rng.chance(0.7) {
+                        rng.shuffle(&mut ids);
+                    }
+                    if rng.chance(0.2) {
+                        for id in &mut ids {
+                            *id = *id * 3 + 7;
+                        }
+                    }
+                    ids
+                },
+                |given| given[t].clone(),
+            );
             let has_cat = tree
                 .nodes
                 .iter()
