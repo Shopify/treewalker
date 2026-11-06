@@ -221,6 +221,23 @@ python3 experiments/scripts/asm_identity.py HEAD~1 HEAD --cpu apple-m4
 python3 experiments/scripts/asm_identity.py HEAD~1 HEAD --target x86_64-unknown-linux-gnu --cpu emeraldrapids
 ```
 
+### Releasing
+
+A release is a pull request that bumps `Cargo.toml`'s version and adds the version's
+section to `CHANGELOG.md`, merged, then a signed tag pushed:
+
+```bash
+git tag -s v3.2.2 -m "treewalker-gbdt 3.2.2" && git push origin v3.2.2
+```
+
+`.github/workflows/release.yml` takes it from there: it checks that the tag is on
+`main` and names the manifest's and the changelog's version, that the version is not
+on crates.io, runs the release tests in the generic x86-64 build at every level,
+packages the crate and keeps it as the run's artifact; then, once a maintainer has
+approved the `crates-io` environment, publishes with a token crates.io issues to the
+run itself (Trusted Publishing, so no token is stored anywhere) and creates the
+GitHub release from the changelog section with the crate file attached.
+
 ## Using the library
 
 Load a model once and predict through a `Predictor`, one per worker thread.
