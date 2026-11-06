@@ -45,8 +45,10 @@ jobs:
         run: cargo clippy -p treewalker-gbdt --lib --features layout-file -- -D warnings
       - name: tests at the CPU's level
         run: cargo test --release --features research
-      - name: tests with layout files
+      - name: layout validator white-box tests
         run: cargo test --release --features research,layout-file
+      - name: production layout-file tests
+        run: cargo test --release --manifest-path experiments/layout-file/Cargo.toml --locked
       - name: tests at x86-64-v3
         run: TREEWALKER_ISA=v3 cargo test --release --features research
       - name: tests at the base level

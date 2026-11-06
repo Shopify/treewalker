@@ -2,7 +2,7 @@
 
 use crate::LoadError;
 
-const NARROW_SLOTS: usize = 1 << u16::BITS;
+pub(super) const NARROW_SLOTS: usize = 1 << u16::BITS;
 
 /// Narrow until a feature needs more slots than u16 can name, then wide throughout.
 #[derive(Clone, Debug)]

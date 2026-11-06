@@ -1,0 +1,13 @@
+[package]
+name = "treewalker-layout-file-tests"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[dependencies]
+treewalker-gbdt = { path = "../..", default-features = false, features = ["layout-file"] }
+
+[[test]]
+name = "layout_file"
+path = "tests/layout_file.rs"
