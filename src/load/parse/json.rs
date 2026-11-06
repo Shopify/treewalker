@@ -169,7 +169,7 @@ pub(super) fn parse(
         .map(|tree| array(tree, "nodes").ok().map(|nodes| nodes.len()))
         .try_fold(0usize, |total, n| total.checked_add(n?));
     let mut decoded = Decoded::new(nodes)?;
-    let mut intern = HashMap::new();
+    let mut intern = super::tree::ListIntern::default();
     let mut ctx = ParseContext {
         decoded: &mut decoded,
         list_intern: choices.bitset_intern.then_some(&mut intern),
