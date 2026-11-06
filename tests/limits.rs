@@ -3,7 +3,9 @@
 //! 65,535 varying predicates, more than 1,000,000 trees, more than 100,000 distinct
 //! heavy sets on a categorical feature, and malformed category segments. Trees of more than 32,767 nodes, deeper than 256, with more than 64
 //! features and with any `u32` category run in the property tests. Each model is
-//! checked against the oracle and the exact full walk.
+//! checked against the oracle and the exact full walk. Also models whose thresholds
+//! or node IDs collided in the loader's hash tables before 3.2.2, which load in
+//! linear time now that the tables hash with keys drawn per load.
 //!
 //! Not run at full scale: 32,000,000 nodes and more (a 512 MB layout), 2^29 varying
 //! predicates and 2^27 bin slots, the layout's field widths; unit tests check those
@@ -12,7 +14,10 @@
 
 mod common;
 
+use std::time::{Duration, Instant};
+
 use common::bits::same;
+use common::flood::{FLAG_VARYING, colliding_node_ids, colliding_thresholds};
 use common::model::{Model, Node, Op, Precision, Task, Tree};
 use common::rng::Rng;
 use treewalker_gbdt::research::LoadAblation;
@@ -41,20 +46,32 @@ const fn model(trees: Vec<Tree>, n_features: usize) -> Model {
 /// distinct thresholds in binary-search-tree order, and leaves valued by their
 /// in-order rank: an integer input `x` in `0..=internal` reaches value `x / 8`.
 fn complete(internal: usize) -> Tree {
-    fn fill(nodes: &mut [Node], i: usize, internal: usize, rank: &mut usize) {
+    complete_with(internal, |rank, i| (rank as f64 - 0.5, i.is_multiple_of(3)))
+}
+
+/// [`complete`] with each split's threshold and missing direction from `split`,
+/// given the split's in-order rank and its index.
+fn complete_with(internal: usize, split: impl Fn(usize, usize) -> (f64, bool)) -> Tree {
+    fn fill(
+        nodes: &mut [Node],
+        i: usize,
+        internal: usize,
+        rank: &mut usize,
+        split: &dyn Fn(usize, usize) -> (f64, bool),
+    ) {
         if i >= internal {
             nodes[i] = leaf(*rank as f64 / 8.0);
             *rank += 1;
             return;
         }
-        fill(nodes, 2 * i + 1, internal, rank);
-        let threshold = *rank as f64 - 0.5;
-        fill(nodes, 2 * i + 2, internal, rank);
+        fill(nodes, 2 * i + 1, internal, rank, split);
+        let (threshold, default_left) = split(*rank, i);
+        fill(nodes, 2 * i + 2, internal, rank, split);
         nodes[i] = Node::Numeric {
             feature: 0,
             op: Op::Le,
             threshold,
-            default_left: i.is_multiple_of(3),
+            default_left,
             left: 2 * i + 1,
             right: 2 * i + 2,
             count: Some((nodes.len() - i) as u64),
@@ -62,7 +79,7 @@ fn complete(internal: usize) -> Tree {
     }
     let total = 2 * internal + 1;
     let mut nodes = vec![leaf(0.0); total];
-    fill(&mut nodes, 0, internal, &mut 0);
+    fill(&mut nodes, 0, internal, &mut 0, &split);
     Tree { nodes }
 }
 
@@ -333,4 +350,69 @@ fn overlapping_category_segments_are_rejected() {
             (overlap, other) => panic!("overlap {overlap}: {other:?}"),
         }
     }
+}
+
+/// What a flooded load may take: 3.2.1 took 104 s on the first model below and 52 s
+/// on the second in a release build on an M-series core, growing with the square of
+/// the size, where the fixed loads take 0.2 s together, and 2.5 s in a debug build.
+const FLOOD_BUDGET: Duration = Duration::from_secs(20);
+
+/// 2^19 splits on varying feature 0 whose thresholds all probed one cluster of the
+/// split table's hash before 3.2.2, so that decoding them took time quadratic in
+/// their number: one complete tree of them loads from binary in linear time, and
+/// predicts as the oracle does on thresholds, values beyond them and missing values.
+#[test]
+fn colliding_thresholds_load_in_linear_time() {
+    let internal = 1 << 19;
+    let thresholds = colliding_thresholds(internal, 0, FLAG_VARYING);
+    let tree = complete_with(internal, |rank, _| (thresholds[rank - 1], false));
+    let m = model(vec![tree], 1);
+    let mut rows: Vec<f64> = thresholds.iter().step_by(internal / 12).copied().collect();
+    rows.extend([0.0, -1e300, 1e300, f64::NAN]);
+    let config = WalkerConfig::builder(1)
+        .max_group_width(rows.len())
+        .varying([0])
+        .build()
+        .unwrap();
+    let started = Instant::now();
+    check(&m, config, &LoadAblation::default(), &rows);
+    let took = started.elapsed();
+    assert!(
+        took < FLOOD_BUDGET,
+        "loading colliding thresholds took {took:?}"
+    );
+}
+
+/// 2^17 splits and their leaves in one tree, whose node IDs all probed one group
+/// of the JSON reader's node map before 3.2.2: the tree loads from JSON in linear
+/// time, and predicts as the oracle does.
+#[test]
+fn colliding_node_ids_load_in_linear_time() {
+    let internal = 1 << 17;
+    let m = model(vec![complete(internal)], 1);
+    let ids = vec![colliding_node_ids(2 * internal + 1)];
+    let bytes = m.to_json_with_ids(&mut Rng::new(3), &ids);
+    let config = WalkerConfig::builder(1)
+        .max_group_width(16)
+        .varying([0])
+        .build()
+        .unwrap();
+    let started = Instant::now();
+    let forest = Forest::from_bytes(
+        &bytes,
+        ModelFormat::TreeliteJson,
+        config,
+        &LoadOptions::default(),
+    )
+    .unwrap_or_else(|e| panic!("load: {e}"));
+    let took = started.elapsed();
+    assert!(
+        took < FLOOD_BUDGET,
+        "loading colliding node IDs took {took:?}"
+    );
+    let rows: Vec<f64> = (0..16).map(|r| (r * internal / 16) as f64).collect();
+    let expected: Vec<f64> = rows.iter().map(|&x| m.predict(&[x])).collect();
+    let mut out = vec![f64::NAN; rows.len()];
+    forest.predictor().predict_group(&rows, &mut out);
+    same(&out, &expected, "group");
 }

@@ -4,9 +4,8 @@
 //! into `TempNode` arrays, then call [`order_tree`], which validates each tree and
 //! adds it to the decoded forest in heavy-first preorder.
 
+use std::collections::HashMap;
 use std::hint::select_unpredictable;
-
-use rustc_hash::FxHashMap as HashMap;
 
 use super::decoded::{Decoded, Packed};
 use crate::LoadError;
