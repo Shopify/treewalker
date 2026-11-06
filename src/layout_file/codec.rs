@@ -1,11 +1,6 @@
 //! Fieldwise metadata and aligned, length-prefixed arrays. Never persist pointers,
 //! padding, bool representations or Rust enum discriminants.
 
-#![allow(
-    dead_code,
-    reason = "decoder entry point follows in the owned-loading change"
-)]
-
 use crate::exact::Plan;
 use crate::load::layout::{MaskChain, MaskFeature, MaskPlan};
 use crate::model::{
