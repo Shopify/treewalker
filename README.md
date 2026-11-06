@@ -117,12 +117,19 @@ PYTHON=.venv/bin/python experiments/scripts/checks.sh fast   # every commit
 PYTHON=.venv/bin/python experiments/scripts/checks.sh full   # before a pull request or a release
 ```
 
+GitHub Actions runs the fast checks on every pull request and push to `main`
+(`.github/workflows/checks.yml`), and the release tests with the research API in a
+generic x86-64 build (`-C target-cpu=x86-64`) at the CPU's level, at `TREEWALKER_ISA=v3`
+and at `base`, so that the levels a default build dispatches to run on x86-64 hardware.
+
 The fast checks are `cargo fmt --check`, `cargo clippy --workspace --all-targets --
 -D warnings` with and without the research features, `cargo test --workspace`, and the
 Python tests, ruff and mypy: 44 s on an M4 Pro once built. The full checks, 4 to 5
-minutes, add the release tests with the research API, the bench crate's tests, the
-property tests at their full counts (`TW_PROPTEST_FULL=1`), cross clippy, Miri, the
-spill checks and the bench crate's suite on the core artifacts (`TEST_ARTIFACTS_BASE`).
+minutes, add the release tests with the research API, the same tests in a generic
+x86-64 build at the detected level and at `TREEWALKER_ISA=base` (natively on x86-64,
+under Rosetta on Apple silicon), the bench crate's tests, the property tests at their
+full counts (`TW_PROPTEST_FULL=1`), cross clippy, Miri, the spill checks and the bench
+crate's suite on the core artifacts (`TEST_ARTIFACTS_BASE`).
 
 What guards what. The property tests (`tests/property.rs`) check production, each call
 and the research predictor against an exact oracle and the full walk, bit for bit, on
@@ -138,8 +145,10 @@ data input gives an error; a violated calling contract panics, as documented (se
 tests natively on their machines.
 
 The Linux-only code (the timestamp counter's calibration, `perf_event`) is checked by
-cross clippy. Parquet's zstd is C, so without a Linux cross toolchain the check compiles
-it with clang and the macOS SDK headers; nothing builds or links for Linux:
+cross clippy, and the library's fallbacks for other architectures (the plain-word
+masks, the empty prefetch) by its RISC-V run. Parquet's zstd is C, so without a Linux
+cross toolchain the check compiles it with clang and the macOS SDK headers; nothing
+builds or links for Linux:
 
 ```bash
 SDK=$(xcrun --show-sdk-path)
@@ -148,13 +157,17 @@ export CC_x86_64_unknown_linux_gnu=clang \
   CC_aarch64_unknown_linux_gnu=clang \
   CFLAGS_aarch64_unknown_linux_gnu="--target=aarch64-unknown-linux-gnu -isystem $SDK/usr/include -D__arm64__"
 for t in "aarch64-apple-darwin apple-m4" "x86_64-unknown-linux-gnu emeraldrapids" \
-         "x86_64-unknown-linux-gnu x86-64-v4" "x86_64-unknown-linux-gnu x86-64" \
-         "aarch64-unknown-linux-gnu neoverse-v2"; do
+         "x86_64-unknown-linux-gnu x86-64-v4" "x86_64-unknown-linux-gnu x86-64-v3" \
+         "x86_64-unknown-linux-gnu x86-64" "aarch64-unknown-linux-gnu neoverse-v2"; do
   set -- $t
   for f in "" "--features treewalker-bench/external-bench,treewalker-bench/pmu" \
            "--features treewalker-bench/research"; do
     RUSTFLAGS="-C target-cpu=$2" cargo clippy --target $1 --workspace --all-targets $f -- -D warnings
   done
+done
+for f in "" "--features research"; do
+  RUSTFLAGS= cargo clippy --target riscv64gc-unknown-linux-gnu -p treewalker-gbdt --all-targets $f \
+    -- -D warnings
 done
 ```
 
@@ -267,7 +280,7 @@ uses to measure the kernel. Serving needs none of it.
   the rule's groups; 0 for none) and `pack` (`Some(true)` or `Some(false)` to pack
   the categorical chains' rank fields or not, instead of the packing rule).
 - `predict_group` and `predict_groups` are the timed build; `predict_group_counted`
-  returns `WorkCounters` (`COUNTERS_VERSION` 6: groups, single rows, bins, precompute,
+  returns `WorkCounters` (`COUNTERS_VERSION` 7: groups, single rows, bins, precompute,
   event scans, prefix and walk steps, lane slots, passes, events, splits, runs and
   arena slots; `fields()` lists them) and adds its phase times to `take_phases()`
   (`Phases`: bins, precompute, prefix, walk, resolve, leaf pass and finish).
@@ -308,7 +321,8 @@ run `treewalker-exp fetch-expedia --train-csv data.zip`; extracting the zip need
 against the file the paper used.
 
 The separate `categorical-scale` suite prepares a public-data model with very
-large categorical features, which 3.0 and 3.1 fail to load at the default limits,
+large categorical features, which 3.0 and 3.1 fail to load at the default limits
+and 3.2 loads,
 `expedia-cat/nt600_md32_nl4096/lightgbm/cohort16-n16-g40000`.
 It does not change the paper's numeric Expedia cells or enter their factorial.
 See [the recipe, load-cap expectation and reproduction commands](docs/categorical-scale.md).

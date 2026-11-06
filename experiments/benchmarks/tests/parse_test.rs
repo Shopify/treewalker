@@ -236,11 +236,16 @@ fn test_tree_ordering_changes_order_but_not_output() {
     let n_features = config.n_features();
     let n_obs = 2;
     let n_rows = n_obs * pl;
+    // Constant features take a value per group and varying ones a value per row, as
+    // the predictor's contract requires.
     let mut data = vec![0.5f64; n_rows * n_features];
     for r in 0..n_rows {
-        data[r * n_features] = r as f64 * 0.1;
-        if n_features > 1 {
-            data[r * n_features + 1] = (r % 3) as f64;
+        for f in 0..n_features {
+            data[r * n_features + f] = if config.is_varying(f) {
+                ((r % pl) as f64).mul_add(0.1, f as f64)
+            } else {
+                ((r / pl) as f64).mul_add(0.7, (f % 3) as f64)
+            };
         }
     }
 
@@ -278,10 +283,9 @@ fn test_lightgbm_json_matches_native() {
         eprintln!("Skipping: {} not found", preds_path.display());
         return;
     }
-    let reference: Vec<f64> = {
-        let arr: ndarray::Array1<f64> = ndarray_npy::read_npy(&preds_path).unwrap();
-        arr.to_vec()
-    };
+    let reference = treewalker_bench::data::read_npy(&preds_path)
+        .unwrap()
+        .into_f64();
 
     let (data, n_rows) = load_test_bin(&dir.join("test_data.bin"));
     let mut results = vec![0.0f64; n_rows];

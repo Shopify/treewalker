@@ -221,6 +221,107 @@ mod tests {
         random_tree(rng, depth - 1, light, width, nodes, group);
     }
 
+    /// [`StepSums`] of one tree of `nodes` with a prefix of `prefix` splits.
+    fn sums(nodes: &[Option<(f64, usize, bool)>], prefix: usize) -> StepSums {
+        let mut sums = StepSums::default();
+        sums.tree(nodes.len(), prefix, |i| nodes[i]);
+        sums
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-12
+    }
+
+    #[test]
+    fn a_single_leaf_takes_one_step() {
+        let s = sums(&[None], 0);
+        assert_eq!(
+            s.steps(1),
+            Steps {
+                leaf: 1.0,
+                stop: 1.0
+            }
+        );
+        let short = s.items().leaf_short;
+        assert!(close(short[0], 1.0) && close(short[1], 0.0) && close(short[2], 0.0));
+    }
+
+    #[test]
+    fn steps_weigh_each_leaf_by_its_probability() {
+        // Root 0.75 heavy to a split of 0.5, light to a leaf at depth 1: leaves at
+        // depth 2 with 0.375 each and at depth 1 with 0.25, 3 × 0.75 + 2 × 0.25.
+        let nodes = [
+            Some((0.75, 4, true)),
+            Some((0.5, 3, true)),
+            None,
+            None,
+            None,
+        ];
+        let s = sums(&nodes, 0).steps(1);
+        assert!(close(s.leaf, 2.75) && close(s.stop, 2.75), "{s:?}");
+    }
+
+    #[test]
+    fn a_walk_with_stops_ends_at_the_first_varying_split() {
+        // A varying root: 1 step to the stop, 2 to a leaf.
+        let s = sums(&[Some((0.75, 2, false)), None, None], 0).steps(1);
+        assert!(close(s.leaf, 2.0) && close(s.stop, 1.0), "{s:?}");
+        // A constant root, heavy to a varying split: the stop at 2 steps with 0.75, the
+        // light leaf at 2 with 0.25.
+        let nodes = [
+            Some((0.75, 4, true)),
+            Some((0.5, 3, false)),
+            None,
+            None,
+            None,
+        ];
+        let s = sums(&nodes, 0).steps(1);
+        assert!(close(s.leaf, 2.75) && close(s.stop, 2.0), "{s:?}");
+    }
+
+    #[test]
+    fn steps_per_tree_average_over_the_trees() {
+        let mut s = StepSums::default();
+        s.tree(1, 0, |_| None);
+        let nodes = [
+            Some((0.75, 4, true)),
+            Some((0.5, 3, true)),
+            None,
+            None,
+            None,
+        ];
+        s.tree(nodes.len(), 0, |i| nodes[i]);
+        let steps = s.steps(2);
+        assert!(
+            close(steps.leaf, 1.875) && close(steps.stop, 1.875),
+            "{steps:?}"
+        );
+        // Of the 2 trees' mass, the lone leaf's 1 is 1 step from the root, 0.25 is 2
+        // steps and 0.75 is 3.
+        let short = s.items().leaf_short;
+        assert!(close(short[0], 0.5) && close(short[1], 0.125) && close(short[2], 0.375));
+    }
+
+    #[test]
+    fn an_item_starts_where_a_row_leaves_the_prefix() {
+        let nodes = [
+            Some((0.75, 4, true)),
+            Some((0.5, 3, true)),
+            None,
+            None,
+            None,
+        ];
+        // Without a prefix the light leaf is 2 steps from the root, the others 3.
+        let short = sums(&nodes, 0).items().leaf_short;
+        assert!(close(short[0], 0.0) && close(short[1], 0.25) && close(short[2], 0.75));
+        // With the root as the prefix, a row leaves it by the light child, a leaf 1
+        // step from the item's start, or by the node past it, whose leaves are 2.
+        let short = sums(&nodes, 1).items().leaf_short;
+        assert!(close(short[0], 0.25) && close(short[1], 0.75) && close(short[2], 0.0));
+        // The prefix changes the item lengths, not the steps.
+        assert_eq!(sums(&nodes, 1).steps(1), sums(&nodes, 0).steps(1));
+    }
+
     #[test]
     fn a_group_takes_a_constant_split_together_and_a_varying_one_apart() {
         // A constant split: the group's rows take one side, 2 steps as for a row.

@@ -1,16 +1,60 @@
 # Changelog
 
+## 3.2.1
+
+3.2.1 fixes what the review of 3.0's and 3.1's changes found that 3.2.0 does not: the
+prefix rule values the runs that a deeper group leaves as the groups' emission does,
+`WorkCounters::precompute_row_evals` counts categorical predicates as documented, with
+`COUNTERS_VERSION` 7, and the Treelite docs say where GTIL computes in float32. The
+serving API is unchanged, and so are outputs. The release also fixes what the crate
+does not ship: tests that did not reach what they named, and the experiments' assembly
+comparison, spill checks, 3.x counter read-outs, kernel-suite retiming, ablation no-op
+reasons and source stamp. It adds tests of the step estimator and of the sigmoid's
+2-ulp bound, and a debug check that the exact sums' unchecked adds take their layout's
+leaves. GitHub Actions runs the fast checks, and the release tests in a generic x86-64
+build at the CPU's level, x86-64-v3 and base; the local full checks run that build's
+tests too, and clippy on riscv64 and at x86-64-v3. The benchmark crate's tests no
+longer take in zip 6.0.0, which Dependabot flags, and 27 other crates leave the lock;
+the library's own dependencies are unchanged.
+
+### Fixes
+
+- Research: `WorkCounters::precompute_row_evals` counts one evaluation per row for each
+  categorical predicate of a varying feature, as its documentation defines it and as
+  2.x counted. 3.0 to 3.2.0 counted a row's code once, plus the code's rank
+  exceptions, whatever the predicates: two predicates on N unlisted rows counted N
+  rather than 2N. `COUNTERS_VERSION` is 7, rather than 6, so that recorded counters
+  say which count they hold; predictions are unchanged.
+- `docs/treelite-loading.md` says that Treelite GTIL, given float32 input, adds a
+  model's leaves in float32 and rounds the division, the base score's addition and
+  the sigmoid to float32, so that its outputs can differ from TreeWalker's, which
+  finalizes in float64, even where the sum is exact. 3.0 to 3.2.0's said the two
+  could differ only through the sum, which holds for float64 input.
+
+### Performance
+
+- The prefix rule values each run of trees that a deeper group leaves on either side
+  as a group of its own, and drops the runs that do not pay, as the groups' emission
+  does, so that with tree ordering the groups it chooses save at least as many steps,
+  by its cost model, as any fixed prefix depth. 3.0 to 3.2.0 valued the trees left at
+  a node of the trie as one group, which emission then split into runs, dropping those
+  that did not pay: of nine trees sharing their first split, five of which also share
+  their second, at a heavy share of 0.8, they grouped the five, saving 5.3 lane steps
+  a call, rather than all nine, saving 6.1. None of the 49 models of the crate's tests
+  changes its groups, and outputs are unchanged.
+
 ## 3.2.0
 
-In 3.2, models with a categorical feature of hundreds of thousands of distinct
-heavy sets load at the default limits, which they did not in 3.0 and 3.1, and trees
-of many leaves share chunks. On Genoa (c3d-standard-90), the chunking took the 1,190
-serving cells 0.949 of 3.1.0's time, geometric mean, and the depth-16 models 0.826;
-the categorical change, measured after it, 0.999 to 1.001. Malformed models
-that panicked 3.1's debug builds fail to load with `LoadError::MalformedModel`, and a
-binary model past `LoadOptions::max_binary_bytes` fails before it reserves its nodes.
-The serving API is unchanged, a layout holds at most 2^27 slots rather than 2^30, and
-the research API's `LoadAblation` gains a field. Outputs are unchanged.
+In 3.2, a model whose categorical splits take hundreds of thousands of distinct heavy
+sets on one feature loads at the default limits, which 3.0 and 3.1 failed to (3.1's
+known gap), and trees of thousands of leaves share chunks, so that their passes fill
+the lanes: against 3.1.0 on Genoa, over 1,190 serving cells, that takes 0.949 of the
+time, geometric mean, and 0.826 on the depth-16 models. The serving API is unchanged;
+a layout holds at most 2^27 slots rather than 2^30, and the research API's
+`LoadAblation` gains `pack`. Two kinds of malformed model that panicked debug builds
+fail with `LoadError::MalformedModel`, a binary model past `max_binary_bytes` fails
+without reserving its nodes, and a predictor whose arena would pass its 32-bit offsets
+panics rather than truncating them. Outputs are unchanged.
 
 ### Changes
 
@@ -39,9 +83,9 @@ the research API's `LoadAblation` gains a field. Outputs are unchanged.
   bring the field to the top; the walks shift only for a model that packs, which
   packs its varying categorical features too. The shifting walk with varying stops
   takes 8 lanes on Apple's AArch64 rather than 9, at which it spilled.
-- A layout holds at most 2^27 slots, rather than 2^30: word 0 gives a packed field's
-  shift 5 bits. A model that needs more (4 per feature with numeric splits, one per
-  chain or word of packed fields) is a `LoadError::Limit`.
+- Compatibility: a layout holds at most 2^27 slots, rather than 2^30: word 0 gives a
+  packed field's shift 5 bits. A model that needs more (4 per feature with numeric
+  splits, one per chain or word of packed fields) is a `LoadError::Limit`.
 - Research: `LoadAblation` gains `pack`, `Some(true)` or `Some(false)` to pack the
   rank fields or not instead of the rule, which code that names every field of
   `LoadAblation` must add (`..LoadAblation::default()` takes the default);
@@ -136,14 +180,14 @@ libm.
   platform; 3.0's last bits came from the platform's libm. Against 3.0 with Apple's
   libm, 99.92% of outputs are unchanged and the rest move by at most 4 ulp; both are
   within 2 ulp of the correctly rounded sigmoid for `|m| <= 40`.
-- A model of more than 2^28 − 2 nodes in all (268,435,454) fails to load with
-  `LoadError::Limit` on every target, where 3.0 loaded up to 2^32 − 2. On x86-64 the
-  walks now step from node to node by byte offset into the node pool, so that a
-  node's address takes no shift, and the offsets are 32-bit: a pool below 4 GiB.
-  AArch64 and the other targets keep node indices and take the same limit, so that a
-  model loads, or fails to, alike everywhere. Only a model loaded with `LoadOptions`
-  caps raised past their defaults can have that many nodes: a binary model takes at
-  least 40 bytes per node.
+- Compatibility: a model of more than 2^28 − 2 nodes in all (268,435,454) fails to
+  load with `LoadError::Limit` on every target, where 3.0 loaded up to 2^32 − 2. On
+  x86-64 the walks now step from node to node by byte offset into the node pool, so
+  that a node's address takes no shift, and the offsets are 32-bit: a pool below
+  4 GiB. AArch64 and the other targets keep node indices and take the same limit, so
+  that a model loads, or fails to, alike everywhere. Only a model loaded with
+  `LoadOptions` caps raised past their defaults can have that many nodes: a binary
+  model takes at least 40 bytes per node.
 - Debug builds check the predictor's contract that a group's constant features are
   equal in every row, on the features that constant splits read, and panic naming
   the feature and the row; a missing value equals a missing one. Release builds do

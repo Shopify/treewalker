@@ -127,7 +127,12 @@ def design(cell: str) -> dict[str, Any]:
     depth ``L``, the survival ``horizon``, the seed ``replicate``, the what-if's
     ``k``, and ``G``: the horizon, the cohort size or the what-if's scenarios (None
     for whole sessions). ``family`` is panel, panel-long (horizons of 256 or
-    more), sessions, sessions-filled, cohort or whatif. The released scenario cells
+    more), sessions, sessions-filled, cohort, whatif or single-row. Kernel cells'
+    ``g1-file`` and ``g1-independent`` are single rows in file or shuffled order;
+    ``panel-shareN`` declares extra constant covariates varying to target N% of
+    internal nodes. Model suffixes ``_pooled`` shift categories to 200 and above;
+    ``_wide`` scales one tree in ten's leaves by 2^-96. Both retain the source
+    model's T, L and horizon. The released scenario cells
     (E1, ``scenario_credit/lightgbm/whatif-v1-kK-GG``) have no model part: their
     one model is `SCENARIO_MODEL`'s."""
     parts = cell.split("/")
@@ -138,13 +143,15 @@ def design(cell: str) -> dict[str, Any]:
         dataset, model, framework, workload = parts
     else:
         raise ValueError(f"unknown cell ID {cell}")
-    m = _MODEL.fullmatch(model)
+    m = _MODEL.fullmatch(re.sub(r"_(pooled|wide)$", "", model))
     if m is None:
         raise ValueError(f"unknown model name in {cell}")
     trees, depth, horizon, replicate = (int(x) if x else None for x in m.groups())
     k = None
-    if workload == "panel":
+    if workload == "panel" or re.fullmatch(r"panel-share\d+", workload):
         family, g = ("panel-long" if horizon and horizon >= 256 else "panel"), horizon
+    elif workload in {"g1-file", "g1-independent"}:
+        family, g = "single-row", 1
     elif workload == "sessions":
         family, g = "sessions", None
     elif workload.startswith("cohort"):

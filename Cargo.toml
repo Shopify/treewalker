@@ -40,7 +40,7 @@ redundant_pub_crate = "allow"       # pub(crate) in private modules states that 
 
 [package]
 name = "treewalker-gbdt"
-version = "3.2.0"
+version = "3.2.1"
 edition.workspace = true
 rust-version.workspace = true
 description = "Grouped tree-ensemble inference via partial evaluation"
@@ -60,7 +60,7 @@ thiserror = "2.0.21"
 [dev-dependencies]
 # Turns research on for this package's tests, so `cargo test` runs them.
 treewalker-gbdt = { path = ".", features = ["research"] }
-divan = "0.1.21"
+divan = { version = "0.1.21", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true

@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
@@ -1215,7 +1215,6 @@ dependencies = [
     { name = "polars" },
     { name = "pooch" },
     { name = "pyarrow" },
-    { name = "requests" },
     { name = "treelite" },
     { name = "typer" },
     { name = "xgboost", marker = "sys_platform != 'linux'" },
@@ -1241,7 +1240,6 @@ requires-dist = [
     { name = "polars", specifier = ">=1.44.2" },
     { name = "pooch", specifier = ">=1.9.0" },
     { name = "pyarrow", specifier = ">=25.0.1" },
-    { name = "requests", specifier = ">=2.34.2" },
     { name = "treelite", specifier = ">=4.7.2" },
     { name = "typer", specifier = ">=0.27.2" },
     { name = "xgboost", marker = "sys_platform != 'linux'", specifier = ">=3.4.1" },
@@ -1372,8 +1370,8 @@ name = "xgboost-cpu"
 version = "3.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
-    { name = "scipy" },
+    { name = "numpy", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "scipy", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/99/98/c35e165aff81e43b43411662219764abbd246adae2547d360b23194cf75f/xgboost_cpu-3.4.1.tar.gz", hash = "sha256:ee0b249eaa962837cdc4e67adfec54567bfe7386337f3c3a3ce5d68909492e81", size = 1232193, upload-time = "2026-08-15T08:38:40.845Z" }
 wheels = [

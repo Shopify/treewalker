@@ -328,6 +328,13 @@ impl Steps {
 }
 
 /// Hint the cache to load the line at `p`; no effect on results.
+#[cfg_attr(
+    not(any(target_arch = "aarch64", target_arch = "x86_64")),
+    expect(
+        clippy::missing_const_for_fn,
+        reason = "the no-op fallback is const, but the prefetch instructions are not"
+    )
+)]
 #[inline(always)]
 pub(super) fn prefetch(p: *const u8) {
     // Miri does not run inline assembly; there the prefetch is a no-op.

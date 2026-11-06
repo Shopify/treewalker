@@ -38,26 +38,31 @@ const fn model(trees: Vec<Tree>, n_features: usize) -> Model {
 }
 
 /// A complete binary tree in breadth-first order, `internal` splits on feature 0 at
-/// distinct thresholds, and leaves valued by position.
+/// distinct thresholds in binary-search-tree order, and leaves valued by their
+/// in-order rank: an integer input `x` in `0..=internal` reaches value `x / 8`.
 fn complete(internal: usize) -> Tree {
+    fn fill(nodes: &mut [Node], i: usize, internal: usize, rank: &mut usize) {
+        if i >= internal {
+            nodes[i] = leaf(*rank as f64 / 8.0);
+            *rank += 1;
+            return;
+        }
+        fill(nodes, 2 * i + 1, internal, rank);
+        let threshold = *rank as f64 - 0.5;
+        fill(nodes, 2 * i + 2, internal, rank);
+        nodes[i] = Node::Numeric {
+            feature: 0,
+            op: Op::Le,
+            threshold,
+            default_left: i.is_multiple_of(3),
+            left: 2 * i + 1,
+            right: 2 * i + 2,
+            count: Some((nodes.len() - i) as u64),
+        };
+    }
     let total = 2 * internal + 1;
-    let nodes = (0..total)
-        .map(|i| {
-            if i < internal {
-                Node::Numeric {
-                    feature: 0,
-                    op: Op::Le,
-                    threshold: i as f64 + 0.5,
-                    default_left: i % 3 == 0,
-                    left: 2 * i + 1,
-                    right: 2 * i + 2,
-                    count: Some((total - i) as u64),
-                }
-            } else {
-                leaf((i % 97) as f64 / 8.0)
-            }
-        })
-        .collect();
+    let mut nodes = vec![leaf(0.0); total];
+    fill(&mut nodes, 0, internal, &mut 0);
     Tree { nodes }
 }
 
@@ -101,16 +106,21 @@ fn more_than_65535_varying_predicates() {
     // threshold: 70,000 predicates, past the old u16 IDs.
     let m = model(vec![complete(70_000)], 2);
     let mut rng = Rng::new(7);
-    let rows: Vec<f64> = (0..300)
-        .flat_map(|r| {
-            let x = match r % 5 {
-                0 => f64::NAN,
-                1 => rng.range(0, 70_000) as f64,
-                _ => rng.range(0, 70_000) as f64 + 0.5,
-            };
-            [x, 1.0]
-        })
-        .collect();
+    // Both children of high node IDs, and the last predicates (IDs sort by
+    // threshold), as well as random leaves and the missing-value path.
+    let mut xs = vec![0.0, 65_536.0, 69_999.0, 70_000.0];
+    for i in [65_536, 69_999] {
+        let Node::Numeric { threshold, .. } = m.trees[0].nodes[i] else {
+            panic!("expected a split");
+        };
+        xs.extend([threshold - 0.5, threshold + 0.5]);
+    }
+    xs.extend((0..291).map(|_| rng.range(0, 70_001) as f64));
+    for &x in &xs {
+        assert_eq!(m.predict(&[x, 1.0]), x / 8.0);
+    }
+    xs.push(f64::NAN);
+    let rows: Vec<f64> = xs.iter().flat_map(|&x| [x, 1.0]).collect();
     for dedup in [true, false] {
         let config = WalkerConfig::builder(2)
             .max_group_width(300)

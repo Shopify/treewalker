@@ -875,15 +875,11 @@ fn chain_masks<const F32: bool, B: Bits + ?Sized, O: Sides<B> + ?Sized, const ST
         }
     }
     let bounds = &plan.flip_bounds[feature.flips..=feature.flips + c.codes.domain()];
-    let mut seen = 0u64;
     // Unchecked: every index below is in range by the plan's construction at load
     // ([`MaskPlan::build`]), which the debug assertions restate. A code's flips lie
     // between its bounds, and name the feature's predicates, which `out` holds; and
     // the rows are the mask's.
     for (r, &code) in codes.iter().enumerate() {
-        if STATS {
-            seen += bins.exceptions(c, code).len() as u64;
-        }
         let code = code as usize;
         debug_assert!(code + 1 < bounds.len());
         // SAFETY: as above; `code` is one of the feature's codes.
@@ -902,7 +898,7 @@ fn chain_masks<const F32: bool, B: Bits + ?Sized, O: Sides<B> + ?Sized, const ST
     }
     if STATS {
         let n_points: usize = chains.iter().map(|chain| chain.len as usize).sum();
-        counters.precompute_row_evals += codes.len() as u64 + seen;
+        counters.precompute_row_evals += n_points as u64 * codes.len() as u64;
         counters.precompute_mask_writes += n_points as u64;
     }
     for chain in chains {
@@ -1177,6 +1173,50 @@ mod tests {
         assert!(f.model.masks.features.iter().all(|m| m.num.is_empty()));
         let m = masks(&f, &[0.0, 1.0, 3.0]);
         assert_eq!(m, [0b110]);
+    }
+
+    #[cfg(feature = "research")]
+    #[test]
+    fn categorical_precompute_counts_every_row_for_each_predicate() {
+        let f = forest(
+            &[categorical(&[1], false), categorical(&[1, 3], false)],
+            false,
+        );
+        let model = &f.model;
+        assert_eq!(model.varying_predicates.len(), 2);
+        let mut evals = Vec::new();
+        for (listed, column) in [(false, [0.0, 2.0, 4.0, 5.0]), (true, [1.0, 2.0, 4.0, 5.0])] {
+            let n = column.len();
+            let (mut out, mut brute) = (vec![[0u32; 2]; 2], vec![[0u32; 2]; 2]);
+            let (mut order, mut codes) = (vec![[0; 2]; 2 * n], vec![0; n]);
+            let mut counters = super::WorkCounters::default();
+            model.precompute_sweep::<false, u32, _, true>(
+                &column,
+                &mut order,
+                &mut codes,
+                &mut out[..],
+                &mut [0u32][..],
+                &mut 0u32,
+                &mut counters,
+            );
+            let c = model.masks.features[0].categories.unwrap();
+            let exceptions: usize = codes
+                .iter()
+                .map(|&code| model.layout.bins.exceptions(c, code).len())
+                .sum();
+            assert_eq!(exceptions > 0, listed);
+            evals.push(counters.precompute_row_evals);
+            let mut counters = super::WorkCounters::default();
+            model.precompute_brute_force::<false, u32, _, true>(
+                &column,
+                &mut brute[..],
+                &mut 0u32,
+                &mut counters,
+            );
+            assert_eq!(counters.precompute_row_evals, 2 * n as u64);
+            assert_eq!(out, brute);
+        }
+        assert_eq!(evals, [8, 8], "unlisted rows, then a rank exception");
     }
 
     #[test]

@@ -11,7 +11,9 @@ changes when nothing in a function does:
   backreferences shift whenever a path's length does;
 - local labels, constant pools, jump and switch tables, anonymous constants, Apple's
   linker-optimization hints, crate hashes and LTO's numeric suffixes on duplicated
-  local symbols are renumbered away;
+  local symbols are renumbered away; basic-block targets retain their identity,
+  and referenced constant pools and jump tables are compared with the function,
+  even when emitted in another section before or after it;
 - LLVM's MergeFunctions keeps one of identical functions under a name chosen by
   order, so functions only one side has are paired by identical bodies.
 
@@ -50,11 +52,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MANGLED = re.compile(r"(?<![A-Za-z0-9_$.])(_{0,2}(?:_R|_ZN)[A-Za-z0-9_$]+)((?:\.[A-Za-z0-9_$]+)*)")
 LABELS = [
     (re.compile(r"\.?(L|l)tmp\d+"), "Ltmp"),
-    (re.compile(r"\.?LBB\d+_\d+"), "LBB"),
     (re.compile(r"l_anon\.[0-9a-f]+\.\d+|\.Lanon\.[0-9a-f]+\.\d+"), "anon"),
     (re.compile(r"\.?L__unnamed_\d+|l___unnamed_\d+"), "unnamed"),
     (re.compile(r"Lloh\d+|Lfunc_(begin|end)\d+|\.?Lexception\d+|GCC_except_table\d+"), "L"),
-    (re.compile(r"[l.]?L?CPI\d+_\d+|\.?LJTI\d+_\d+"), "L"),
     (
         re.compile(r"(l_switch\.table\.|\.Lswitch\.table\.)(\S+?)\.\d+(?=@|\(|\.rel|$|\s|,)"),
         r"\1\2",
@@ -63,6 +63,7 @@ LABELS = [
     (re.compile(r"\.(?:llvm\.)?\d+»"), "»"),
 ]
 FUNC = re.compile(r"^(«[^»]*»|_?main):")
+DATA = re.compile(r"(?<![\w.])(?:[l.]?L?CPI\d+_\d+|\.?LJTI\d+_\d+)(?![\w.])")
 SKIP = (".loc", ".cfi", "//", ";", "#", "@", ".p2align", ".file")
 END = (".cfi_endproc", ".Lfunc_end", "Lfunc_end", ".size", ".section", ".subsections_via_symbols")
 TIMED = re.compile(
@@ -98,8 +99,20 @@ def functions(text: str, renames: list[tuple[str, str]]) -> dict[str, list[str]]
         pattern = re.compile("|".join(re.escape(k) for k in sorted(table, key=len, reverse=True)))
         text = pattern.sub(lambda m: table[m.group(0)], text)
     out: dict[str, list[str]] = {}
+    data: dict[str, list[str]] = {}
+    block: list[str] | None = None
     cur: list[str] | None = None
     for line in text.splitlines():
+        s = line.strip()
+        label = re.match(r"^([.\w$]+):", s)
+        # Pools precede the function in literal sections; jump tables can follow
+        # its end in rodata (ELF) or __TEXT,__const (Mach-O).
+        if label or FUNC.match(s) or s.startswith((*END, ".text", ".data", ".globl", ".type")):
+            block = None
+        if label and DATA.fullmatch(label[1]):
+            block = data[label[1]] = [s]
+        elif block is not None and s and not s.startswith(SKIP):
+            block.append(s)
         m = FUNC.match(line)
         if m:
             name = re.sub(r"\.(?:llvm\.)?\d+»", "»", m.group(1))
@@ -109,15 +122,39 @@ def functions(text: str, renames: list[tuple[str, str]]) -> dict[str, list[str]]
             continue
         if cur is None:
             continue
-        s = line.strip()
         if s.startswith(END):
             cur = None
             continue
         if not s or s.startswith(SKIP):
             continue
-        for pattern_, repl in LABELS:
-            s = pattern_.sub(repl, s)
         cur.append(s)
+    for body in out.values():
+        refs = set(DATA.findall("\n".join(body)))
+        while True:
+            more = {
+                ref for key in refs if key in data for ref in DATA.findall("\n".join(data[key]))
+            }
+            if more <= refs:
+                break
+            refs |= more
+        # Definition order keeps references tied to targets, including forward
+        # references from a table to a basic block in the function.
+        for key, lines in data.items():
+            if key in refs and lines[0] not in body:
+                body.extend(lines)
+        definitions = [m[1] for s in body if (m := re.match(r"^(\.?LBB\d+_\d+):", s))]
+        labels = {key: f"L{i}" for i, key in enumerate(definitions)}
+        labels.update({key: f"D{i}" for i, key in enumerate(k for k in data if k in refs)})
+
+        def rename_label(m: re.Match[str], table: dict[str, str] = labels) -> str:
+            return table.get(m[0], m[0])
+
+        for i, s in enumerate(body):
+            s = re.sub(r"\.?LBB\d+_\d+", rename_label, s)
+            s = DATA.sub(rename_label, s)
+            for pattern_, repl in LABELS:
+                s = pattern_.sub(repl, s)
+            body[i] = s
     return out
 
 

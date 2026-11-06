@@ -11,9 +11,12 @@ use std::time::{Duration, Instant};
 /// through the same passes as groups, so `pieces`, `passes`, `leaf_events` and
 /// `runs_written` count them too. Version 5 runs every group whole, at a runtime
 /// mask width past 1,024 rows, so `pieces` counts groups. Version 6 drops `pieces`,
-/// which equals `groups`; the other counters keep their version 5 meaning.
+/// which equals `groups`; the other counters keep their version 5 meaning. Version 7
+/// counts `precompute_row_evals` for a categorical feature as one evaluation per row
+/// for each of its predicates, the version 2 meaning, where versions 3 to 6 counted a
+/// code per row plus the code's rank exceptions.
 #[cfg(feature = "research")]
-pub const COUNTERS_VERSION: u32 = 6;
+pub const COUNTERS_VERSION: u32 = 7;
 
 /// [`WorkCounters`] from its one list of fields, with `+=` and its fields' names and
 /// values, which `Display` and [`WorkCounters::fields`] read: no counter can be in some
