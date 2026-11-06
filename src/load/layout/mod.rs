@@ -152,7 +152,7 @@ use std::hint::select_unpredictable;
 use std::ops::Range;
 
 use crate::LoadError;
-use crate::exact::WideLeaf;
+use crate::exact::{FixedLeaf, WideLeaf};
 use crate::model::category;
 
 use exceptions::ExceptionSlots;
@@ -722,8 +722,8 @@ fn count_below<const F32: bool>(thresholds: &[f64], x: f64) -> usize {
 /// Leaf values by leaf-value index.
 #[derive(Clone, Debug)]
 pub(crate) enum LeafValues {
-    /// Values times 2^e for the model's [`crate::exact::Plan::Fixed`] scale e.
-    Fixed(Vec<i128>),
+    /// Packed values at the model's [`crate::exact::Plan::Fixed`] scale.
+    Fixed(Vec<FixedLeaf>),
     /// The values in the digits of the model's [`crate::exact::Plan::Wide`] accumulator.
     Wide(Vec<WideLeaf>),
 }

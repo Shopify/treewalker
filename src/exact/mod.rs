@@ -6,6 +6,7 @@
 //! prediction is the correctly rounded sum of the leaf values whatever order the
 //! leaves are added in, which lets a leaf be added to a run of rows with two writes
 //! to a difference array.
+//! The original leaves fit in [`FixedLeaf`]'s eight bytes; sums still need `i128`.
 //!
 //! When the leaf exponents span too wide a range for `i128`, a [`Wide`] accumulator
 //! holds the same fixed point in as many 29-bit digits as the span needs, each in an
@@ -51,6 +52,38 @@ pub fn to_fixed(v: f64, e: i32) -> i128 {
         -magnitude
     } else {
         magnitude
+    }
+}
+
+/// A leaf at a [`Plan::Fixed`] scale, packed as a signed odd mantissa and a shift.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FixedLeaf(i64);
+
+impl FixedLeaf {
+    /// `v` at its model's [`fixed_scale`] e.
+    pub(crate) fn new(v: f64, e: i32) -> Self {
+        let value = to_fixed(v, e);
+        if value == 0 {
+            return Self(0);
+        }
+        let shift = value.trailing_zeros();
+        let odd = value >> shift;
+        // A finite f64's odd mantissa is below 2^53 in magnitude, and fixed_scale
+        // keeps the shift in 0..=124 (0..=123 with any trees): both fit in an i64.
+        debug_assert!(shift < 125 && odd.unsigned_abs() < 1 << 53);
+        Self(((odd as i64) << 8) | i64::from(shift))
+    }
+}
+
+impl From<FixedLeaf> for i128 {
+    #[expect(
+        clippy::inline_always,
+        reason = "keeps the production call path independent of the research builds"
+    )]
+    #[inline(always)]
+    fn from(value: FixedLeaf) -> Self {
+        // The arithmetic shift recovers the signed mantissa; zero decodes to zero.
+        Self::from(value.0 >> 8) << (value.0 & 127)
     }
 }
 
