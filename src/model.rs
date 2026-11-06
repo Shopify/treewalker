@@ -6,9 +6,9 @@
 //!
 //! Loading decodes each tree into packed nodes ([`crate::load::parse::decoded`]) and
 //! writes the prediction layout from them ([`crate::load::layout`]). Production keeps
-//! the layout, the categorical splits' lists, the trees and the varying predicates.
-//! With the `research` feature, the layout's build also writes each node as a parsed
-//! [`Node`], kept for introspection and the full walk.
+//! the layout, the trees and the varying predicates. With the `research` feature, the
+//! layout's build also writes each node as a parsed [`Node`], and the categorical
+//! splits' lists are kept, for introspection, the full walk and research's scans.
 //!
 //! # Node layout (24 bytes, fall-through)
 //!
@@ -420,6 +420,7 @@ pub(crate) struct Model {
     pub(crate) trees: Vec<Tree>,
     pub(crate) config: WalkerConfig,
     /// The categorical splits' lists: each its length, then its sorted categories.
+    /// Empty in production, which frees them once loaded; research and the tests read them.
     pub(crate) categories: Vec<u32>,
     pub(crate) varying_predicates: Vec<VaryingPredicate>,
     /// Each varying feature's predicates, and the categorical ones' left regions.

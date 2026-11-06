@@ -212,8 +212,8 @@ including caches the system does not report;
 replaces the measurement. Every group runs whole: groups of up to 1,024 rows take
 masks of 32 to 1,024 bits, a power of two, and wider ones masks of their own width
 in 128-bit units. A loaded model keeps the prediction layout,
-16 bytes per node plus the bins and the leaf table; the parsed nodes are kept only
-with the `research` feature.
+16 bytes per node plus the bins and the leaf table; the parsed nodes and the
+category lists are kept only with the `research` feature.
 
 ## Bounded import
 
