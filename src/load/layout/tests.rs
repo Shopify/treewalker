@@ -614,14 +614,8 @@ fn reused_fills_match_fresh_bins_across_the_restore_boundary() {
         held: 0,
     };
     bins.offsets = vec![0, 0, 0, 1, 3, 6, 6];
-    bins.exceptions = vec![
-        [5, 100],
-        [10, 101],
-        [20, 102],
-        [5, 103],
-        [10, 104],
-        [20, 105],
-    ];
+    bins.exception_slots = ExceptionSlots::Narrow(vec![0, 5, 15, 0, 5, 15]);
+    bins.exception_words = vec![100, 101, 102, 103, 104, 105];
     bins.constant.push(FeatureBins {
         feature: 0,
         thresholds: 0..1,
@@ -640,6 +634,65 @@ fn reused_fills_match_fresh_bins_across_the_restore_boundary() {
         assert_eq!(reused, fresh);
         bins.fill(&[x], &mut reused, true);
         assert_eq!(reused, fresh);
+    }
+}
+
+#[test]
+fn widening_keeps_the_earlier_features_fills() {
+    let mut bins = Layout::empty().bins;
+    bins.n_features = 2;
+    bins.n_slots = 3 + 65_537;
+    bins.n_categorical = 2;
+    bins.defaults.resize(bins.n_slots, 99);
+    let first = CategoryBins {
+        codes: CategoryCodes::new(&mut bins.books, &[0, 1]).unwrap(),
+        slot: 1,
+        slots: 2,
+        offsets: 0,
+        held: 0,
+    };
+    let second = CategoryBins {
+        codes: CategoryCodes::new(&mut bins.books, &[0, 1]).unwrap(),
+        slot: 3,
+        slots: 65_537,
+        offsets: 5,
+        held: 1,
+    };
+    bins.offsets = vec![0, 0, 0, 1, 2, 2, 2, 2, 3, 4];
+    bins.exception_slots = ExceptionSlots::Narrow(vec![0, 1]);
+    bins.exception_words = vec![101, 102];
+    bins.exception_slots.resize(4, second.slots()).unwrap();
+    bins.exception_slots.set(2, 0);
+    bins.exception_slots.set(3, 65_536);
+    bins.exception_words.extend([201, 202]);
+    for (feature, c) in [first, second].into_iter().enumerate() {
+        bins.constant.push(FeatureBins {
+            feature,
+            thresholds: 0..0,
+            slot: c.slot,
+            categories: Some(c),
+        });
+    }
+    assert_eq!(bins.rank_table_bytes(), 4 * (2 + 65_537 + 10) + 8 * 4);
+    let mut reused = bins.new_bins();
+    for row in [
+        [0.0, 0.0],
+        [1.0, 1.0],
+        [0.0, -1.0],
+        [-1.0, 1.0],
+        [f64::NAN; 2],
+        [1.0, 0.0],
+    ] {
+        bins.fill(&row, &mut reused, true);
+        let mut expected = bins.defaults.clone();
+        for (feature, c, words) in [(0, first, [101, 102]), (1, second, [201, 202])] {
+            match row[feature] {
+                0.0 => expected[c.slot] = words[0],
+                1.0 => expected[c.slot + c.slots() - 1] = words[1],
+                _ => {}
+            }
+        }
+        assert_eq!(reused[..bins.n_slots], expected);
     }
 }
 
@@ -707,10 +760,10 @@ fn heavy_right_splits_read_inverted_bins_and_complemented_sets() {
         assert_eq!(ranks, want);
         assert_eq!(c.slots(), 1);
         let listed = list.len() + usize::from(default_left);
-        assert_eq!(layout.bins.exceptions.len(), listed);
+        assert_eq!(layout.bins.exception_words.len(), listed);
         assert_eq!(
             layout.bins.rank_table_bytes(),
-            4 * (1 + domain as usize + 1) + 8 * listed
+            4 * (1 + domain as usize + 1) + 6 * listed
         );
         let listed = |x: f64| x >= 0.0 && list.contains(&(x as u32));
         for x in [
@@ -886,7 +939,7 @@ fn nested_heavy_sets_share_a_chain() {
 #[test]
 fn chains_stop_at_the_rank_table_cap() {
     // Ten singletons, some with missing: an antichain, ten chains over 12 codes.
-    // The rank tables take 212 bytes: 10 defaults, 13 exception bounds and 15
+    // The rank tables take 182 bytes: 10 defaults, 13 exception bounds and 15
     // exceptions, each singleton's code and five times missing, at rank 0. Varying,
     // the masks' flips take 112 more: 13 bounds and a flip per exception, each into
     // its chain's one predicate (no row starts in it, the default rank being past
@@ -897,10 +950,10 @@ fn chains_stop_at_the_rank_table_cap() {
         ..LoadOptions::default()
     };
     let mut rng = Rng::new(31);
-    for (varying, bytes) in [(false, 212), (true, 324)] {
+    for (varying, bytes) in [(false, 182), (true, 294)] {
         let forest = categorical_load(&splits, varying, &cap(bytes), Some(false)).unwrap();
         let (bins, masks) = (&forest.model.layout.bins, &forest.model.masks);
-        assert_eq!((bins.rank_table_bytes(), bins.chain_slots()), (212, 10));
+        assert_eq!((bins.rank_table_bytes(), bins.chain_slots()), (182, 10));
         let flips = 4 * (masks.flip_bounds.len() + masks.flips.len());
         assert_eq!(flips, if varying { 112 } else { 0 });
         check_model(&mut rng, &forest, 500);
@@ -1041,7 +1094,7 @@ fn a_lone_field_takes_its_word() {
 fn packed_fields_span_words() {
     // 160 singletons over 162 codes: 160 1-bit fields in five words. The tables take
     // five defaults, 163 exception bounds and an exception per singleton's code,
-    // 1,952 bytes, against 2,572 for 160 chains of a word each.
+    // 1,632 bytes, against 2,252 for 160 chains of a word each.
     let splits: Vec<_> = (0..160).map(|c| (vec![c], false, true)).collect();
     let mut rng = Rng::new(41);
     for varying in [false, true] {
@@ -1054,13 +1107,13 @@ fn packed_fields_span_words() {
                 bins.chain_slots(),
                 bins.has_shifts()
             ),
-            (1952, 5, true)
+            (1632, 5, true)
         );
         check_model(&mut rng, &forest, 200);
         let forest =
             categorical_load(&splits, varying, &LoadOptions::default(), Some(false)).unwrap();
         let bins = &forest.model.layout.bins;
-        assert_eq!((bins.rank_table_bytes(), bins.chain_slots()), (2572, 160));
+        assert_eq!((bins.rank_table_bytes(), bins.chain_slots()), (2252, 160));
     }
 }
 

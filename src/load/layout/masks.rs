@@ -177,8 +177,8 @@ impl MaskPlan {
                 let chains = &plan.chains[first..];
                 plan.flip_bounds.push(index(plan.flips.len())?);
                 for e in 0..c.codes.domain() {
-                    for &[slot, word] in bins.exceptions(c, e as u32) {
-                        for m in of_slot[slot as usize - c.slot].clone() {
+                    for (slot, word) in bins.exceptions(c, e as u32) {
+                        for m in of_slot[slot].clone() {
                             let chain = chains[m as usize];
                             let from = first_test[m as usize] as usize;
                             let j = first_heavy(&tests[from..from + chain.len as usize], word);

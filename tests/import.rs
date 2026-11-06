@@ -861,14 +861,14 @@ fn input_caps_are_options() {
     ));
     // A split on 41 categories with missing sent left takes, in its one chain, a
     // default rank, the bounds of its 43 codes' exceptions (the categories, no
-    // category and missing), 44 of 4 bytes, and 42 exceptions of 8 bytes: 516 bytes.
+    // category and missing), 44 of 4 bytes, and 42 exceptions of 6 bytes: 432 bytes.
     let mut v = simd_json::to_owned_value(&mut json.clone()).unwrap();
     v["trees"][0]["nodes"][0]["category_list"] =
         Value::Array(Box::new((0..=40).map(Value::from).collect()));
     let pooled = simd_json::to_vec(&v).unwrap();
     assert!(with(defaults, &pooled, json_format).is_ok());
     let capped = LoadOptions {
-        max_rank_table_bytes: 4 + 4 * 44 + 8 * 42 - 1,
+        max_rank_table_bytes: 4 + 4 * 44 + 6 * 42 - 1,
         ..defaults
     };
     assert!(limit(capped, &pooled, json_format));
