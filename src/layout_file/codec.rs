@@ -88,6 +88,8 @@ pub(crate) struct Decoder<R> {
     pub(crate) at: usize,
     pub(crate) total: usize,
     pub(crate) checksum: Checksum,
+    #[cfg(all(unix, target_pointer_width = "64"))]
+    pub(crate) mapping: Option<std::sync::Arc<super::storage::Mapping>>,
 }
 
 impl<R: Read> Decoder<R> {
@@ -95,6 +97,13 @@ impl<R: Read> Decoder<R> {
         if bytes.len() > self.total.saturating_sub(self.at) {
             return Err(invalid("truncated layout section"));
         }
+        #[cfg(all(unix, target_pointer_width = "64"))]
+        if let Some(mapping) = &self.mapping {
+            bytes.copy_from_slice(mapping.bytes(self.at, bytes.len())?);
+        } else {
+            self.inner.read_exact(bytes)?;
+        }
+        #[cfg(not(all(unix, target_pointer_width = "64")))]
         self.inner.read_exact(bytes)?;
         self.checksum.write(bytes);
         self.at += bytes.len();
@@ -475,18 +484,112 @@ impl<A: Codec, B: Codec> Codec for (A, B) {
         Ok((A::get(r)?, B::get(r)?))
     }
 }
-impl<T: Codec> Codec for Box<T> {
-    fn put<W: Write>(&self, w: &mut Encoder<W>) -> io::Result<()> {
-        (**self).put(w)
-    }
-    fn get<R: Read>(r: &mut Decoder<R>) -> io::Result<Self> {
-        Ok(Self::new(T::get(r)?))
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fieldwise_lengths_use_minimum_wire_sizes() {
+        let shortest = MaskFeature {
+            feature: 0,
+            num: 0..0,
+            chains: 0..0,
+            flips: 0,
+            categories: None,
+        };
+        let mut encoded = Encoder::new(io::sink());
+        shortest.put(&mut encoded).unwrap();
+        assert_eq!(encoded.at, 49); // 8 + 16 + 16 + 8 + 1, independently of MIN_BYTES.
+        let mut w = Encoder::new(Vec::new());
+        100usize.put(&mut w).unwrap();
+        w.align().unwrap();
+        let bytes = w.inner;
+        let mut r = Decoder {
+            inner: bytes.as_slice(),
+            at: 0,
+            total: bytes.len(),
+            checksum: Checksum::default(),
+            #[cfg(all(unix, target_pointer_width = "64"))]
+            mapping: None,
+        };
+        r.total = 16 + 100 * 49 - 1;
+        assert!(r.length::<MaskFeature>().is_err());
+        let error = <(u32, bool)>::get_vec(usize::MAX, &mut r).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn trailing_length_is_rejected_before_the_vector_allocation_entry() {
+        struct Probe;
+        impl Codec for Probe {
+            fn put<W: Write>(&self, _: &mut Encoder<W>) -> io::Result<()> {
+                unreachable!()
+            }
+            fn get<R: Read>(_: &mut Decoder<R>) -> io::Result<Self> {
+                unreachable!()
+            }
+            fn get_vec<R: Read>(_: usize, _: &mut Decoder<R>) -> io::Result<Vec<Self>> {
+                panic!("must reject the count before entering vector allocation")
+            }
+        }
+        // A large already-consumed prefix must not justify a trailing count.
+        // Probe makes invocation of the allocation entry point observable.
+        let mut tail = [0; 16];
+        tail[..8].copy_from_slice(&256u64.to_ne_bytes());
+        let mut r = Decoder {
+            inner: tail.as_slice(),
+            at: 4096,
+            total: 4096 + tail.len(),
+            checksum: Checksum::default(),
+            #[cfg(all(unix, target_pointer_width = "64"))]
+            mapping: None,
+        };
+        assert!(Vec::<Probe>::get(&mut r).is_err());
+    }
+
+    #[test]
+    fn direct_pod_reads_check_extent_before_reserving() {
+        let mut r = Decoder {
+            inner: io::empty(),
+            at: 0,
+            total: 0,
+            checksum: Checksum::default(),
+            #[cfg(all(unix, target_pointer_width = "64"))]
+            mapping: None,
+        };
+        assert_eq!(
+            u64::get_vec(usize::MAX, &mut r).unwrap_err().to_string(),
+            "layout array extent"
+        );
+        assert_eq!(
+            u64::get_vec(1, &mut r).unwrap_err().to_string(),
+            "layout array extent"
+        );
+    }
+
+    fn decode<T: Codec>(bytes: &[u8]) -> io::Result<T> {
+        let mut r = Decoder {
+            inner: bytes,
+            at: 0,
+            total: bytes.len(),
+            checksum: Checksum::default(),
+            #[cfg(all(unix, target_pointer_width = "64"))]
+            mapping: None,
+        };
+        T::get(&mut r)
+    }
+    #[test]
+    fn rejects_invalid_tags_lengths_and_alignment_padding() {
+        assert!(decode::<bool>(&[2]).is_err());
+        assert!(decode::<crate::model::ThresholdType>(&[2]).is_err());
+        assert!(decode::<crate::model::Postprocessor>(&[2]).is_err());
+        assert!(decode::<Vec<u32>>(&u64::MAX.to_ne_bytes()).is_err());
+        let mut w = Encoder::new(Vec::new());
+        vec![1u32].put(&mut w).unwrap();
+        w.inner[8] = 1;
+        assert!(decode::<Vec<u32>>(&w.inner).is_err());
+    }
+
     #[test]
     fn checksum_is_independent_of_write_boundaries() {
         let input: Vec<u8> = (0..251).collect();

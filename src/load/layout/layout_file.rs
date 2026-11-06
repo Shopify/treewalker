@@ -441,8 +441,8 @@ mod tests {
             |b| b.varying[0].categories.as_mut().unwrap().codes.start = u32::MAX,
             |b| b.varying[0].categories.as_mut().unwrap().codes.small = Some(u32::MAX),
             |b| b.varying[0].categories.as_mut().unwrap().offsets = usize::MAX,
-            |b| b.exception_words.clear(),
-            |b| b.exception_slots = ExceptionSlots::Narrow(vec![]),
+            |b| b.exception_words = super::super::array(Vec::new()),
+            |b| b.exception_slots = ExceptionSlots::Narrow(super::super::array(vec![])),
             |b| b.exception_slots.set(0, u32::from(u16::MAX)),
         ];
         for corrupt in corruptions {
@@ -475,11 +475,11 @@ mod tests {
                 model.masks.features[0].categories = Some(*c);
                 bins.n_slots += extra;
                 bins.defaults.resize(bins.n_slots, 0);
-                bins.exception_slots = ExceptionSlots::Wide(
+                bins.exception_slots = ExceptionSlots::Wide(super::super::array(
                     (0..count)
                         .map(|i| bins.exception_slots.at(i) as u32)
                         .collect(),
-                );
+                ));
             }
             let mut w = crate::layout_file::codec::Encoder::new(Vec::new());
             bins.put(&mut w).unwrap();
@@ -488,6 +488,8 @@ mod tests {
                 at: 0,
                 total: w.inner.len(),
                 checksum: crate::layout_file::codec::Checksum::default(),
+                #[cfg(all(unix, target_pointer_width = "64"))]
+                mapping: None,
             };
             let mut loaded = BinMap::get(&mut r).unwrap();
             assert_eq!(r.at, r.total);
@@ -505,17 +507,17 @@ mod tests {
             }
             let mut wrong = loaded.clone();
             wrong.exception_slots = if wide {
-                ExceptionSlots::Narrow(
+                ExceptionSlots::Narrow(super::super::array(
                     (0..count)
                         .map(|i| loaded.exception_slots.at(i) as u16)
                         .collect(),
-                )
+                ))
             } else {
-                ExceptionSlots::Wide(
+                ExceptionSlots::Wide(super::super::array(
                     (0..count)
                         .map(|i| loaded.exception_slots.at(i) as u32)
                         .collect(),
-                )
+                ))
             };
             assert!(
                 wrong
@@ -525,10 +527,62 @@ mod tests {
                     .to_string()
                     .contains("canonical exception slot width")
             );
+            #[cfg(all(unix, target_pointer_width = "64", not(miri)))]
+            {
+                let mut forest = forest;
+                let path = support::File::new();
+                std::sync::Arc::get_mut(&mut forest.model)
+                    .unwrap()
+                    .layout
+                    .bins = loaded.clone();
+                forest.save_layout_impl(&path.0).unwrap();
+                let copied = Forest::load_layout_impl(&path.0).unwrap();
+                // SAFETY: the test exclusively owns the file and does not write
+                // or truncate it until every mapped forest/predictor has dropped.
+                let mapped = unsafe { Forest::map_layout_impl(&path.0).unwrap() };
+                let layout = &mapped.model.layout;
+                assert!(layout.nodes.is_mapped());
+                assert!(layout.bins.exception_words.is_mapped());
+                match &layout.bins.exception_slots {
+                    ExceptionSlots::Narrow(s) => {
+                        assert!(!wide);
+                        assert!(s.is_mapped());
+                    }
+                    ExceptionSlots::Wide(s) => {
+                        assert!(wide);
+                        assert!(s.is_mapped());
+                    }
+                }
+                assert!(matches!(mapped.model.plan, crate::exact::Plan::Fixed(_)));
+                assert!(layout.leaves.is_empty());
+                let rows = [0.0, 1.0, 99.0, f64::NAN];
+                let (mut a, mut b) = ([0.0f64; 4], [0.0f64; 4]);
+                forest.predictor().predict_group(&rows, &mut a);
+                copied.predictor().predict_group(&rows, &mut b);
+                assert_eq!(a.map(f64::to_bits), b.map(f64::to_bits));
+                mapped.predictor().predict_group(&rows, &mut b);
+                assert_eq!(a.map(f64::to_bits), b.map(f64::to_bits));
+            }
             loaded
                 .exception_slots
                 .set(0, if wide { u32::MAX } else { u32::from(u16::MAX) });
             assert!(loaded.validate_layout(&config, false).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_exception_width() {
+        for tag in [0, 1, 8, 255] {
+            let bytes = [tag];
+            let mut r = Decoder {
+                inner: bytes.as_slice(),
+                at: 0,
+                total: 1,
+                checksum: crate::layout_file::codec::Checksum::default(),
+                #[cfg(all(unix, target_pointer_width = "64"))]
+                mapping: None,
+            };
+            assert!(ExceptionSlots::get(&mut r).is_err());
         }
     }
 }

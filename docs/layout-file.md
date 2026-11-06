@@ -10,9 +10,9 @@ layout-file methods return `LoadError::Unsupported`; research builds rebuild fro
 the source model. No parsed research nodes or category lists are stored.
 
 `Forest::save_layout(path)` includes the grouping configuration. Use `.twl` for
-layout files. Writes are
-buffered and flushed, not fsynced or atomically published. Write a new file and
-rename it into place; do not overwrite files used by mapped readers.
+layout files. Writes are buffered and flushed, not fsynced or atomically published.
+Write a new file and rename it into place; do not overwrite files used by mapped
+readers.
 
 `Forest::load_layout(path)` streams into owned vectors and validates before
 returning. I/O failures use `LoadError::Io`, incompatible/corrupt layouts use
@@ -55,12 +55,34 @@ MaskPlan while the stored plan is still alive. Reconstruction uses the stored
 plan's flip-byte budget, not an independent multi-gigabyte allowance; that budget
 is not a strict heap-peak bound, because vectors also have capacities and scratch.
 
+Measured with dhat in release builds, retaining only the loaded forest (no
+predictor), a private model with many categorical splits had peak/live heap
+ratios of 1.00x owned and 1.05x mapped with its own configuration. With every feature varying, they were 1.84x and 2.51x:
+predicate-heavy validation can require substantial temporary heap. A public
+generated forest with 1,024 two-sided categorical predicates used 0.345/0.251 MiB
+peak/live owned and 0.220/0.134 MiB mapped. These are heap measurements, not RSS;
+file-backed mapped pages are not counted by dhat.
+
 Checks needed only for prediction agreement are deliberately omitted: threshold
 and codebook order, code-zero exceptions and agreement between a predicate's
 two split sides. Bounds, predicate (feature, kind) ordering and mask-plan
 correspondence remain safety requirements. A hostile writer can choose arbitrary
 predictions; neither structural validation nor the checksum authenticates a model.
 
+On 64-bit Unix, `unsafe Forest::map_layout(path)` borrows the layout nodes,
+exception words and either width of relative exception slots from a read-only
+private mapping. Fixed values travel in their mapped leaf nodes. Other metadata,
+including wide leaves, remains owned. Validation and checksum checks are identical
+to the owned loader. Mapping lifetime is retained by the forest and all
+predictors/clones; array access is an unconditional pointer/length slice, not an
+owned/mapped branch in the kernel. Without `layout-file`, arrays remain ordinary Vecs.
+
+The **caller must ensure that no thread or process writes or truncates the backing
+file during the call or until all returned forests, clones and predictors drop**.
+Neither read-only access nor MAP_PRIVATE enforces that contract. Replacing a name
+by atomic rename is fine if the old file remains immutable. This unsafe API is
+deliberate: validation cannot protect a live slice from subsequent external writes.
+An immutable artifact/ownership abstraction for a safe mapped API remains open.
 
 ## Format
 
@@ -74,8 +96,8 @@ The field order is specified by `layout_file::codec` and the colocated schemas
 that need private access, not Rust layout.
 
 The `TWLAYOUT` format starts at schema version 1. It stores exception words
-separately from feature-relative slots. The slots
-section starts with an explicit u8 width tag: 2 for u16 slots, 4 for u32 slots,
+separately from feature-relative slots. The slots section starts with an explicit
+u8 width tag: 2 for u16 slots, 4 for u32 slots,
 followed by that width's aligned array. Both widths are supported model-wide.
 The layout has one Wide-leaf vector, empty under a Fixed plan. Fixed values live
 in layout nodes: word 0 is zero; word 1 has shift bits 0-6, zero at bit 7, the

@@ -26,5 +26,8 @@ fn research_rebuilds_from_source_instead_of_using_layout_files() {
         Err(LoadError::Unsupported(_))
     ));
     rejected(Forest::load_layout(&path));
+    #[cfg(all(unix, target_pointer_width = "64"))]
+    // SAFETY: no file is written or truncated; rejection precedes opening it.
+    rejected(unsafe { Forest::map_layout(&path) });
     assert!(!path.exists());
 }
