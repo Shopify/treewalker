@@ -57,7 +57,7 @@ pub fn to_fixed(v: f64, e: i32) -> i128 {
 
 /// A leaf at a [`Plan::Fixed`] scale, packed as a signed odd mantissa and a shift.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct FixedLeaf(i64);
+pub(crate) struct FixedLeaf(pub(crate) i64);
 
 impl FixedLeaf {
     /// `v` at its model's [`fixed_scale`] e.

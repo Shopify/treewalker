@@ -125,6 +125,8 @@ pub(super) use walk_with;
 /// One chunk's walk and resolve passes.
 pub(super) struct Pass<'a, M> {
     pub(super) p: &'a Pools,
+    /// Fixed leaf entries carry node links rather than Wide table indices.
+    pub(super) inline_leaves: bool,
     pub(super) roots: &'a [u32],
     /// The group's rows.
     pub(super) n: usize,
@@ -296,12 +298,21 @@ impl<M: Mask> Pass<'_, M> {
                 res.out = next;
                 let leaves_before = res.n_leaves;
                 let items_in_pass = n;
-                n = super::resolve::resolve::<X, M, C, SCAN, EMPTY, STATS>(
-                    &mut res,
-                    items_in_pass,
-                    scan,
-                    &mut seen,
-                );
+                n = if self.inline_leaves {
+                    super::resolve::resolve::<X, M, C, SCAN, EMPTY, STATS, true>(
+                        &mut res,
+                        items_in_pass,
+                        scan,
+                        &mut seen,
+                    )
+                } else {
+                    super::resolve::resolve::<X, M, C, SCAN, EMPTY, STATS, false>(
+                        &mut res,
+                        items_in_pass,
+                        scan,
+                        &mut seen,
+                    )
+                };
                 clock = clock.lap(&mut self.stats.phases.resolve);
                 // `resolve`'s contract: the items left for the next pass and the leaf
                 // entries so far fit the chunk's count, so a pass that breaks it fails

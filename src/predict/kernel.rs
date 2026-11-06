@@ -17,7 +17,7 @@
 
 use super::counters::{Clock, Stats};
 use super::isa::Isa;
-use super::leaves::leaf_pass_at;
+use super::leaves::{InlineLeaves, leaf_pass_at};
 use super::mask::rows::{self, Unit};
 use super::mask::{Mask, Wide};
 use super::passes::{Pass, Walks, walk_with};
@@ -28,7 +28,7 @@ use super::scratch::{Common, Queues, Scratch, Sums, WIDE_ROWS, Width, Words, vie
 use super::walk::{self, MAX_PAD, Pools, Steps};
 use super::{Groups, WorkCounters};
 use crate::exact::{self, Plan, WIDE_SUMS, WideRuns};
-use crate::load::layout::{LINK_STRIDE, LeafValues, node_index};
+use crate::load::layout::{LINK_STRIDE, LayoutNode, node_index};
 use crate::model::Model;
 
 /// The kernel's runtime choices; production uses [`Options::default`].
@@ -491,6 +491,7 @@ impl Model {
             let (stops, words) = (&mut c.stops[..], &mut c.words[..]);
             let mut pass = Pass {
                 p: &p,
+                inline_leaves: matches!(self.plan, Plan::Fixed(_)),
                 roots,
                 n,
                 units,
@@ -538,8 +539,8 @@ impl Model {
             };
             clock = Clock::<STATS>::start();
             let (full, entries) = queues.leaves[..n_leaves].split_at(n_full);
-            let runs = match (&self.layout.leaves, &mut c.sums) {
-                (LeafValues::Fixed(values), Sums::Fixed(diff)) => {
+            let runs = match &mut c.sums {
+                Sums::Fixed(diff) => {
                     let half = diff.len() / 2;
                     let (even, odd) = diff.split_at_mut(half);
                     leaf_pass_at::<X, M, C, _, _, STATS>(
@@ -547,17 +548,14 @@ impl Model {
                         full,
                         arena,
                         units,
-                        values,
+                        &InlineLeaves(&self.layout.nodes),
                         &mut even[..=n],
                         &mut odd[..=n],
                     )
                 }
-                (
-                    LeafValues::Wide(values),
-                    Sums::Wide {
-                        wide, diff, sums, ..
-                    },
-                ) => {
+                Sums::Wide {
+                    wide, diff, sums, ..
+                } => {
                     let limbs = (n + 1) * wide.limbs();
                     let half = diff.len() / 2;
                     let (even, odd) = diff.split_at_mut(half);
@@ -566,12 +564,11 @@ impl Model {
                         full,
                         arena,
                         units,
-                        values,
+                        self.layout.leaves.as_slice(),
                         &mut WideRuns::new(*wide, &mut even[..limbs], sums),
                         &mut WideRuns::new(*wide, &mut odd[..limbs], &mut []),
                     )
                 }
-                _ => unreachable!("leaf values follow the plan"),
             };
             clock = clock.lap(&mut stats.phases.leaf_pass);
             if STATS {
@@ -617,9 +614,10 @@ impl Model {
     /// every feature, as a single row's do, so that varying splits step through their
     /// constant encoding. Every leaf a walk reaches carries all the rows: each chunk's
     /// one pass walks the roots in place, the leaf values are summed in a register from
-    /// the walk's words, which hold each stop's leaf-value index, and the sum is every
-    /// row's. No mask, item, leaf entry or difference array is touched. `ABLATE` keeps
-    /// research's instantiation apart, as in [`Self::prefix_starts`].
+    /// the walk's words, which hold each stop's Fixed value or Wide table index, and
+    /// the sum is every row's. No mask, item, leaf entry or difference array is
+    /// touched. `ABLATE` keeps research's instantiation apart, as in
+    /// [`Self::prefix_starts`].
     #[cfg_attr(dispatch, inline(always))]
     #[cfg_attr(not(dispatch), inline(never))]
     fn constant_group<X: Isa, const STATS: bool, const ABLATE: bool, const SHIFT: bool>(
@@ -706,25 +704,25 @@ impl Model {
                 ));
             }
             *clock = clock.lap(&mut stats.phases.walk);
-            // Every stop is a leaf, whose word 1 starts with its leaf-value index.
-            let leaves = c.words[..n].iter().map(|&w1| w1 as u32 as usize);
-            match (&self.layout.leaves, &mut c.sums) {
-                (LeafValues::Fixed(values), _) => {
-                    for leaf in leaves {
-                        fixed += i128::from(values[leaf]);
+            // Every stop is a leaf: word 1 holds its Fixed value or Wide table index.
+            match &mut c.sums {
+                Sums::Fixed(_) => {
+                    for &word in &c.words[..n] {
+                        fixed += i128::from(LayoutNode::fixed_value(word));
                     }
                 }
-                (LeafValues::Wide(values), Sums::Wide { wide, acc, .. }) => {
+                Sums::Wide { wide, acc, .. } => {
                     // Leaf i adds to sum i % WIDE_SUMS, as in WideRuns: consecutive
                     // leaves mostly share their slots.
                     let l = wide.limbs();
                     assert!(acc.len() >= WIDE_SUMS * l, "the sums of a single row");
-                    let leaves = leaves.map(|leaf| values[leaf]);
+                    let leaves = c.words[..n]
+                        .iter()
+                        .map(|&word| self.layout.leaves[word as u32 as usize]);
                     // SAFETY: the assert above holds the WIDE_SUMS accumulators, and the
                     // model's leaf values are leaves of its layout.
                     unsafe { exact::add_in_turns(acc.as_mut_ptr(), l, 0, leaves) };
                 }
-                _ => unreachable!("leaf values follow the plan"),
             }
             *clock = clock.lap(&mut stats.phases.leaf_pass);
             if STATS {

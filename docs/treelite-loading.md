@@ -275,8 +275,9 @@ node counts `Forest::load` reads first (one or two positioned reads per tree,
 about 0.5 µs each). From another reader the nodes are decoded in segments and
 copied into place once, which holds them twice for a moment. Trees are then ordered
 by their heavy paths, and the build rewrites each tree's nodes in place, in that
-order, from the distinct splits' bins, codebooks and chains, and writes the leaf table:
-tree order is the order of the trees' starts and leaf values, not of their nodes.
+order, from the distinct splits' bins, codebooks and chains. A fixed-point plan's
+leaf values go into their leaf nodes; a wide plan's into a table in tree order, the
+order of the trees' starts and leaf values, not of their nodes.
 Peak memory is therefore the loaded model plus the split table (small for binned
 models: thousands of splits against millions of nodes) and a reader's buffer of at
 most 1 MiB or one tree's fields. A model with categorical splits also holds its
