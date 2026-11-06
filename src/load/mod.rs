@@ -113,6 +113,12 @@ impl Forest {
             decoded.into_layout_source(),
         )?;
         drop(predicate_ids);
+        // Production reads the lists no more ([`Model::categories`]).
+        #[cfg(not(any(test, feature = "research")))]
+        let categories = {
+            drop(categories);
+            Vec::new()
+        };
         // The walks start at the roots' links.
         let mut tree_roots = tree_starts;
         for root in &mut tree_roots {

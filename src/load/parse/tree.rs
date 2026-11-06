@@ -5,6 +5,7 @@
 //! adds it to the decoded forest in heavy-first preorder.
 
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::hint::select_unpredictable;
 
 use super::decoded::{Decoded, Packed};
@@ -54,7 +55,7 @@ impl TempNode {
 /// model-level configuration.
 pub struct ParseContext<'a> {
     pub decoded: &'a mut Decoded,
-    pub list_intern: Option<&'a mut HashMap<Vec<u32>, u32>>,
+    pub list_intern: Option<&'a mut ListIntern>,
     pub config: &'a WalkerConfig,
     pub threshold_type: ThresholdType,
     /// A split's categories, sorted and distinct.
@@ -102,6 +103,9 @@ pub const fn build_flags(default_left: bool, is_cat: bool, inline: bool, varying
 // Categorical encoding
 // ---------------------------------------------------------------------------
 
+/// A category list's per-load hash to its pool offset; a hit must match the pool's list.
+pub type ListIntern = HashMap<u64, u32>;
+
 /// Encode a split's categories: inline as a u32 word when every category is below
 /// 32, otherwise as a list in `ctx.categories`, its length then its categories,
 /// sorted and distinct. Lists are interned unless `disable_bitset_intern`.
@@ -116,29 +120,35 @@ pub fn encode_categories(
     let list = &mut ctx.list;
     list.clear();
     list.extend(categories);
-    list.sort_unstable();
-    list.dedup();
+    // Exporters write a split's categories ascending, so most lists need no sort.
+    if !list.is_sorted_by(|a, b| a < b) {
+        list.sort_unstable();
+        list.dedup();
+    }
     if list.last().is_none_or(|&c| c < 32) {
         let word = list.iter().fold(0u32, |w, &c| w | 1 << c);
         return Ok((f64::from(word), true));
     }
-    let interned = ctx
+    let hash = ctx
         .list_intern
         .as_ref()
-        .and_then(|intern| intern.get(list.as_slice()).copied());
-    let offset = if let Some(offset) = interned {
-        offset
-    } else {
-        let categories = &mut ctx.decoded.categories;
-        let offset = crate::load::u32_extent(categories.len(), list.len() + 1, "category lists")?;
-        LoadError::reserve(categories.try_reserve(list.len() + 1))?;
-        categories.push(list.len() as u32);
-        categories.extend_from_slice(list);
-        if let Some(intern) = ctx.list_intern.as_mut() {
-            intern.insert(list.clone(), offset);
-        }
-        offset
-    };
+        .map_or(0, |intern| intern.hasher().hash_one(list.as_slice()));
+    if let Some(&offset) = ctx
+        .list_intern
+        .as_ref()
+        .and_then(|intern| intern.get(&hash))
+        && crate::model::category_list(&ctx.decoded.categories, offset) == list
+    {
+        return Ok((f64::from(offset), false));
+    }
+    let categories = &mut ctx.decoded.categories;
+    let offset = crate::load::u32_extent(categories.len(), list.len() + 1, "category lists")?;
+    LoadError::reserve(categories.try_reserve(list.len() + 1))?;
+    categories.push(list.len() as u32);
+    categories.extend_from_slice(list);
+    if let Some(intern) = ctx.list_intern.as_mut() {
+        intern.insert(hash, offset);
+    }
     Ok((f64::from(offset), false))
 }
 
@@ -418,6 +428,13 @@ fn validate_tree(
 mod tests {
     use super::*;
 
+    #[test]
+    fn list_fingerprints_are_keyed_per_load() {
+        let (a, b) = (ListIntern::default(), ListIntern::default());
+        let list = [40, 41, 42];
+        assert_ne!(a.hasher().hash_one(list), b.hasher().hash_one(list));
+    }
+
     /// Weights whose sum overflows keep their share; finite sums round as before.
     #[test]
     fn heavy_shares_of_weights_near_f64_max() {
@@ -427,6 +444,35 @@ mod tests {
         assert_eq!(heavy_share(f64::MAX, 0.0), u16::MAX);
         assert_eq!(heavy_share(3.0, 1.0), 49_151);
         assert_eq!(heavy_share(0.0, 0.0), 32_768);
+    }
+
+    /// A hash match alone never shares a different list's offset.
+    #[test]
+    fn a_hash_match_checks_the_pool_list() {
+        let list = [40, 41, 42];
+        let mut decoded = Decoded::default();
+        decoded.categories.extend([2, 40, 41]);
+        let mut intern = ListIntern::default();
+        intern.insert(intern.hasher().hash_one(list.as_slice()), 0);
+        let config = WalkerConfig::builder(1)
+            .max_group_width(1)
+            .varying([])
+            .build()
+            .unwrap();
+        let mut ctx = ParseContext {
+            decoded: &mut decoded,
+            list_intern: Some(&mut intern),
+            config: &config,
+            threshold_type: ThresholdType::F64,
+            list: Vec::new(),
+        };
+        let (offset, inline) = encode_categories(list, &mut ctx).unwrap();
+        assert!(!inline);
+        assert_ne!(offset as u32, 0);
+        assert_eq!(
+            crate::model::category_list(&ctx.decoded.categories, offset as u32),
+            list
+        );
     }
 
     /// The node total's bound, without building 268 million nodes: 2^28 - 2, and the

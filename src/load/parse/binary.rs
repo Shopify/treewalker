@@ -8,7 +8,6 @@ use super::validation::{self, Metadata, ParsedModel};
 use crate::config::Choices;
 use crate::model::ThresholdType;
 use crate::{LoadError, LoadOptions, WalkerConfig};
-use std::collections::HashMap;
 use std::io::Read;
 
 /// A little-endian scalar of the checkpoint.
@@ -445,7 +444,7 @@ fn parse_source(
     };
     let output = meta.validate(config)?;
     let mut decoded = Decoded::new(nodes)?;
-    let mut intern = HashMap::new();
+    let mut intern = super::tree::ListIntern::default();
     let mut ctx = ParseContext {
         decoded: &mut decoded,
         list_intern: choices.bitset_intern.then_some(&mut intern),

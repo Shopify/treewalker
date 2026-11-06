@@ -8,13 +8,13 @@
 //! order of the tree starts, and so of the prefix groups and chunks, and of the leaf
 //! values.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use super::chains::{self, Cover, Sets};
 use super::{
     BOUND_BIAS, BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, FIRST_CATEGORY,
     FLAG_LEAF, FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT, MAX_PREDICATES, MAX_SLOTS,
-    MISSING, Need, SHIFT_AT, SLOT_SHIFT, node_link,
+    MISSING, NO_CATEGORY, Need, SHIFT_AT, SLOT_SHIFT, node_link,
 };
 use crate::LoadError;
 use crate::config::WalkerConfig;
@@ -61,20 +61,6 @@ pub(crate) struct Built {
     /// The parsed nodes, for introspection and the full walk.
     #[cfg(any(test, feature = "research"))]
     pub(crate) nodes: Vec<crate::model::Node>,
-}
-
-/// A split's categories, from its inline word or its list in `categories`.
-fn split_categories(split: &Split, categories: &[u32], out: &mut Vec<u32>) {
-    out.clear();
-    if split.inline_cat() {
-        let mut w = split.value as u32;
-        while w != 0 {
-            out.push(w.trailing_zeros());
-            w &= w - 1;
-        }
-    } else {
-        out.extend_from_slice(category_list(categories, split.value as u32));
-    }
 }
 
 /// What [`category_slots`] reads of one categorical feature.
@@ -124,16 +110,18 @@ fn too_big(what: &str, max_bytes: u64) -> LoadError {
 /// A heavy set is a split's list, its listed codes and with a default left missing,
 /// or with its heavy side on the right the list's complement, which holds no
 /// category. Everything is built from the lists, never from sets over the domain, so
-/// the work and the bytes follow the model's lists.
+/// the work and the bytes follow the model's lists. Each distinct list's codes are
+/// held once, after missing's, and its sets, with or without missing, listed or
+/// complemented, are ranges of them.
 struct HeavySets {
-    /// Each categorical split side, `(split, side)`, and its set.
-    owners: Vec<(u32, usize)>,
+    /// The set of each categorical split side, in [`sides`] order.
     set_of: Vec<u32>,
-    /// The distinct sets' lists, set i's at `codes[starts[i]..starts[i + 1]]`, and
-    /// whether each is complemented.
-    starts: Vec<u32>,
+    /// The distinct sets' ranges in `codes`, and whether each is complemented.
+    ranges: Vec<(u32, u32)>,
     codes: Vec<u32>,
     complement: Vec<bool>,
+    /// The distinct sets' codes, each set's counted in full, which orders the covers.
+    listed: usize,
     /// Bytes of every split side's list, built on the way.
     list_bytes: u64,
 }
@@ -142,94 +130,184 @@ impl HeavySets {
     fn sets(&self, domain: usize) -> Sets<'_> {
         Sets {
             domain,
-            starts: &self.starts,
+            ranges: &self.ranges,
             codes: &self.codes,
             complement: &self.complement,
         }
     }
 }
 
-/// The distinct heavy sets of the categorical splits of `f`.
-fn heavy_sets(f: &Feature<'_>, members: &mut Vec<u32>) -> Result<HeavySets, LoadError> {
-    let domain = f.codes.domain();
-    // Each split side's heavy set: its list in `lists` and whether it is complemented.
-    let owners: Vec<(u32, usize)> = f
-        .ids
+/// Each categorical split side of `f` that is heavy somewhere, `(split, side)`.
+fn sides<'a>(f: &'a Feature<'_>) -> impl Iterator<Item = (u32, usize)> + 'a {
+    f.ids
         .iter()
-        .filter(|&&s| f.splits[s as usize].is_categorical())
-        .flat_map(|&s| {
+        .filter(move |&&s| f.splits[s as usize].is_categorical())
+        .flat_map(move |&s| {
             (0..2)
                 .filter(move |&side| f.splits[s as usize].sides >> side & 1 != 0)
                 .map(move |side| (s, side))
         })
+}
+
+/// A split's categories as decoded, ascending: an inline word's bits, or a list in
+/// the pool.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum RawList<'a> {
+    Inline(u32),
+    Pool(&'a [u32]),
+}
+
+impl RawList<'_> {
+    fn of<'a>(split: &Split, categories: &'a [u32]) -> RawList<'a> {
+        if split.inline_cat() {
+            RawList::Inline(split.value as u32)
+        } else {
+            RawList::Pool(category_list(categories, split.value as u32))
+        }
+    }
+
+    fn iter(self) -> impl Iterator<Item = u32> {
+        let (mut word, mut list) = match self {
+            Self::Inline(word) => (word, &[][..]),
+            Self::Pool(list) => (0, list),
+        };
+        std::iter::from_fn(move || {
+            if word != 0 {
+                let c = word.trailing_zeros();
+                word &= word - 1;
+                Some(c)
+            } else {
+                let (&first, rest) = list.split_first()?;
+                list = rest;
+                Some(first)
+            }
+        })
+    }
+
+    const fn len(self) -> usize {
+        match self {
+            Self::Inline(word) => word.count_ones() as usize,
+            Self::Pool(list) => list.len(),
+        }
+    }
+
+    /// The largest category, or 0.
+    fn max(self) -> u32 {
+        match self {
+            Self::Inline(word) => word.checked_ilog2().unwrap_or(0),
+            Self::Pool(list) => list.last().copied().unwrap_or(0),
+        }
+    }
+}
+
+/// A table by category, or the distinct categories' bits, is used only when it has
+/// at most this many entries per list entry it replaces; else a search and a sort.
+const DENSE_SPREAD: usize = 8;
+
+/// The most entries of the category-to-code table: 8 MiB.
+const MAX_DENSE_CODES: usize = 1 << 21;
+
+/// The distinct heavy sets of the categorical splits of `f`.
+fn heavy_sets(f: &Feature<'_>) -> Result<HeavySets, LoadError> {
+    let domain = f.codes.domain();
+    let book = f.codes.book(f.books);
+    let table = book.last().and_then(|&max| {
+        let max = max as usize;
+        if max >= MAX_DENSE_CODES || max >= book.len().saturating_mul(DENSE_SPREAD) {
+            return None;
+        }
+        let mut table = vec![NO_CATEGORY; max + 1];
+        for (i, &c) in book.iter().enumerate() {
+            table[c as usize] = i as u32 + FIRST_CATEGORY;
+        }
+        Some(table)
+    });
+    let code_of = |c: u32| {
+        table.as_ref().map_or_else(
+            || f.codes.of(f.books, c),
+            |table| table.get(c as usize).copied().unwrap_or(NO_CATEGORY),
+        )
+    };
+    // Each split side's list, whether its set takes missing, and whether it is
+    // complemented.
+    let sides: Vec<(RawList<'_>, bool, bool)> = sides(f)
+        .map(|(s, side)| {
+            let split = &f.splits[s as usize];
+            let list = RawList::of(split, f.categories);
+            (list, split.default_left(), side == 1)
+        })
         .collect();
-    let (mut lists, mut spans) = (Vec::new(), Vec::with_capacity(owners.len()));
-    for &(s, side) in &owners {
-        let split = &f.splits[s as usize];
-        split_categories(split, f.categories, members);
-        let at = lists.len();
-        if (at + members.len() + 1) as u64 * 4 > f.max_bytes {
+    // The cap counts each side's list as encoded, with room for missing's code.
+    let mut list_bytes = 0u64;
+    for &(list, missing, _) in &sides {
+        if list_bytes + (list.len() as u64 + 1) * 4 > f.max_bytes {
             return Err(too_big("a feature's categorical heavy sets", f.max_bytes));
         }
-        if split.default_left() {
-            lists.push(MISSING);
-        }
-        lists.extend(members.iter().map(|&c| {
-            let code = f.codes.of(f.books, c);
-            debug_assert!(
-                code >= FIRST_CATEGORY,
-                "a split's categories are in its codebook"
-            );
-            code
-        }));
-        // Already sorted and distinct: a split's categories ascend (an inline word's
-        // bits from the lowest, a list as encoded), the codebook keeps their order,
-        // and missing's code is below every category's.
-        debug_assert!(
-            lists[at..].is_sorted_by(|a, b| a < b),
-            "a heavy set's codes ascend"
-        );
-        spans.push((at as u32, lists.len() as u32, side == 1));
+        list_bytes += (list.len() + usize::from(missing)) as u64 * 4;
     }
-    let list_bytes = lists.len() as u64 * 4;
-    // The distinct sets, by size, then listed before complemented, then by list.
-    let list = |i: usize| &lists[spans[i].0 as usize..spans[i].1 as usize];
-    // Sorted by a key of the size, the kind and the first code, then by the lists.
+    // The distinct sets, by size, then listed before complemented, then by list:
+    // sorted by a key of the size, the kind and the first code, then by the lists.
     let key = |i: usize| {
-        let (list, complement) = (list(i), spans[i].2);
-        let size = if complement {
-            domain - list.len()
+        let (list, missing, complement) = sides[i];
+        let len = list.len() + usize::from(missing);
+        let size = if complement { domain - len } else { len };
+        let first = if missing {
+            MISSING
         } else {
-            list.len()
+            list.iter().next().map_or(0, code_of)
         };
-        (size as u64) << 33
-            | u64::from(complement) << 32
-            | u64::from(list.first().map_or(0, |&c| c))
+        (size as u64) << 33 | u64::from(complement) << 32 | u64::from(first)
     };
-    let mut by_size: Vec<(u64, u32)> = (0..owners.len()).map(|i| (key(i), i as u32)).collect();
+    let mut by_size: Vec<(u64, u32)> = (0..sides.len()).map(|i| (key(i), i as u32)).collect();
     by_size.sort_unstable_by(|&(ka, a), &(kb, b)| {
+        // Equal keys take missing alike; the codebook keeps the categories' order.
         ka.cmp(&kb)
-            .then_with(|| list(a as usize).cmp(list(b as usize)))
+            .then_with(|| sides[a as usize].0.iter().cmp(sides[b as usize].0.iter()))
     });
-    let (mut starts, mut codes, mut complement) = (vec![0u32], Vec::new(), Vec::new());
-    let mut set_of = vec![0u32; owners.len()];
-    let mut last: Option<(u64, usize)> = None;
+    let (mut ranges, mut codes, mut complement) = (Vec::new(), Vec::new(), Vec::new());
+    let mut held: HashMap<RawList<'_>, (u32, u32)> = HashMap::default();
+    let mut set_of = vec![0u32; sides.len()];
+    let (mut last, mut listed) = (None, 0);
     for &(k, i) in &by_size {
         let i = i as usize;
-        if last.is_none_or(|(kl, l)| kl != k || list(l) != list(i)) {
-            codes.extend_from_slice(list(i));
-            starts.push(codes.len() as u32);
-            complement.push(spans[i].2);
-            last = Some((k, i));
+        let (list, missing, inverted) = sides[i];
+        if last != Some((k, list)) {
+            let (start, end) = *held.entry(list).or_insert_with(|| {
+                let start = codes.len();
+                codes.push(MISSING);
+                codes.extend(list.iter().map(|c| {
+                    let code = code_of(c);
+                    debug_assert!(
+                        code >= FIRST_CATEGORY,
+                        "a split's categories are in its codebook"
+                    );
+                    code
+                }));
+                debug_assert!(
+                    codes[start..].is_sorted_by(|a, b| a < b),
+                    "a heavy set's codes ascend"
+                );
+                (start as u32, codes.len() as u32)
+            });
+            ranges.push((start + u32::from(!missing), end));
+            listed += list.len() + usize::from(missing);
+            complement.push(inverted);
+            last = Some((k, list));
         }
         set_of[i] = (complement.len() - 1) as u32;
     }
+    // The sets stay until the second pass, so they are trimmed.
+    drop(by_size);
+    drop(held);
+    drop(table);
+    codes.shrink_to_fit();
+    ranges.shrink_to_fit();
     Ok(HeavySets {
-        owners,
         set_of,
-        starts,
+        ranges,
         codes,
         complement,
+        listed,
         list_bytes,
     })
 }
@@ -382,7 +460,7 @@ fn category_slots(
     // Each split side's word, field and position: its bound puts the field at the top,
     // `rank <= k` exactly when the shifted word is at most ((k + 1) << (32 - b)) - 1,
     // whatever the fields below it hold.
-    for (&(s, side), &i) in heavy.owners.iter().zip(&heavy.set_of) {
+    for ((s, side), &i) in sides(f).zip(&heavy.set_of) {
         let (chain, k) = cover.at[i as usize];
         let Field { word, low, width } = fields[chain as usize];
         let bound = ((u64::from(k) + 1) << (u32::BITS - width)) - 1 + u64::from(BOUND_BIAS);
@@ -392,63 +470,60 @@ fn category_slots(
             | ((f.slot as u64 + u64::from(word)) << SLOT_SHIFT);
     }
 
-    // A chain's listed sets come first, so no category's rank is the number of listed
-    // sets: the default, which each word packs for its fields. The exceptions come
-    // from the lists ([`chain_exceptions`]), `(code, chain, rank)`, taken chain by chain
-    // in word order, so that each code's are in word order, then merged by word.
+    // Chains are visited in word order, keeping each code's ranks for a word together.
+    // Count one exception per (code, word), then write it in place by code,
+    // starting from the word's default and replacing its exceptional rank fields.
     tables.defaults.resize(f.slot + n_words, 0);
-    let mut found: Vec<(u32, u32, u32)> = Vec::new();
-    for c in by_word(&fields) {
-        let listed = chain_exceptions(cover.chain(c as usize), &sets, |e, rank| {
-            found.push((e, c, rank));
-        });
+    let order = by_word(&fields);
+    let mut bounds = vec![0u32; domain + 1];
+    let mut last = vec![u32::MAX; domain];
+    for &c in &order {
         let Field { word, low, .. } = fields[c as usize];
+        let listed = chain_exceptions(cover.chain(c as usize), &sets, |e, _| {
+            let e = e as usize;
+            if last[e] != word {
+                last[e] = word;
+                bounds[e + 1] += 1;
+            }
+        });
         tables.defaults[f.slot + word as usize] |= (listed as u32) << low;
     }
     tables.slots += n_words;
-    // By code, each code's in word order: a counting sort, then a word per code and
-    // word, its default with the code's ranks in its fields. The triples are at most
-    // the heavy sets' listed codes, which the cap bounded; the tables are checked
-    // once merged.
-    let mut bounds = vec![0u32; domain + 1];
-    for &(e, _, _) in &found {
-        bounds[e as usize + 1] += 1;
-    }
+    let too_many = || LoadError::Limit("the rank tables exceed u32 exceptions".into());
+    let base = tables.exceptions.len();
+    bounds[0] = base as u32;
     for e in 0..domain {
-        bounds[e + 1] += bounds[e];
+        bounds[e + 1] = bounds[e + 1].checked_add(bounds[e]).ok_or_else(too_many)?;
     }
-    let mut sorted = vec![(0u32, 0u32); found.len()];
-    let mut next = bounds[..domain].to_vec();
-    for &(e, c, rank) in &found {
-        let at = &mut next[e as usize];
-        sorted[*at as usize] = (c, rank);
-        *at += 1;
+    // The tables are checked before they grow. The exceptions are at most the heavy
+    // sets' listed codes, which the cap bounded.
+    let end = bounds[domain] as usize;
+    let n = end - base;
+    if tables.bytes() + 4 * (domain as u64 + 1) + 8 * n as u64 > f.max_bytes {
+        return Err(too_big("the categorical splits' rank tables", f.max_bytes));
     }
-    drop(found);
     let offsets = tables.offsets.len();
     LoadError::reserve(tables.offsets.try_reserve_exact(domain + 1))?;
-    for e in 0..domain {
-        tables.offsets.push(
-            u32::try_from(tables.exceptions.len())
-                .map_err(|_| LoadError::Limit("the rank tables exceed u32 exceptions".into()))?,
-        );
-        let ranks = &sorted[bounds[e] as usize..bounds[e + 1] as usize];
-        for run in ranks.chunk_by(|a, b| fields[a.0 as usize].word == fields[b.0 as usize].word) {
-            let slot = f.slot + fields[run[0].0 as usize].word as usize;
-            let mut value = tables.defaults[slot];
-            for &(c, rank) in run {
-                let Field { low, width, .. } = fields[c as usize];
-                value = value & !((u32::MAX >> (u32::BITS - width)) << low) | rank << low;
+    tables.offsets.extend_from_slice(&bounds);
+    LoadError::reserve(tables.exceptions.try_reserve_exact(n))?;
+    tables.exceptions.resize(end, [0, 0]);
+    let (defaults, exceptions) = (&tables.defaults, &mut tables.exceptions);
+    let mut next = bounds;
+    last.fill(u32::MAX);
+    for &c in &order {
+        let Field { word, low, width } = fields[c as usize];
+        let slot = f.slot + word as usize;
+        let mask = !((u32::MAX >> (u32::BITS - width)) << low);
+        chain_exceptions(cover.chain(c as usize), &sets, |e, rank| {
+            let e = e as usize;
+            if last[e] != word {
+                last[e] = word;
+                exceptions[next[e] as usize] = [slot as u32, defaults[slot]];
+                next[e] += 1;
             }
-            tables.exceptions.push([slot as u32, value]);
-        }
-    }
-    tables.offsets.push(
-        u32::try_from(tables.exceptions.len())
-            .map_err(|_| LoadError::Limit("the rank tables exceed u32 exceptions".into()))?,
-    );
-    if tables.bytes() > f.max_bytes {
-        return Err(too_big("the categorical splits' rank tables", f.max_bytes));
+            let value = &mut exceptions[next[e] as usize - 1][1];
+            *value = *value & mask | rank << low;
+        });
     }
     Ok(CategoryBins {
         codes: f.codes,
@@ -485,8 +560,7 @@ impl Layout {
         let total = source.nodes.len();
         check_node_total(total, 0)?;
         let dummy = node_link(total);
-        let mut words = vec![[0u64; 2]; source.splits.len()];
-        let (bins, sets) = bin_map(input, &source.splits, &mut words, |max| {
+        let (bins, sets, words) = bin_map(input, &source.splits, |max| {
             group_lane_slots(input, &source, max)
         })?;
         Ok(encode_trees(input, source, &words, dummy, bins, sets))
@@ -514,6 +588,9 @@ fn group_lane_slots(input: &Input<'_>, source: &LayoutSource, max: f64) -> f64 {
     sums.lane_slots(lanes(width > 1, false))
 }
 
+/// Each split's word 0 by its heavy side (left, right).
+type SplitWords = Vec<[u64; 2]>;
+
 /// A categorical feature's codes, distinct heavy sets and their cover, between the
 /// two passes of [`bin_map`].
 struct Covered {
@@ -523,8 +600,8 @@ struct Covered {
 }
 
 /// The bins, codebooks and rank tables of the forest's distinct `splits`, flat, each
-/// feature's slots in feature order, and each split's word 0 by its heavy side
-/// (left, right) into `words`; with the number of distinct heavy sets and of chains.
+/// feature's slots in feature order; with the number of distinct heavy sets and of
+/// chains, and each split's word 0 by its heavy side (left, right).
 ///
 /// A first pass takes each feature's thresholds, codebook, heavy sets and cover; the
 /// packing rule ([`crate::rules::pack`]) then decides whether the chains' rank fields
@@ -535,9 +612,8 @@ struct Covered {
 fn bin_map(
     input: &Input<'_>,
     splits: &[Split],
-    words: &mut [[u64; 2]],
     lane_slots: impl FnOnce(f64) -> f64,
-) -> Result<(BinMap, [usize; 2]), LoadError> {
+) -> Result<(BinMap, [usize; 2], SplitWords), LoadError> {
     let Input {
         categories,
         config,
@@ -553,21 +629,18 @@ fn bin_map(
 
     let (mut thresholds, mut books, mut tables) = (Vec::new(), Vec::new(), Tables::default());
     let (mut constant, mut varying) = (Vec::new(), Vec::new());
-    let (mut t, mut cats, mut members) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut t, mut cats) = (Vec::new(), Vec::new());
     // Each feature's thresholds and, if categorical, its cover; with the heavy sets'
     // lists so far, which the cap bounds.
     let mut first: Vec<(std::ops::Range<usize>, Option<Covered>)> = Vec::new();
     let (mut n_chains, mut n_sets, mut list_bytes) = (0, 0, 0);
     for ids in features() {
         t.clear();
-        cats.clear();
         let mut categorical = false;
         for &s in ids {
             let split = &splits[s as usize];
             if split.is_categorical() {
                 categorical = true;
-                split_categories(split, categories, &mut members);
-                cats.extend_from_slice(&members);
             } else {
                 // Float32 thresholds arrive rounded, so comparing in f64 is exact.
                 debug_assert!(
@@ -583,8 +656,46 @@ fn bin_map(
         let start = thresholds.len();
         thresholds.extend_from_slice(&t);
         let covered = if categorical {
-            cats.sort_unstable();
-            cats.dedup();
+            cats.clear();
+            // Dense categories take bits up to the largest; sparse lists are
+            // deduplicated as they grow, since splits can repeat their categories.
+            let lists = || {
+                ids.iter()
+                    .map(|&s| &splits[s as usize])
+                    .filter(|split| split.is_categorical())
+                    .map(|split| RawList::of(split, categories))
+            };
+            let entries: usize = lists().map(RawList::len).sum();
+            let words = lists()
+                .map(RawList::max)
+                .max()
+                .map_or(0, |max| max as usize / 64 + 1);
+            if words <= entries.saturating_mul(DENSE_SPREAD).div_ceil(64)
+                && words <= MAX_DENSE_CODES / 2
+            {
+                let mut bits = vec![0u64; words];
+                for c in lists().flat_map(RawList::iter) {
+                    bits[c as usize / 64] |= 1 << (c % 64);
+                }
+                for (i, mut word) in bits.into_iter().enumerate() {
+                    while word != 0 {
+                        cats.push((i * 64) as u32 + word.trailing_zeros());
+                        word &= word - 1;
+                    }
+                }
+            } else {
+                let mut distinct = 0;
+                for list in lists() {
+                    cats.extend(list.iter());
+                    if cats.len() > 2 * distinct + 4096 {
+                        cats.sort_unstable();
+                        cats.dedup();
+                        distinct = cats.len();
+                    }
+                }
+                cats.sort_unstable();
+                cats.dedup();
+            }
             let codes = CategoryCodes::new(&mut books, &cats)?;
             let feature = Feature {
                 codes,
@@ -596,7 +707,7 @@ fn bin_map(
                 held: 0,
                 max_bytes: max_rank_bytes,
             };
-            let heavy = heavy_sets(&feature, &mut members)?;
+            let heavy = heavy_sets(&feature)?;
             list_bytes += heavy.list_bytes;
             if list_bytes > max_rank_bytes {
                 return Err(too_big(
@@ -614,11 +725,13 @@ fn bin_map(
         };
         first.push((start..thresholds.len(), covered));
     }
+    // The first pass's scratch, freed before the covers and the rank tables.
+    drop(cats);
     if thresholds.len() >= u32::MAX as usize {
         return Err(LoadError::Limit("threshold count exceeds u32".into()));
     }
     // The covers, the features of the fewest list entries first, sharing their steps.
-    let size = |c: &Covered| c.heavy.sets(c.codes.domain()).codes.len() + c.heavy.complement.len();
+    let size = |c: &Covered| c.heavy.listed + c.heavy.complement.len();
     let mut by_size: Vec<&mut Covered> = first.iter_mut().filter_map(|f| f.1.as_mut()).collect();
     by_size.sort_by_key(|c| size(c));
     let (mut pool, mut minimum) = (chains::SHARED_WORK, true);
@@ -656,6 +769,7 @@ fn bin_map(
         saved > 0.0 && lane_slots(max) < max
     });
 
+    let mut words = vec![[0u64; 2]; splits.len()];
     let mut next_slot = DUMMY_SLOT + 1;
     let mut n_categorical = 0;
     for (ids, (range, covered)) in features().zip(first) {
@@ -686,7 +800,7 @@ fn bin_map(
                 cover.as_ref().expect("every categorical feature's cover"),
                 pack,
                 &mut tables,
-                words,
+                &mut words,
             )?;
             next_slot += c.slots();
             n_categorical += 1;
@@ -748,7 +862,7 @@ fn bin_map(
         constant,
         varying,
     };
-    Ok((bins, [n_sets, n_chains]))
+    Ok((bins, [n_sets, n_chains], words))
 }
 
 /// The trees' layout nodes, in tree order, from the words of `bin_map`, and the dummy

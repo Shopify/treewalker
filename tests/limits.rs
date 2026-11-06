@@ -416,3 +416,48 @@ fn colliding_node_ids_load_in_linear_time() {
     forest.predictor().predict_group(&rows, &mut out);
     same(&out, &expected, "group");
 }
+
+/// Lists which collided under the fixed Fx hash still load within the flood
+/// budget, through both the decoder's intern and the layout's shared-list table.
+#[test]
+fn colliding_category_lists_load_in_linear_time() {
+    let trees = common::flood::colliding_category_lists(1 << 15)
+        .map(|categories| Tree {
+            nodes: vec![
+                Node::Categorical {
+                    feature: 0,
+                    categories: categories.to_vec(),
+                    right_child: false,
+                    default_left: false,
+                    left: 1,
+                    right: 2,
+                    count: Some(2),
+                },
+                leaf(1.0),
+                leaf(-1.0),
+            ],
+        })
+        .collect();
+    let m = model(trees, 1);
+    let rows = [
+        0.0,
+        1.0,
+        64.0,
+        -1.0,
+        f64::NAN,
+        f64::from(0x0370_7344),
+        f64::from(0x1319_8a2e),
+    ];
+    let config = WalkerConfig::builder(1)
+        .max_group_width(rows.len())
+        .varying([0])
+        .build()
+        .unwrap();
+    let started = Instant::now();
+    check(&m, config, &LoadAblation::default(), &rows);
+    let took = started.elapsed();
+    assert!(
+        took < FLOOD_BUDGET,
+        "loading colliding category lists took {took:?}"
+    );
+}
