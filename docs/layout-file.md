@@ -6,9 +6,9 @@ The default build and representation are unchanged. This is an experimental loca
 cache format, not a replacement for a portable Treelite checkpoint.
 
 `Forest::save_layout(path)` includes the grouping configuration. Use `.twl` for
-layout files. Writes are
-buffered and flushed, not fsynced or atomically published. Write a new file and
-rename it into place; do not overwrite files used by mapped readers.
+layout files. Writes are buffered and flushed, not fsynced or atomically published.
+Write a new file and rename it into place; do not overwrite files used by mapped
+readers.
 
 `Forest::load_layout(path)` streams into owned vectors and validates before
 returning. I/O failures use `LoadError::Io`, incompatible/corrupt layouts use
@@ -62,10 +62,22 @@ forests when the merge allowance runs out.
 
 Research nodes must agree with layout leaf/split kinds and links. Finite research
 leaves must reconstruct the exact-sum plan and the stored leaf encodings before
-research prediction can convert them. CI runs release tests with both `research`
-and `layout-file`, in addition to its existing feature/ISA checks.
-Production-only paths are covered by clippy and an external consumer; the benchmark
-member unconditionally depends on `research` and is not a production-only test host.
+research prediction can convert them.
+
+On 64-bit Unix, `unsafe Forest::map_layout(path)` borrows the layout nodes,
+exception words and either width of relative exception slots from a read-only
+private mapping. Fixed values travel in their mapped leaf nodes. Other metadata,
+including wide leaves, remains owned. Validation and checksum checks are identical
+to the owned loader. Mapping lifetime is retained by the forest and all
+predictors/clones; array access is an unconditional pointer/length slice, not an
+owned/mapped branch in the kernel. Without `layout-file`, arrays remain ordinary Vecs.
+
+The **caller must ensure that no thread or process writes or truncates the backing
+file during the call or until all returned forests, clones and predictors drop**.
+Neither read-only access nor MAP_PRIVATE enforces that contract. Replacing a name
+by atomic rename is fine if the old file remains immutable. This unsafe API is
+deliberate: validation cannot protect a live slice from subsequent external writes.
+An immutable artifact/ownership abstraction for a safe mapped API remains open.
 
 ## Format
 
@@ -79,8 +91,8 @@ The field order is specified by `layout_file::codec` and the colocated schemas
 that need private access, not Rust layout.
 
 The `TWLAYOUT` format starts at schema version 1. It stores exception words
-separately from feature-relative slots. The slots
-section starts with an explicit u8 width tag: 2 for u16 slots, 4 for u32 slots,
+separately from feature-relative slots. The slots section starts with an explicit
+u8 width tag: 2 for u16 slots, 4 for u32 slots,
 followed by that width's aligned array. Both widths are supported model-wide.
 The layout has one Wide-leaf vector, empty under a Fixed plan. Fixed values live
 in layout nodes: word 0 is zero; word 1 has shift bits 0-6, zero at bit 7, the

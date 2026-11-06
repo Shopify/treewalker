@@ -635,8 +635,8 @@ fn reused_fills_match_fresh_bins_across_the_restore_boundary() {
         held: 0,
     };
     bins.offsets = vec![0, 0, 0, 1, 3, 6, 6];
-    bins.exception_slots = ExceptionSlots::Narrow(vec![0, 5, 15, 0, 5, 15]);
-    bins.exception_words = vec![100, 101, 102, 103, 104, 105];
+    bins.exception_slots = ExceptionSlots::Narrow(array(vec![0, 5, 15, 0, 5, 15]));
+    bins.exception_words = array(vec![100, 101, 102, 103, 104, 105]);
     bins.constant.push(FeatureBins {
         feature: 0,
         thresholds: 0..1,
@@ -680,12 +680,11 @@ fn widening_keeps_the_earlier_features_fills() {
         held: 1,
     };
     bins.offsets = vec![0, 0, 0, 1, 2, 2, 2, 2, 3, 4];
-    bins.exception_slots = ExceptionSlots::Narrow(vec![0, 1]);
-    bins.exception_words = vec![101, 102];
+    bins.exception_slots = ExceptionSlots::Narrow(array(vec![0, 1]));
+    bins.exception_words = array(vec![101, 102, 201, 202]);
     bins.exception_slots.resize(4, second.slots()).unwrap();
     bins.exception_slots.set(2, 0);
     bins.exception_slots.set(3, 65_536);
-    bins.exception_words.extend([201, 202]);
     for (feature, c) in [first, second].into_iter().enumerate() {
         bins.constant.push(FeatureBins {
             feature,

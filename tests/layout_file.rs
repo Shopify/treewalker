@@ -56,6 +56,36 @@ fn load(bytes: &[u8]) -> Forest {
 }
 
 #[test]
+fn native_lightgbm_text_round_trips_layout_file() {
+    let forest = Forest::from_bytes(
+        include_bytes!("fixtures/import/lightgbm/category_words.txt"),
+        ModelFormat::LightGbmText,
+        WalkerConfig::builder(2)
+            .max_group_width(4)
+            .all_varying()
+            .build()
+            .unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let file = File::new();
+    forest.save_layout(&file.0).unwrap();
+    let loaded = Forest::load_layout(&file.0).unwrap();
+    let rows = [1.0, 0.0, 32.0, 65.0, 64.0, f64::NAN, -1.0, 128.0];
+    let (mut expected, mut actual) = ([0.0f64; 4], [0.0f64; 4]);
+    forest.predictor().predict_group(&rows, &mut expected);
+    loaded.predictor().predict_group(&rows, &mut actual);
+    assert_eq!(expected.map(f64::to_bits), actual.map(f64::to_bits));
+    #[cfg(all(unix, target_pointer_width = "64", not(miri)))]
+    {
+        // SAFETY: no writes or truncation occur while mapped owners live.
+        let mapped = unsafe { Forest::map_layout(&file.0).unwrap() };
+        mapped.predictor().predict_group(&rows, &mut actual);
+        assert_eq!(expected.map(f64::to_bits), actual.map(f64::to_bits));
+    }
+}
+
+#[test]
 fn many_numeric_features_round_trip() {
     let features = if cfg!(miri) { 8 } else { 512 };
     let trees: Vec<_> =
@@ -130,6 +160,13 @@ fn inline_fixed_value_extremes_round_trip() {
         forest.predictor().predict_group(&rows, &mut expected);
         loaded.predictor().predict_group(&rows, &mut actual);
         assert_eq!(expected.map(f64::to_bits), actual.map(f64::to_bits));
+        #[cfg(all(unix, target_pointer_width = "64", not(miri)))]
+        {
+            // SAFETY: this file is not written until mapped owners drop.
+            let mapped = unsafe { Forest::map_layout(&file.0).unwrap() };
+            mapped.predictor().predict_group(&rows, &mut actual);
+            assert_eq!(expected.map(f64::to_bits), actual.map(f64::to_bits));
+        }
     }
 }
 
@@ -171,6 +208,13 @@ fn many_two_sided_categorical_predicates_round_trip() {
         forest.predictor().predict_group(&rows, &mut expected);
         loaded.predictor().predict_group(&rows, &mut actual);
         assert_eq!(expected.map(f64::to_bits), actual.map(f64::to_bits));
+        #[cfg(all(unix, target_pointer_width = "64", not(miri)))]
+        {
+            // SAFETY: the file remains immutable until mapped owners drop.
+            let mapped = unsafe { Forest::map_layout(&file.0).unwrap() };
+            mapped.predictor().predict_group(&rows, &mut actual);
+            assert_eq!(expected.map(f64::to_bits), actual.map(f64::to_bits));
+        }
     }
 }
 
@@ -187,6 +231,23 @@ fn copy_round_trips_numeric_and_categorical_precisions() {
         loaded.predictor().predict_group(&rows, &mut b);
         assert_eq!(a.map(f64::to_bits), b.map(f64::to_bits));
         assert_eq!(forest.config(), loaded.config());
+        #[cfg(all(unix, target_pointer_width = "64", not(miri)))]
+        {
+            // SAFETY: this test owns the file exclusively and does not write it
+            // again until every forest/predictor retaining the mapping is dropped.
+            let mapped = unsafe { Forest::map_layout(&path.0).unwrap() };
+            #[cfg(feature = "research")]
+            {
+                mapped.predict_full_walk(&rows, &mut b);
+                assert_eq!(a.map(f64::to_bits), b.map(f64::to_bits));
+            }
+            let clone = mapped.clone();
+            let mut predictor = mapped.predictor();
+            drop(mapped);
+            drop(clone);
+            predictor.predict_group(&rows, &mut b);
+            assert_eq!(a.map(f64::to_bits), b.map(f64::to_bits));
+        }
     }
 }
 
@@ -223,6 +284,12 @@ fn corrupt_truncated_and_extended_files_are_errors_not_panics() {
             corrupt[state as usize % bytes.len()] ^= 1 << (state % 8);
             std::fs::write(&path.0, &corrupt).unwrap();
             assert!(Forest::load_layout(&path.0).is_err());
+            #[cfg(all(unix, target_pointer_width = "64", not(miri)))]
+            {
+                // SAFETY: no mapping from a previous call remains alive; no
+                // writes occur during this call or while its result is alive.
+                assert!(unsafe { Forest::map_layout(&path.0) }.is_err());
+            }
         }
         let mut extended = bytes;
         extended.push(0);

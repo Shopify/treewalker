@@ -4,6 +4,8 @@
 //! interchange format. See `docs/layout-file.md` for compatibility and trust.
 
 pub(crate) mod codec;
+#[cfg(all(unix, target_pointer_width = "64"))]
+pub(crate) mod storage;
 #[cfg(test)]
 pub(crate) mod testsupport;
 pub(crate) mod validate;
@@ -46,15 +48,43 @@ fn fingerprint(config: &crate::WalkerConfig) -> io::Result<u64> {
     Ok(w.checksum.finish())
 }
 
-pub(crate) fn error(error: io::Error) -> LoadError {
+fn error(error: io::Error) -> LoadError {
     if error.kind() == io::ErrorKind::InvalidData || error.kind() == io::ErrorKind::UnexpectedEof {
         LoadError::Layout(error.to_string())
+    } else if error.kind() == io::ErrorKind::FileTooLarge {
+        LoadError::Limit(error.to_string())
     } else {
         LoadError::Io(error)
     }
 }
 
 impl Forest {
+    /// Map a layout file, borrowing its largest arrays (`layout-file`, 64-bit Unix).
+    ///
+    /// Runs the same compatibility, corruption and structural checks as the owned
+    /// loader. Small metadata remains owned. No model construction is performed.
+    ///
+    /// # Safety
+    /// The underlying file must not be modified or truncated by any thread or
+    /// process until the returned forest, all its clones, and all predictors that
+    /// retain it have been dropped. Read-only/private mapping does not enforce
+    /// this. Rename a new immutable artifact into place rather than overwriting
+    /// the mapped file. This contract also applies while validation is running.
+    #[cfg(all(unix, target_pointer_width = "64"))]
+    pub unsafe fn map_layout(path: impl AsRef<Path>) -> Result<Self, LoadError> {
+        let (file, len) = open_layout(path.as_ref())?;
+        // SAFETY: the caller guarantees immutability throughout all mapping owners.
+        let mapping = Arc::new(unsafe { storage::Mapping::new(&file, len) }.map_err(error)?);
+        let mut r = Decoder {
+            inner: io::empty(),
+            at: 0,
+            total: mapping.len - 8,
+            checksum: Checksum::default(),
+            mapping: Some(mapping),
+        };
+        Self::read_layout(&mut r).map_err(error)
+    }
+
     /// Load a layout file into owned arrays (`layout-file` feature).
     ///
     /// Checks compatibility, corruption and the invariants of the unchecked kernel
@@ -67,6 +97,8 @@ impl Forest {
             at: 0,
             total: len - 8,
             checksum: Checksum::default(),
+            #[cfg(all(unix, target_pointer_width = "64"))]
+            mapping: None,
         };
         Self::read_layout(&mut r).map_err(error)
     }

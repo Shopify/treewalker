@@ -7,13 +7,13 @@ pub(super) const NARROW_SLOTS: usize = 1 << u16::BITS;
 /// Narrow until a feature needs more slots than u16 can name, then wide throughout.
 #[derive(Clone, Debug)]
 pub(super) enum ExceptionSlots {
-    Narrow(Vec<u16>),
-    Wide(Vec<u32>),
+    Narrow(super::Array<u16>),
+    Wide(super::Array<u32>),
 }
 
 impl Default for ExceptionSlots {
     fn default() -> Self {
-        Self::Narrow(Vec::new())
+        Self::Narrow(super::array(Vec::new()))
     }
 }
 
@@ -40,7 +40,7 @@ impl ExceptionSlots {
                 LoadError::reserve(wide.try_reserve_exact(len))?;
                 wide.extend(slots.iter().map(|&s| u32::from(s)));
                 wide.resize(len, 0);
-                *self = Self::Wide(wide);
+                *self = Self::Wide(super::array(wide));
             }
             Self::Narrow(slots) => {
                 LoadError::reserve(slots.try_reserve_exact(len - slots.len()))?;

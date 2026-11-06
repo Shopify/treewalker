@@ -90,4 +90,14 @@ pub(crate) fn rejects(forest: &Forest, reason: &str) {
         matches!(error, LoadError::Layout(_)) && error.to_string().contains(reason),
         "{error}"
     );
+    #[cfg(all(unix, target_pointer_width = "64", not(miri)))]
+    {
+        // SAFETY: no writes/truncation occur during this call or while its
+        // result lives; all prior mapping owners were dropped before saving.
+        let error = unsafe { Forest::map_layout(&file.0) }.unwrap_err();
+        assert!(
+            matches!(error, LoadError::Layout(_)) && error.to_string().contains(reason),
+            "{error}"
+        );
+    }
 }
