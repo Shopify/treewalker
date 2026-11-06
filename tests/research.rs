@@ -412,9 +412,8 @@ fn layout_stats_describe_the_kernel_choices() {
     assert_eq!((s.pool_level, s.distance, s.distance_constant), (1, 0, 0));
     assert!(s.prefix_trees >= 2 * s.prefix_groups && s.prefix_saved_steps >= s.prefix_cost_steps);
     assert_eq!(s.pool_bytes, 16 * (forest.nodes().len() + 1));
-    let leaves = forest.nodes().iter().filter(|n| n.is_leaf()).count();
     assert_eq!(s.wide_limbs, 0);
-    assert_eq!(s.leaf_bytes, 8 * leaves);
+    assert_eq!(s.leaf_bytes, 0);
     assert_eq!((s.rank_table_bytes, s.chain_slots, s.chain_sets), (0, 0, 0));
     assert_eq!(s.flip_table_bytes, 0);
     // Two categorical features, each with one split: a chain of one set apiece,

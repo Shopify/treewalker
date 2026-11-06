@@ -1,5 +1,5 @@
 //! The prediction layout, built at load from the decoded forest: integer bins per
-//! slot, 16-byte pre-oriented nodes and the leaf-value table.
+//! slot, 16-byte pre-oriented nodes and, for Wide plans, a leaf-value table.
 //!
 //! Every split is one test, `bin[slot] <= k`: heavy when it holds. A slot is a chain
 //! of nested sets over its feature's values, and a row's bin in it is its rank, the
@@ -15,7 +15,7 @@
 //! too, so tree starts and prefix groups index both; one dummy node follows the last
 //! tree. Tree order is the order of the tree starts, so a chunk's trees need not be
 //! adjacent: a group reaches each node at most once, through one path per tree. The
-//! leaf values are in tree order. A node is two words:
+//! Wide leaf values are in tree order. Splits and Wide leaves use two words:
 //!
 //! ```text
 //! Word 0:
@@ -31,6 +31,27 @@
 //!          mask, 2i + 1 when that is the left side and 2i + 2 when it is the right
 //!   63     unused
 //! ```
+//!
+//! Fixed leaves have word 0 = 0 and carry their packed value entirely in word 1:
+//!
+//! ```text
+//! Word 0: 0 (bound 0, shift 0, bin slot 0)
+//! Word 1:
+//!   0-6    shift, 0..=124
+//!   7      0
+//!   8-31   signed odd significand's low 24 bits
+//!   32     leaf flag, 1
+//!   33-62  signed odd significand's remaining 30 bits (sign at 62)
+//!   63     sign extension
+//! ```
+//!
+//! That is [`FixedLeaf`]'s packed integer, significand << 8 | shift, with a gap
+//! opened at the leaf flag; removing the gap restores it exactly. Every leaf's slot
+//! is 0, as the lanes evaluate a leaf's test before its flag, and no walk follows a
+//! leaf's low word as a link. A Fixed leaf's bits 33-62 are not a mask field, so
+//! resolve selects the all-rows mask for it, and its leaf entry carries the stop's
+//! link, through which the leaf pass reads word 1. Constant walks decode word 1
+//! directly. Wide leaves keep their table indices.
 //!
 //! What bounds each field: links and leaf indices are 32-bit, and a model has at
 //! most [`MAX_NODES`], 2^28 - 1, nodes with the dummy, a pool below 4 GiB, on every
@@ -253,7 +274,7 @@ pub(crate) const MASK_SHIFT: u32 = 33;
 pub(crate) const MASK_BITS: u32 = 30;
 pub(crate) const MASK_FIELD: u64 = (1 << MASK_BITS) - 1;
 /// The bits of word 1 that stop a walk at varying splits: the leaf flag and the
-/// mask field. Bit 63 stays clear: a test of word 1's top 32 bits would compile to
+/// mask field. Splits keep bit 63 clear: a test of word 1's top 32 bits would compile to
 /// a shift and a compare rather than one AArch64 logical immediate.
 pub(crate) const STOPS_VARYING: u64 = FLAG_LEAF | MASK_FIELD << MASK_SHIFT;
 /// Varying predicates a model may have: predicate i takes the fields 2i + 1 and
@@ -269,6 +290,25 @@ const _: () = assert!(MASK_SHIFT + MASK_BITS == 63);
 const _: () = assert!(2 * MAX_PREDICATES as u64 <= MASK_FIELD);
 
 impl LayoutNode {
+    /// A fixed leaf: slot and shift zero, with its value around word 1's leaf flag.
+    pub(crate) const fn fixed(value: FixedLeaf) -> Self {
+        let bits = value.0 as u64;
+        Self {
+            w0: 0,
+            w1: (bits & CHILD_MASK) | ((bits & !CHILD_MASK) << 1) | FLAG_LEAF,
+        }
+    }
+
+    /// Decode a fixed leaf's word 1, also returned directly by constant walks.
+    #[expect(
+        clippy::inline_always,
+        reason = "the leaf pass must decode without a call"
+    )]
+    #[inline(always)]
+    pub(crate) const fn fixed_value(word: u64) -> FixedLeaf {
+        FixedLeaf(((word as i64 >> 1) & !(CHILD_MASK as i64)) | (word & CHILD_MASK) as i64)
+    }
+
     /// The dummy at `link`: a numeric split on slot 0 whose bound is 0, so that it
     /// always takes its light child, itself (the module documentation).
     const fn dummy(link: u32) -> Self {
@@ -278,14 +318,15 @@ impl LayoutNode {
         }
     }
 
-    /// The light child's link; a leaf's leaf-value index.
+    /// The light child's link; a Wide leaf's table index (not meaningful for Fixed leaves).
     #[inline]
     pub(crate) const fn child(self) -> u32 {
         (self.w1 & CHILD_MASK) as u32
     }
 
-    /// The mask field: 0 for leaves and constant splits, else the index of the
+    /// The mask field: 0 for Wide leaves and constant splits, else the index of the
     /// heavy side's mask, `2i + 1` (left) or `2i + 2` (right) for predicate `i`.
+    /// Fixed leaves carry value bits here, and resolve selects mask 0 for them.
     #[cfg(test)]
     #[inline]
     pub(crate) const fn mask_field(self) -> usize {
@@ -309,7 +350,7 @@ impl LayoutNode {
         !self.is_leaf() && self.mask_field() != 0
     }
 
-    /// Word 0's low 32 bits: a split's bound or a leaf's leaf-value index.
+    /// Word 0's low 32 bits: a split's bound, Wide leaf's table index, or Fixed leaf's 0.
     #[inline]
     pub(crate) const fn payload(self) -> u32 {
         (self.w0 & PAYLOAD_MASK) as u32
@@ -716,29 +757,6 @@ fn count_below<const F32: bool>(thresholds: &[f64], x: f64) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// Leaf values
-// ---------------------------------------------------------------------------
-
-/// Leaf values by leaf-value index.
-#[derive(Clone, Debug)]
-pub(crate) enum LeafValues {
-    /// Packed values at the model's [`crate::exact::Plan::Fixed`] scale.
-    Fixed(Vec<FixedLeaf>),
-    /// The values in the digits of the model's [`crate::exact::Plan::Wide`] accumulator.
-    Wide(Vec<WideLeaf>),
-}
-
-impl LeafValues {
-    #[cfg(test)]
-    pub(crate) const fn len(&self) -> usize {
-        match self {
-            Self::Fixed(values) => values.len(),
-            Self::Wide(values) => values.len(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
 
@@ -749,7 +767,9 @@ pub(crate) struct Layout {
     /// Every tree's nodes, in input order, then the dummy.
     pub(crate) nodes: Vec<LayoutNode>,
     pub(crate) bins: BinMap,
-    pub(crate) leaves: LeafValues,
+    /// A Wide plan's leaf values, in tree order; empty for a Fixed plan, whose
+    /// values are in its leaf nodes.
+    pub(crate) leaves: Vec<WideLeaf>,
     /// Share of internal nodes that split on varying features.
     #[cfg_attr(
         not(any(test, feature = "research")),
@@ -822,7 +842,7 @@ impl Layout {
                 constant: Vec::new(),
                 varying: Vec::new(),
             },
-            leaves: LeafValues::Wide(Vec::new()),
+            leaves: Vec::new(),
             varying_share: 0.0,
             chain_sets: 0,
             chains: 0,
