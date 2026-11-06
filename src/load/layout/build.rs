@@ -963,7 +963,7 @@ fn encode_trees(
                     let Plan::Fixed(scale) = plan else {
                         unreachable!()
                     };
-                    values.push(crate::exact::to_fixed(value, scale));
+                    values.push(crate::exact::FixedLeaf::new(value, scale));
                     values.len() - 1
                 }
                 LeafValues::Wide(values) => {

@@ -171,7 +171,10 @@ fn check_structure(model: &Model) {
                 assert_eq!(new.mask_field(), 0, "leaves read the all-rows mask");
                 match (&layout.leaves, model.plan) {
                     (LeafValues::Fixed(values), crate::exact::Plan::Fixed(e)) => {
-                        assert_eq!(values[leaf], crate::exact::to_fixed(old.value, e));
+                        assert_eq!(
+                            i128::from(values[leaf]),
+                            crate::exact::to_fixed(old.value, e)
+                        );
                     }
                     (LeafValues::Wide(values), crate::exact::Plan::Wide(wide)) => {
                         assert_eq!(values[leaf], wide.leaf(old.value));

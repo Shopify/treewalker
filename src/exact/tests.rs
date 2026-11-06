@@ -116,6 +116,44 @@ fn fixed_point_round_trips_leaf_values() {
 }
 
 #[test]
+fn packed_leaves_round_trip() {
+    let values = [
+        0.0,
+        -0.0,
+        -3.0,
+        0.1,
+        f64::MAX,
+        -f64::MAX,
+        f64::from_bits((1 << 52) - 1),
+    ];
+    for v in values {
+        let e = scale([v], 1).unwrap();
+        assert_eq!(i128::from(FixedLeaf::new(v, e)), to_fixed(v, e));
+    }
+    // Each possible shift, for both signs; the zero-tree utility permits 124.
+    for shift in 0..=124 {
+        let values = [1.0, -1.0, 2f64.powi(-shift)];
+        assert_eq!(Plan::new(values, 0), Plan::Fixed(shift));
+        for v in values {
+            assert_eq!(i128::from(FixedLeaf::new(v, shift)), to_fixed(v, shift));
+        }
+    }
+    let mut rng = Lcg(19);
+    for _ in 0..10_000 {
+        let v = rng.value(0..=2046);
+        let e = scale([v], 1).unwrap();
+        let fixed = to_fixed(v, e);
+        let width = (128 - fixed.unsigned_abs().leading_zeros()).max(1);
+        // A second, smaller leaf can raise the scale: cover every width the
+        // Fixed rule permits, not only a lone leaf's odd integer.
+        let shift = rng.below(u64::from(125 - width)) as i32;
+        for e in [e, e + shift] {
+            assert_eq!(i128::from(FixedLeaf::new(v, e)), to_fixed(v, e));
+        }
+    }
+}
+
+#[test]
 fn scale_rejects_what_cannot_be_exact() {
     assert_eq!(scale([1.0, f64::INFINITY], 2), None);
     assert_eq!(scale([1.0, f64::NAN], 2), None);

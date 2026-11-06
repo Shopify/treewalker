@@ -27,6 +27,9 @@ unchanged.
   a copy of each list.
 - Production frees the category lists once a model is loaded: it tests categorical
   splits through the rank tables only. Research and the tests keep them.
+- A fixed-point plan's leaf values take 8 bytes rather than 16: each holds its odd
+  significand, below 2^53, and its shift, and its 128-bit value is rebuilt exactly
+  where it is added. Wide plans keep their limbs.
 
 ### Prediction
 
