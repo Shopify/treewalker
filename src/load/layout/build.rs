@@ -392,63 +392,60 @@ fn category_slots(
             | ((f.slot as u64 + u64::from(word)) << SLOT_SHIFT);
     }
 
-    // A chain's listed sets come first, so no category's rank is the number of listed
-    // sets: the default, which each word packs for its fields. The exceptions come
-    // from the lists ([`chain_exceptions`]), `(code, chain, rank)`, taken chain by chain
-    // in word order, so that each code's are in word order, then merged by word.
+    // Chains are visited in word order, keeping each code's ranks for a word together.
+    // Count one exception per (code, word), then write it in place by code,
+    // starting from the word's default and replacing its exceptional rank fields.
     tables.defaults.resize(f.slot + n_words, 0);
-    let mut found: Vec<(u32, u32, u32)> = Vec::new();
-    for c in by_word(&fields) {
-        let listed = chain_exceptions(cover.chain(c as usize), &sets, |e, rank| {
-            found.push((e, c, rank));
-        });
+    let order = by_word(&fields);
+    let mut bounds = vec![0u32; domain + 1];
+    let mut last = vec![u32::MAX; domain];
+    for &c in &order {
         let Field { word, low, .. } = fields[c as usize];
+        let listed = chain_exceptions(cover.chain(c as usize), &sets, |e, _| {
+            let e = e as usize;
+            if last[e] != word {
+                last[e] = word;
+                bounds[e + 1] += 1;
+            }
+        });
         tables.defaults[f.slot + word as usize] |= (listed as u32) << low;
     }
     tables.slots += n_words;
-    // By code, each code's in word order: a counting sort, then a word per code and
-    // word, its default with the code's ranks in its fields. The triples are at most
-    // the heavy sets' listed codes, which the cap bounded; the tables are checked
-    // once merged.
-    let mut bounds = vec![0u32; domain + 1];
-    for &(e, _, _) in &found {
-        bounds[e as usize + 1] += 1;
-    }
+    let too_many = || LoadError::Limit("the rank tables exceed u32 exceptions".into());
+    let base = tables.exceptions.len();
+    bounds[0] = base as u32;
     for e in 0..domain {
-        bounds[e + 1] += bounds[e];
+        bounds[e + 1] = bounds[e + 1].checked_add(bounds[e]).ok_or_else(too_many)?;
     }
-    let mut sorted = vec![(0u32, 0u32); found.len()];
-    let mut next = bounds[..domain].to_vec();
-    for &(e, c, rank) in &found {
-        let at = &mut next[e as usize];
-        sorted[*at as usize] = (c, rank);
-        *at += 1;
+    // The tables are checked before they grow. The exceptions are at most the heavy
+    // sets' listed codes, which the cap bounded.
+    let end = bounds[domain] as usize;
+    let n = end - base;
+    if tables.bytes() + 4 * (domain as u64 + 1) + 8 * n as u64 > f.max_bytes {
+        return Err(too_big("the categorical splits' rank tables", f.max_bytes));
     }
-    drop(found);
     let offsets = tables.offsets.len();
     LoadError::reserve(tables.offsets.try_reserve_exact(domain + 1))?;
-    for e in 0..domain {
-        tables.offsets.push(
-            u32::try_from(tables.exceptions.len())
-                .map_err(|_| LoadError::Limit("the rank tables exceed u32 exceptions".into()))?,
-        );
-        let ranks = &sorted[bounds[e] as usize..bounds[e + 1] as usize];
-        for run in ranks.chunk_by(|a, b| fields[a.0 as usize].word == fields[b.0 as usize].word) {
-            let slot = f.slot + fields[run[0].0 as usize].word as usize;
-            let mut value = tables.defaults[slot];
-            for &(c, rank) in run {
-                let Field { low, width, .. } = fields[c as usize];
-                value = value & !((u32::MAX >> (u32::BITS - width)) << low) | rank << low;
+    tables.offsets.extend_from_slice(&bounds);
+    LoadError::reserve(tables.exceptions.try_reserve_exact(n))?;
+    tables.exceptions.resize(end, [0, 0]);
+    let (defaults, exceptions) = (&tables.defaults, &mut tables.exceptions);
+    let mut next = bounds;
+    last.fill(u32::MAX);
+    for &c in &order {
+        let Field { word, low, width } = fields[c as usize];
+        let slot = f.slot + word as usize;
+        let mask = !((u32::MAX >> (u32::BITS - width)) << low);
+        chain_exceptions(cover.chain(c as usize), &sets, |e, rank| {
+            let e = e as usize;
+            if last[e] != word {
+                last[e] = word;
+                exceptions[next[e] as usize] = [slot as u32, defaults[slot]];
+                next[e] += 1;
             }
-            tables.exceptions.push([slot as u32, value]);
-        }
-    }
-    tables.offsets.push(
-        u32::try_from(tables.exceptions.len())
-            .map_err(|_| LoadError::Limit("the rank tables exceed u32 exceptions".into()))?,
-    );
-    if tables.bytes() > f.max_bytes {
-        return Err(too_big("the categorical splits' rank tables", f.max_bytes));
+            let value = &mut exceptions[next[e] as usize - 1][1];
+            *value = *value & mask | rank << low;
+        });
     }
     Ok(CategoryBins {
         codes: f.codes,
