@@ -312,13 +312,13 @@ pub(crate) fn category_list(categories: &[u32], offset: u32) -> &[u32] {
 pub struct Tree {
     /// Index of this tree's root in the parsed nodes and in the layout.
     #[cfg_attr(
-        not(feature = "research"),
+        not(any(feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "read through the research introspection")
     )]
     pub node_start: u32,
     /// Total nodes (internal + leaves) in this tree.
     #[cfg_attr(
-        not(feature = "research"),
+        not(any(feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "read through the research introspection")
     )]
     pub node_count: u32,
@@ -328,7 +328,7 @@ pub struct Tree {
     /// into earlier regions. Nodes hold absolute offsets (in `Node.value`), not this
     /// field. Retained for diagnostics and memory accounting.
     #[cfg_attr(
-        not(feature = "research"),
+        not(any(feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "read through the research introspection")
     )]
     pub category_start: u32,

@@ -42,7 +42,7 @@ const fn heavy(word: u32, shift: u32, bound: u32) -> bool {
 }
 
 /// One varying feature's predicates.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MaskFeature {
     pub(crate) feature: usize,
     /// Its numeric predicates' IDs, in increasing threshold order.
@@ -68,7 +68,7 @@ pub(crate) struct MaskFeature {
 /// it to its own: two bit flips per exception, nothing per row and chain. Which
 /// masks a code's exceptions flip depends only on the code, so the plan lists them
 /// per code ([`MaskPlan::flips`]).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MaskChain {
     /// Its first predicate at or past the default rank, `len` if none is.
     pub(crate) start: u32,
@@ -79,7 +79,7 @@ pub(crate) struct MaskChain {
 
 /// Per varying feature, its predicates; per chain, its categorical predicates; per
 /// code of a varying categorical feature, the masks its rows flip.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MaskPlan {
     pub(crate) features: Vec<MaskFeature>,
     pub(crate) chains: Vec<MaskChain>,

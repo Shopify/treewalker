@@ -165,6 +165,8 @@
 mod build;
 mod chains;
 mod exceptions;
+#[cfg(feature = "layout-file")]
+mod layout_file;
 mod masks;
 #[cfg(test)]
 mod tests;
@@ -391,7 +393,7 @@ const SMALL_CATEGORIES: u32 = u64::BITS;
 
 /// How a feature's input value becomes a categorical code: its codebook, at
 /// `start..start + len` in [`BinMap::books`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CategoryCodes {
     start: u32,
     len: u32,
@@ -469,7 +471,7 @@ impl CategoryCodes {
 
 /// A categorical feature's slots: how its values become codes, and where each code's
 /// words of rank fields differ from no category's, its exceptions.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CategoryBins {
     pub(crate) codes: CategoryCodes,
     /// Its first slot, and its slots ([`Self::slots`]), each a word of rank fields.
@@ -772,18 +774,18 @@ pub(crate) struct Layout {
     pub(crate) leaves: Vec<WideLeaf>,
     /// Share of internal nodes that split on varying features.
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) varying_share: f64,
     /// The categorical features' distinct heavy sets, and the chains that cover them.
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) chain_sets: u32,
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) chains: u32,
