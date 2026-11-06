@@ -120,8 +120,11 @@ pub fn encode_categories(
     let list = &mut ctx.list;
     list.clear();
     list.extend(categories);
-    list.sort_unstable();
-    list.dedup();
+    // Exporters write a split's categories ascending, so most lists need no sort.
+    if !list.is_sorted_by(|a, b| a < b) {
+        list.sort_unstable();
+        list.dedup();
+    }
     if list.last().is_none_or(|&c| c < 32) {
         let word = list.iter().fold(0u32, |w, &c| w | 1 << c);
         return Ok((f64::from(word), true));
