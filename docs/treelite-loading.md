@@ -222,9 +222,11 @@ file past one fails with `LoadError::Limit`, and trusted inputs may raise them.
 They bound input, representation, and decoding work; they are not a promise about
 peak process RSS. Large legitimate forests should use binary. The loader's hash
 tables (the forest's distinct splits, a JSON tree's node IDs, interned category
-lists) hash with keys drawn at random for each load, so a file cannot choose
-thresholds or IDs that collide: decoding work stays linear in the input whatever
-its values.
+lists and the heavy sets' shared lists) hash with keys drawn at random for each
+load, so a file cannot choose thresholds, IDs or lists that collide: decoding
+work stays linear in the input whatever its values. Category-list fingerprints
+use the intern map's random keys too; a hit is compared with the pool's list
+before sharing it.
 
 | Cap (`LoadOptions` field) | Default | Protects against |
 |---|---:|---|
@@ -277,7 +279,10 @@ order, from the distinct splits' bins, codebooks and chains, and writes the leaf
 tree order is the order of the trees' starts and leaf values, not of their nodes.
 Peak memory is therefore the loaded model plus the split table (small for binned
 models: thousands of splits against millions of nodes) and a reader's buffer of at
-most 1 MiB or one tree's fields. For Expedia's 1,000-tree, depth-16 LightGBM model
+most 1 MiB or one tree's fields. A model with categorical splits also holds its
+category lists, each distinct one once, while it loads, and each categorical
+feature's heavy sets and rank tables while its layout is built; production frees
+the lists once loaded. For Expedia's 1,000-tree, depth-16 LightGBM model
 (7.7 million nodes, a 636 MB file), `Forest::load` takes 0.27 s with a heap peak of
 191 MB, against a loaded model of 186 MB. JSON keeps a
 document in memory: simd-json's tape over the input, whose strings it borrows,

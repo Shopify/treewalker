@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+Loading a model with many categorical splits takes much less memory, and so does
+the loaded model. For a large model with many categorical splits, the heap's peak
+while loading from a file or a reader is 55% lower than 3.2.1's, and the loaded
+model's heap 52% lower, with loads 30% faster. The layout and the outputs are
+unchanged.
+
+### Memory
+
+- The rank tables' exceptions are counted, then written in place in a table of
+  their exact size, so the build no longer holds every (code, chain, rank) triple
+  and a sorted copy, and the loaded model keeps no spare capacity. The cap on the
+  rank tables is checked before they grow.
+- A categorical feature's heavy sets hold each distinct category list's codes once,
+  shared by its sets with and without missing, listed and complemented, rather
+  than every split side's list and every set's.
+- The build frees its categorical scratch sooner: the heavy sets are trimmed, the
+  split sides recomputed rather than stored, the distinct categories deduplicated
+  as they grow, and the splits' words allocated for the pass that writes them.
+- The decoders intern category lists by their hash and pool offset rather than by
+  a copy of each list.
+- Production frees the category lists once a model is loaded: it tests categorical
+  splits through the rank tables only. Research and the tests keep them.
+
+### Load time
+
+- Where a categorical feature's categories are dense enough, the build looks their
+  codes up by table and collects the distinct categories in bits, rather than by
+  binary search and a sort of every split's list.
+
 ## 3.2.2
 
 3.2.2 closes a denial of service in the loader found by a security review: a model
