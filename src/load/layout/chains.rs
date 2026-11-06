@@ -16,8 +16,8 @@
 /// and a complemented one always does.
 pub(crate) struct Sets<'a> {
     pub(crate) domain: usize,
-    /// Set i's list, at `starts[i]..starts[i + 1]` in `codes`.
-    pub(crate) starts: &'a [u32],
+    /// Set i's list, at `ranges[i]` in `codes`; sets can share codes.
+    pub(crate) ranges: &'a [(u32, u32)],
     pub(crate) codes: &'a [u32],
     /// Whether each set is its list's complement.
     pub(crate) complement: &'a [bool],
@@ -29,7 +29,8 @@ impl Sets<'_> {
     }
 
     pub(crate) fn list(&self, i: usize) -> &[u32] {
-        &self.codes[self.starts[i] as usize..self.starts[i + 1] as usize]
+        let (start, end) = self.ranges[i];
+        &self.codes[start as usize..end as usize]
     }
 }
 
@@ -528,7 +529,7 @@ mod tests {
     /// codes it lacks.
     struct Family {
         bits: Vec<u64>,
-        starts: Vec<u32>,
+        ranges: Vec<(u32, u32)>,
         codes: Vec<u32>,
         complement: Vec<bool>,
     }
@@ -541,19 +542,20 @@ mod tests {
             bits.dedup();
             let mut family = Self {
                 bits,
-                starts: vec![0],
+                ranges: Vec::new(),
                 codes: Vec::new(),
                 complement: Vec::new(),
             };
             for &set in &family.bits {
                 let complement = set & 1 != 0;
                 let list = if complement { !set } else { set };
+                let at = family.codes.len() as u32;
                 family.codes.extend(
                     (0..domain)
                         .filter(|&c| list >> c & 1 != 0)
                         .map(|c| c * scale),
                 );
-                family.starts.push(family.codes.len() as u32);
+                family.ranges.push((at, family.codes.len() as u32));
                 family.complement.push(complement);
             }
             family
@@ -562,7 +564,7 @@ mod tests {
         fn sets(&self, domain: u32) -> Sets<'_> {
             Sets {
                 domain: domain as usize,
-                starts: &self.starts,
+                ranges: &self.ranges,
                 codes: &self.codes,
                 complement: &self.complement,
             }
@@ -695,13 +697,14 @@ mod tests {
             sets.dedup();
             let mut family = Family {
                 bits: Vec::new(),
-                starts: vec![0],
+                ranges: Vec::new(),
                 codes: Vec::new(),
                 complement: Vec::new(),
             };
             for (complement, list) in &sets {
+                let at = family.codes.len() as u32;
                 family.codes.extend_from_slice(list);
-                family.starts.push(family.codes.len() as u32);
+                family.ranges.push((at, family.codes.len() as u32));
                 family.complement.push(*complement);
             }
             let (cover, steps) =
@@ -781,13 +784,14 @@ mod tests {
             sets.dedup();
             let mut family = Family {
                 bits: Vec::new(),
-                starts: vec![0],
+                ranges: Vec::new(),
                 codes: Vec::new(),
                 complement: Vec::new(),
             };
             for (complement, list) in &sets {
+                let at = family.codes.len() as u32;
                 family.codes.extend_from_slice(list);
-                family.starts.push(family.codes.len() as u32);
+                family.ranges.push((at, family.codes.len() as u32));
                 family.complement.push(*complement);
             }
             let full: Vec<Vec<u32>> = sets
