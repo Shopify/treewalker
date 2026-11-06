@@ -1,15 +1,16 @@
-# Publishes treewalker-gbdt to crates.io from a `v*` tag, with no long-lived token:
-# the job proves its identity to crates.io with GitHub's OIDC token (Trusted
-# Publishing), and crates.io hands back a publish token that lives for the job.
+# Prepares a release of treewalker-gbdt from a `v*` tag: checks what the tag claims,
+# runs the release tests, packages the crate and creates the GitHub release with the
+# crate attached. Publishing to crates.io stays a maintainer's `cargo publish` from the
+# tag once this run is green, with the credentials on their machine: no registry token
+# is held by the repository or by CI.
 #
-# One-time setup, by a crate owner: on crates.io, the crate's settings → Trusted
-# Publishing → GitHub, repository `Shopify/treewalker`, workflow `release.yml`,
-# environment `crates-io`; in this repository, Settings → Environments → `crates-io`
-# with the maintainers as required reviewers and `v*` as its deployment tag rule.
+# A release is: bump `Cargo.toml` and add the CHANGELOG section on a pull request;
+# merge; `git tag -s vX.Y.Z && git push origin vX.Y.Z`; when this run is green,
+# `git checkout vX.Y.Z && cargo publish --locked -p treewalker-gbdt`.
 #
-# A release is then: bump `Cargo.toml` and add the CHANGELOG section on a pull
-# request; merge; `git tag -s vX.Y.Z && git push origin vX.Y.Z`; when the `publish`
-# job pauses, inspect the `verify` job's crate artifact and approve the environment.
+# Trusted Publishing would let the run publish with no token at all, but crates.io
+# verifies the repository owner through the crate owner's GitHub token, which the
+# Shopify organization's policy refuses; revisit when the organization enables it.
 
 name: release
 
@@ -24,7 +25,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Everything the tag claims is checked before anything leaves the runner.
+  # Everything the tag claims is checked before the release exists.
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -79,28 +80,19 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  publish:
+  release:
     needs: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    # The environment's required reviewers are the human gate, and its tag rule keeps
-    # the environment's trust to `v*` refs.
-    environment: crates-io
+    timeout-minutes: 10
     permissions:
-      contents: write # the GitHub release below
-      id-token: write # the OIDC token Trusted Publishing exchanges
+      contents: write # the GitHub release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
-        id: auth
-      # `cargo publish` packages the crate again from the same commit; `cargo package`
-      # is deterministic, so it is the artifact the approver inspected.
-      - name: publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo publish --locked -p treewalker-gbdt
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: crate
       - name: GitHub release from the changelog section, with the crate file
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,11 +101,5 @@ jobs:
         run: |
           set -eu
           awk -v v="$VERSION" '$0 == "## " v {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
-          gh release create "$REF" --verify-tag --title "treewalker-gbdt $VERSION" --notes-file notes.md
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: crate
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          REF: ${{ github.ref_name }}
-        run: gh release upload "$REF" treewalker-gbdt-*.crate
+          gh release create "$REF" --verify-tag --title "treewalker-gbdt $VERSION" \
+            --notes-file notes.md treewalker-gbdt-*.crate
