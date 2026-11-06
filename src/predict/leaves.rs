@@ -15,23 +15,24 @@ pub(super) fn leaf_pass_at<
     M: Mask,
     C: Carrier<M>,
     S: RunSink + ?Sized,
+    V: Copy + Into<S::Value>,
     const STATS: bool,
 >(
     entries: &[Item<C>],
     full: &[Item<C>],
     arena: &[M],
     u: usize,
-    values: &[S::Value],
+    values: &[V],
     even: &mut S,
     odd: &mut S,
 ) -> u64 {
     if X::NATIVE {
-        return leaf_pass::<M, C, S, STATS>(entries, full, arena, u, values, even, odd);
+        return leaf_pass::<M, C, S, V, STATS>(entries, full, arena, u, values, even, odd);
     }
     X::with7(
         #[inline(always)]
         |entries, full, arena, u, values, even, odd| {
-            leaf_pass::<M, C, S, STATS>(entries, full, arena, u, values, even, odd)
+            leaf_pass::<M, C, S, V, STATS>(entries, full, arena, u, values, even, odd)
         },
         entries,
         full,
@@ -48,12 +49,18 @@ pub(super) fn leaf_pass_at<
 /// runs, alternating between the sinks `even` and `odd`; with `STATS`, returns the
 /// number of runs, a full entry being one. Arena masks have `u` units of `M`.
 #[cfg_attr(dispatch, inline(always))]
-pub(super) fn leaf_pass<M: Mask, C: Carrier<M>, S: RunSink + ?Sized, const STATS: bool>(
+pub(super) fn leaf_pass<
+    M: Mask,
+    C: Carrier<M>,
+    S: RunSink + ?Sized,
+    V: Copy + Into<S::Value>,
+    const STATS: bool,
+>(
     entries: &[Item<C>],
     full: &[Item<C>],
     arena: &[M],
     u: usize,
-    values: &[S::Value],
+    values: &[V],
     even: &mut S,
     odd: &mut S,
 ) -> u64 {
@@ -76,24 +83,30 @@ pub(super) fn leaf_pass<M: Mask, C: Carrier<M>, S: RunSink + ?Sized, const STATS
 /// any, the sum is zero, and flushing it would add zeros, so neither runs. The
 /// others go two at a time.
 #[inline(always)]
-fn add_entries<M: Mask, C: Carrier<M>, S: RunSink + ?Sized>(
+fn add_entries<M: Mask, C: Carrier<M>, S: RunSink + ?Sized, V: Copy + Into<S::Value>>(
     entries: &[Item<C>],
     full: &[Item<C>],
     arena: &[M],
     u: usize,
-    values: &[S::Value],
+    values: &[V],
     even: &mut S,
     odd: &mut S,
 ) {
     if !full.is_empty() {
         let mut sum = S::Sum::default();
-        even.add_all_of(&mut sum, full.iter().map(|e| values[e.node as usize]));
+        even.add_all_of(
+            &mut sum,
+            full.iter().map(|e| values[e.node as usize].into()),
+        );
         even.flush(sum);
     }
     let mut pairs = entries.chunks_exact(2);
     for pair in &mut pairs {
         let (a, b) = (&pair[0], &pair[1]);
-        let (va, vb) = (values[a.node as usize], values[b.node as usize]);
+        let (va, vb) = (
+            values[a.node as usize].into(),
+            values[b.node as usize].into(),
+        );
         // SAFETY: a leaf entry's handle is a slot its passes wrote.
         unsafe {
             a.carry.add_runs(arena.as_ptr(), va, even, u);
@@ -101,7 +114,7 @@ fn add_entries<M: Mask, C: Carrier<M>, S: RunSink + ?Sized>(
         }
     }
     for e in pairs.remainder() {
-        let v = values[e.node as usize];
+        let v = values[e.node as usize].into();
         // SAFETY: as above.
         unsafe { e.carry.add_runs(arena.as_ptr(), v, even, u) };
     }

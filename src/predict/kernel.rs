@@ -542,7 +542,7 @@ impl Model {
                 (LeafValues::Fixed(values), Sums::Fixed(diff)) => {
                     let half = diff.len() / 2;
                     let (even, odd) = diff.split_at_mut(half);
-                    leaf_pass_at::<X, M, C, _, STATS>(
+                    leaf_pass_at::<X, M, C, _, _, STATS>(
                         entries,
                         full,
                         arena,
@@ -561,7 +561,7 @@ impl Model {
                     let limbs = (n + 1) * wide.limbs();
                     let half = diff.len() / 2;
                     let (even, odd) = diff.split_at_mut(half);
-                    leaf_pass_at::<X, M, C, _, STATS>(
+                    leaf_pass_at::<X, M, C, _, _, STATS>(
                         entries,
                         full,
                         arena,
@@ -711,7 +711,7 @@ impl Model {
             match (&self.layout.leaves, &mut c.sums) {
                 (LeafValues::Fixed(values), _) => {
                     for leaf in leaves {
-                        fixed += values[leaf];
+                        fixed += i128::from(values[leaf]);
                     }
                 }
                 (LeafValues::Wide(values), Sums::Wide { wide, acc, .. }) => {

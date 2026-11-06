@@ -136,7 +136,7 @@ fn leaves_past_the_126_bit_rule_sum_exactly() {
     )
     .unwrap();
     // The wide accumulator's leaf table holds each leaf's first slot and three
-    // digits, 16 bytes, as an i128 leaf takes.
+    // digits: 16 bytes per leaf.
     let leaves = forest.nodes().iter().filter(|n| n.is_leaf()).count();
     assert_eq!(forest.layout_stats().leaf_bytes, 16 * leaves);
     let data = values("data.bin");
