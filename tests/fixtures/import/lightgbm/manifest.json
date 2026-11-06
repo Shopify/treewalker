@@ -1,0 +1,15 @@
+{
+  "lightgbm": "4.7.0",
+  "treelite": "4.7.2",
+  "models": [
+    "custom",
+    "binary",
+    "xentropy",
+    "lambdarank",
+    "rf",
+    "single_leaf",
+    "categorical_trained",
+    "missing_types",
+    "category_words"
+  ]
+}

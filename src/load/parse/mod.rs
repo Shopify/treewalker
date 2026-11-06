@@ -1,5 +1,5 @@
-//! Decoding a Treelite model: the binary checkpoint ([`binary`]) or the JSON dump
-//! ([`json`]) into the decoded forest ([`decoded`]), each tree validated and put in
+//! Decoding a Treelite binary checkpoint ([`binary`]), JSON dump ([`json`]), or
+//! native LightGBM text ([`lightgbm`]) into the decoded forest ([`decoded`]), each tree validated and put in
 //! heavy-first preorder as it is read ([`tree`]), with the model-level checks and
 //! the input caps ([`validation`]).
 //!
@@ -17,6 +17,7 @@
 mod binary;
 pub(crate) mod decoded;
 mod json;
+mod lightgbm;
 pub(crate) mod tree;
 mod validation;
 use crate::LoadError;
@@ -39,6 +40,8 @@ pub enum ModelFormat {
     TreeliteBinaryV4,
     /// Treelite JSON dump, from `Model.dump_as_json()`.
     TreeliteJson,
+    /// Native LightGBM text model, with Treelite 4.7.2 frontend semantics.
+    LightGbmText,
 }
 
 impl ModelFormat {
@@ -46,8 +49,9 @@ impl ModelFormat {
         match path.extension().and_then(|e| e.to_str()) {
             Some("bin") => Ok(Self::TreeliteBinaryV4),
             Some("json") => Ok(Self::TreeliteJson),
+            Some("txt") => Ok(Self::LightGbmText),
             _ => Err(LoadError::Unsupported(format!(
-                "model path {} must end in .bin or .json; use Forest::from_reader with an explicit ModelFormat",
+                "model path {} must end in .bin, .json or .txt; use Forest::from_reader with an explicit ModelFormat",
                 path.display()
             ))),
         }
@@ -64,6 +68,7 @@ pub(crate) fn parse_reader(
     match format {
         ModelFormat::TreeliteBinaryV4 => binary::parse(reader, None, config, options, choices),
         ModelFormat::TreeliteJson => json::parse(reader, config, options, choices),
+        ModelFormat::LightGbmText => lightgbm::parse(reader, config, options, choices),
     }
 }
 
@@ -86,6 +91,7 @@ pub(crate) fn parse_file(
             binary::parse(file, nodes, config, options, choices)
         }
         ModelFormat::TreeliteJson => json::parse(file, config, options, choices),
+        ModelFormat::LightGbmText => lightgbm::parse(file, config, options, choices),
     }
 }
 
@@ -101,5 +107,6 @@ pub(crate) fn parse_bytes(
     match format {
         ModelFormat::TreeliteBinaryV4 => binary::parse_bytes(bytes, config, options, choices),
         ModelFormat::TreeliteJson => json::parse(bytes, config, options, choices),
+        ModelFormat::LightGbmText => lightgbm::parse(bytes, config, options, choices),
     }
 }

@@ -268,11 +268,15 @@ rather than every feature silently treated as constant.
 
 The supported subset includes scalar regression, ranking and binary
 classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base
-scores. Binary Treelite v4 is recommended; native XGBoost JSON must first be
-converted through Treelite. Inputs have up to `i32::MAX` features, Treelite's own
-limit; trees, nodes, depth and category IDs are bounded only by the input caps of
-`LoadOptions`, memory and a node pool below 4 GiB (2^28 − 2 nodes in all, on every
-target); groups can have any number of rows.
+scores. It loads Treelite v4 binary checkpoints (`.bin`), Treelite JSON dumps
+(`.json`), and native LightGBM text models (`.txt`). Binary Treelite v4 is
+recommended for large models; native XGBoost JSON must first be converted through
+Treelite. Native LightGBM loading follows Treelite 4.7.2's frontend rather than
+LightGBM's evaluator: at Zero missing-type splits, NaN and zeros go by comparing
+zero with the threshold, not by the default bit. Inputs have up to `i32::MAX`
+features, Treelite's own limit; trees, nodes, depth and category IDs are bounded
+only by the input caps of `LoadOptions`, memory and a node pool below 4 GiB
+(2^28 − 2 nodes in all, on every target); groups can have any number of rows.
 See [Treelite loading](docs/treelite-loading.md) for export examples, the exact
 output and precision policy, errors, limits, prediction scratch, and the caller's
 grouping contract.

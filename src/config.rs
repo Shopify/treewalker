@@ -43,11 +43,13 @@ struct WalkerConfigFile {
 pub struct LoadOptions {
     /// Bytes a binary model may take in all; default 4 GiB.
     pub max_binary_bytes: u64,
-    /// Bytes one array field of a binary model may take; default 64 MiB. It also
+    /// Bytes one array field of a binary or LightGBM text model may take in the
+    /// decoded representation; default 64 MiB. It also
     /// bounds the trees (4 bytes each in `target_id`) and the nodes and category
     /// entries of each tree.
     pub max_binary_array_bytes: u64,
-    /// Bytes of a JSON model; default 64 MiB. Large models should use binary.
+    /// Bytes of a JSON or LightGBM text model; default 64 MiB. Large models should
+    /// use binary, or raise this cap for native text.
     pub max_json_bytes: u64,
     /// Bytes of a model's `attributes` string; default 16 MiB.
     pub max_attributes_bytes: u64,

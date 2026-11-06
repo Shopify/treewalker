@@ -1,6 +1,7 @@
-# Loading Treelite models
+# Loading Treelite and LightGBM models
 
-TreeWalker imports a validated scalar subset of Treelite directly in Rust.
+TreeWalker imports a validated scalar subset of Treelite and native LightGBM
+text models directly in Rust.
 Python and `libtreelite` are needed only to export models or regenerate the
 optional reference fixtures, not to load or execute models in the Rust library.
 
@@ -54,8 +55,53 @@ fn load(bytes: &[u8]) -> Result<Forest, LoadError> {
 
 `Forest::from_reader` accepts any `std::io::Read` with the same remaining
 arguments, and `Forest::load_with` takes `LoadOptions` with the two paths.
-Path-based loading recognizes exactly `.bin` and `.json`; other extensions
+Path-based loading recognizes exactly `.bin`, `.json` and `.txt`; other extensions
 return an error pointing to explicit format selection.
+
+## Native LightGBM text
+
+`Forest::load("model.txt", "walker_config.json")` loads LightGBM's text export
+without Python, Treelite or conversion. For memory or readers, select
+`ModelFormat::LightGbmText`. The normalization matches Treelite **4.7.2**'s
+LightGBM frontend and then uses the same validation, category encoding and
+heavy-first tree layout as the Treelite readers. The decoded models and
+TreeWalker predictions are bitwise identical through either route.
+
+- Numeric splits compare `<=` in float64; leaves are float64 too. For NaN missing
+  type, NaN follows the declared default direction. For **None and Zero missing
+  types alike**, NaN follows `0.0 <= threshold`, overriding the default direction.
+  Zero itself is still compared normally. This deliberately follows Treelite,
+  **not LightGBM's zero-as-missing semantics**: where zero is a missing value and
+  the declared default disagrees with the comparison, native LightGBM predictions
+  can differ. Use this reader when Treelite compatibility is the desired policy.
+- Categorical thresholds index `cat_boundaries`; `cat_threshold` words enumerate
+  the left child's category set. Missing type and default bits are ignored: NaN
+  always goes right. Fractional and out-of-range categories follow the policy
+  below, as in GTIL, not necessarily LightGBM's native evaluator.
+  Each categorical split must have its own threshold index, as in LightGBM's
+  exports. Treelite accepts shared indices; this reader rejects them as malformed
+  so that many splits cannot repeatedly scan the same bitset words.
+- `max_feature_idx + 1` must match the configuration. Base score is zero;
+  `average_output` being present selects average aggregation. Leaf and internal
+  counts are the training weights, not the hessian sums. Node numbering follows
+  Treelite's right-first preorder before the shared heavy-first ordering.
+- Objectives are read by the names LightGBM saves, with Treelite's transforms.
+  Binary requires a positive `sigmoid` parameter, rounded to float32 before
+  promotion; `cross_entropy` uses sigmoid with alpha one. Regression objectives
+  without `sqrt`, ranking and an absent (custom) objective use identity. Other
+  objectives (multiclass, multiclassova, cross_entropy_lambda, poisson, gamma,
+  tweedie, regression `sqrt`) and `num_class > 1` are unsupported.
+- Linear trees (`is_linear=1`) and `num_tree_per_iteration` other than one are
+  rejected even where Treelite would silently ignore their semantics. Single-leaf
+  trees are supported. Each tree needs `num_cat`, `decision_type`, `leaf_count`
+  and `internal_count`, as LightGBM writes them.
+
+The text document is materialized under `max_json_bytes` (64 MiB by default),
+which bounds text input as well as JSON. `max_binary_array_bytes` also bounds its
+decoded arrays, tree count, per-tree nodes and category-list entries before
+allocation; the shared node and rank-table bounds still apply. Raise the text
+cap for larger trusted models, or export binary to avoid holding a text document.
+Malformed fields and topology return `LoadError`, never a partial model.
 
 Every loader returns `Result`. `LoadError` distinguishes `Io`,
 `MalformedModel`, `MalformedConfig`, `Unsupported`, and `Limit`, implements
@@ -231,8 +277,8 @@ before sharing it.
 | Cap (`LoadOptions` field) | Default | Protects against |
 |---|---:|---|
 | Binary bytes consumed (`max_binary_bytes`) | 4 GiB | unbounded reads |
-| Individual binary field array (`max_binary_array_bytes`) | 64 MiB | allocations from declared lengths; it also bounds the trees (`target_id`), and each tree's nodes and category entries |
-| JSON input (`max_json_bytes`) | 64 MiB | the materialized JSON document |
+| Individual decoded field array (`max_binary_array_bytes`) | 64 MiB | allocations from binary or LightGBM text declared lengths; it also bounds the trees (`target_id`), and each tree's nodes and category entries |
+| JSON or LightGBM text input (`max_json_bytes`) | 64 MiB | the materialized document |
 | Config JSON (`max_config_bytes`) | 64 KiB | oversized configurations |
 | Attributes (`max_attributes_bytes`) | 16 MiB | the attributes document |
 | JSON nesting (`max_json_nesting`) | 64 | parser recursion, in models, attributes and configurations |
@@ -305,6 +351,15 @@ Optional fixture generation is documented in
 It pins Treelite 4.7.2, NumPy 2.5.3, sklearn 1.9.1, and SciPy 1.18.1, and
 `generate.py.lock` pins their dependencies; the manifest records input dtype
 and per-fixture absolute/relative tolerances.
+[`generate_lightgbm.py`](../tests/fixtures/import/generate_lightgbm.py) and its
+script lock pin LightGBM 4.7.0 and Treelite 4.7.2 for the native text/checkpoint
+pairs. Trained synthetic models and explicit decision-bit trees cover missing
+types, category words beyond 32 and 64, non-unit sigmoid, regression, ranking,
+cross entropy, random forest averaging, single leaves and an absent objective.
+Tests compare every native/checkpoint pair's decoded representation bit for bit,
+including the training weights' effect on ordering. One fixture checks prediction
+through path, byte and reader dispatch; the shared prediction tests cover threshold
+boundaries, NaN, signed zeros and invalid or fractional categories.
 Float64 fixtures use 1e-14; float32 fixtures allow 1e-7 for the different
 accumulation precision. Existing artifact gates remain f64 1e-14 and native
 XGBoost f32 1e-5.

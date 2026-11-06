@@ -145,3 +145,23 @@ fn binary_models_past_the_byte_limit_reserve_no_nodes() {
     assert!(matches!(result, Err(LoadError::Limit(_))));
     assert!(bytes < 64 << 10, "{bytes} bytes at the peak");
 }
+
+/// A text header cannot reserve the decoded node store without enough leaf text
+/// to back its count, even when the caller raises the decoded-array cap.
+#[test]
+fn lightgbm_leaf_counts_need_backing_text_before_reserving_nodes() {
+    let text = b"tree\nnum_class=1\nmax_feature_idx=0\nTree=0\nnum_leaves=134217727\nnum_cat=0\nleaf_value=0\n";
+    let config = WalkerConfig::builder(1)
+        .max_group_width(1)
+        .varying([])
+        .build()
+        .unwrap();
+    let options = LoadOptions {
+        max_binary_array_bytes: u64::MAX,
+        ..LoadOptions::default()
+    };
+    let (result, bytes) =
+        peak(|| Forest::from_bytes(text, ModelFormat::LightGbmText, config, &options));
+    assert!(matches!(result, Err(LoadError::MalformedModel(_))));
+    assert!(bytes < 64 << 10, "{bytes} bytes at the peak");
+}
