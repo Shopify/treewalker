@@ -12,9 +12,9 @@ use std::collections::{BTreeSet, HashMap};
 
 use super::chains::{self, Cover, Sets};
 use super::{
-    BOUND_BIAS, BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, FIRST_CATEGORY,
-    FLAG_LEAF, FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT, MAX_PREDICATES, MAX_SLOTS,
-    MISSING, NO_CATEGORY, Need, SHIFT_AT, SLOT_SHIFT, node_link,
+    BOUND_BIAS, BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, ExceptionSlots,
+    FIRST_CATEGORY, FLAG_LEAF, FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT,
+    MAX_PREDICATES, MAX_SLOTS, MISSING, NO_CATEGORY, Need, SHIFT_AT, SLOT_SHIFT, node_link,
 };
 use crate::LoadError;
 use crate::config::WalkerConfig;
@@ -86,15 +86,9 @@ struct Feature<'a> {
 struct Tables {
     defaults: Vec<u32>,
     offsets: Vec<u32>,
-    exceptions: Vec<[u32; 2]>,
+    exception_slots: ExceptionSlots,
+    exception_words: Vec<u32>,
     slots: usize,
-}
-
-impl Tables {
-    /// Their bytes so far, as [`BinMap::rank_table_bytes`] counts them.
-    const fn bytes(&self) -> u64 {
-        4 * (self.slots + self.offsets.len()) as u64 + 8 * self.exceptions.len() as u64
-    }
 }
 
 /// A load that would exceed `max_bytes`.
@@ -493,7 +487,7 @@ fn category_slots(
     // hold its words, as [`BinMap::fill_with`] needs.
     debug_assert_eq!(bounds[NO_CATEGORY as usize + 1], 0);
     let too_many = || LoadError::Limit("the rank tables exceed u32 exceptions".into());
-    let base = tables.exceptions.len();
+    let base = tables.exception_words.len();
     bounds[0] = base as u32;
     for e in 0..domain {
         bounds[e + 1] = bounds[e + 1].checked_add(bounds[e]).ok_or_else(too_many)?;
@@ -501,16 +495,21 @@ fn category_slots(
     // The tables are checked before they grow. The exceptions are at most the heavy
     // sets' listed codes, which the cap bounded.
     let end = bounds[domain] as usize;
-    let n = end - base;
-    if tables.bytes() + 4 * (domain as u64 + 1) + 8 * n as u64 > f.max_bytes {
+    if 4 * (tables.slots as u64 + tables.offsets.len() as u64 + domain as u64 + 1 + end as u64)
+        + tables.exception_slots.bytes_after(end, n_words)
+        > f.max_bytes
+    {
         return Err(too_big("the categorical splits' rank tables", f.max_bytes));
     }
     let offsets = tables.offsets.len();
     LoadError::reserve(tables.offsets.try_reserve_exact(domain + 1))?;
     tables.offsets.extend_from_slice(&bounds);
-    LoadError::reserve(tables.exceptions.try_reserve_exact(n))?;
-    tables.exceptions.resize(end, [0, 0]);
-    let (defaults, exceptions) = (&tables.defaults, &mut tables.exceptions);
+    tables.exception_slots.resize(end, n_words)?;
+    LoadError::reserve(tables.exception_words.try_reserve_exact(end - base))?;
+    tables.exception_words.resize(end, 0);
+    let defaults = &tables.defaults;
+    let exception_slots = &mut tables.exception_slots;
+    let exception_words = &mut tables.exception_words;
     let mut next = bounds;
     last.fill(u32::MAX);
     for &c in &order {
@@ -521,10 +520,11 @@ fn category_slots(
             let e = e as usize;
             if last[e] != word {
                 last[e] = word;
-                exceptions[next[e] as usize] = [slot as u32, defaults[slot]];
+                exception_slots.set(next[e] as usize, word);
+                exception_words[next[e] as usize] = defaults[slot];
                 next[e] += 1;
             }
-            let value = &mut exceptions[next[e] as usize - 1][1];
+            let value = &mut exception_words[next[e] as usize - 1];
             *value = *value & mask | rank << low;
         });
     }
@@ -844,7 +844,8 @@ fn bin_map(
     let Tables {
         mut defaults,
         offsets,
-        exceptions,
+        exception_slots,
+        exception_words,
         ..
     } = tables;
     defaults.resize(next_slot, 0);
@@ -859,7 +860,8 @@ fn bin_map(
         books,
         defaults,
         offsets,
-        exceptions,
+        exception_slots,
+        exception_words,
         shifts,
         n_categorical,
         constant,

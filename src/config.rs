@@ -58,9 +58,10 @@ pub struct LoadOptions {
     pub max_config_bytes: u64,
     /// Bytes of the categorical rank tables built at load; default 256 MiB. A
     /// categorical feature with C categories whose splits' sets need W chains takes
-    /// 4 × (W + C + 3) bytes, and 8 more per exception, a code's rank in a chain
+    /// 4 × (W + C + 3) bytes, and 6 more per exception (a code's rank in a chain
     /// where it differs from an unlisted category's: at most one per listed category
-    /// (or missing sent left) of each distinct heavy set. A model whose chains' rank
+    /// or missing sent left of each distinct heavy set), or 8 if any feature needs
+    /// more than 65,536 categorical slots. A model whose chains' rank
     /// fields pack several to a 32-bit word takes a word where it took a chain, and an
     /// exception per word where it took one per chain, so no more. A categorical
     /// feature the walker configuration declares varying also takes, for the masks its

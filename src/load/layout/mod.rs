@@ -112,8 +112,10 @@
 //! code of each heavy set, so the tables grow with the model's lists, not with its
 //! codes times its chains. A bins buffer holds the defaults and, after the slots,
 //! each categorical feature's held code, whose exceptions its chain slots hold; a
-//! fill restores the held code's exceptions and writes the new code's. The tables
-//! take at most [`crate::LoadOptions::max_rank_table_bytes`] in all.
+//! fill restores the held code's exceptions and writes the new code's. Slots are
+//! feature-relative, separate from the words, 16 bits each unless a feature needs
+//! more than 65,536 slots, when every slot is 32 bits. Restores read only the slots.
+//! The tables take at most [`crate::LoadOptions::max_rank_table_bytes`] in all.
 //!
 //! # Packed fields
 //!
@@ -141,6 +143,7 @@
 
 mod build;
 mod chains;
+mod exceptions;
 mod masks;
 #[cfg(test)]
 mod tests;
@@ -151,6 +154,8 @@ use std::ops::Range;
 use crate::LoadError;
 use crate::exact::WideLeaf;
 use crate::model::category;
+
+use exceptions::ExceptionSlots;
 
 pub(crate) use build::{Built, Input};
 pub(crate) use masks::{ChainPoint, MaskChain, MaskFeature, MaskPlan};
@@ -472,7 +477,10 @@ pub(crate) struct BinMap {
     /// slot order, code `e`'s at `offsets[e]..offsets[e + 1]` from its feature's
     /// offsets.
     pub(crate) offsets: Vec<u32>,
-    pub(crate) exceptions: Vec<[u32; 2]>,
+    /// Feature-relative slots, separate so a restore need not read the words.
+    exception_slots: ExceptionSlots,
+    /// The word paired with each exception slot.
+    exception_words: Vec<u32>,
     /// Whether some split shifts its word: a word holds two rank fields or more.
     shifts: bool,
     /// The categorical features.
@@ -504,11 +512,21 @@ impl BinMap {
         bins
     }
 
-    /// Code `code`'s exceptions in the words of `c`.
     #[inline]
-    pub(crate) fn exceptions(&self, c: CategoryBins, code: u32) -> &[[u32; 2]] {
+    fn exception_range(&self, c: CategoryBins, code: u32) -> Range<usize> {
         let at = c.offsets + code as usize;
-        &self.exceptions[self.offsets[at] as usize..self.offsets[at + 1] as usize]
+        self.offsets[at] as usize..self.offsets[at + 1] as usize
+    }
+
+    /// Code `code`'s feature-relative slots and words.
+    #[inline]
+    pub(crate) fn exceptions(
+        &self,
+        c: CategoryBins,
+        code: u32,
+    ) -> impl ExactSizeIterator<Item = (usize, u32)> + '_ {
+        self.exception_range(c, code)
+            .map(move |i| (self.exception_slots.at(i), self.exception_words[i]))
     }
 
     /// Whether some split shifts its word, so that the walks shift.
@@ -521,15 +539,16 @@ impl BinMap {
     /// exception bounds and the exceptions.
     pub(crate) fn rank_table_bytes(&self) -> usize {
         size_of::<u32>() * (self.chain_slots() + self.offsets.len())
-            + size_of_val(self.exceptions.as_slice())
+            + self.exception_slots.bytes()
+            + size_of_val(self.exception_words.as_slice())
     }
 
     /// Code `code`'s words in the slots of `c`.
     #[cfg(test)]
     pub(crate) fn ranks_of(&self, c: CategoryBins, code: u32) -> Vec<u32> {
         let mut words = self.defaults[c.slot..c.slot + c.slots()].to_vec();
-        for &[s, w] in self.exceptions(c, code) {
-            words[s as usize - c.slot] = w;
+        for (s, w) in self.exceptions(c, code) {
+            words[s] = w;
         }
         words
     }
@@ -642,22 +661,42 @@ impl BinMap {
                 if code == bins[held] {
                     continue;
                 }
-                let previous = self.exceptions(c, bins[held]);
-                if previous.len() > c.slots() / RESTORE_DENSITY {
-                    let range = c.slot..c.slot + c.slots();
-                    bins[range.clone()].copy_from_slice(&self.defaults[range]);
-                } else {
-                    for &[s, _] in previous {
-                        bins[s as usize] = self.defaults[s as usize];
-                    }
-                }
-                for &[s, word] in self.exceptions(c, code) {
-                    bins[s as usize] = word;
+                match &self.exception_slots {
+                    ExceptionSlots::Narrow(slots) => self.fill_category(slots, c, code, bins),
+                    ExceptionSlots::Wide(slots) => self.fill_category(slots, c, code, bins),
                 }
                 bins[held] = code;
             }
         }
         bins[DUMMY_SLOT] = u32::MAX;
+    }
+
+    /// Restore and apply with the model's slot width chosen outside both loops.
+    #[inline]
+    fn fill_category<S: Copy + Into<u32>>(
+        &self,
+        slots: &[S],
+        c: CategoryBins,
+        code: u32,
+        bins: &mut [u32],
+    ) {
+        let previous = self.exception_range(c, bins[self.n_slots + c.held]);
+        if previous.len() > c.slots() / RESTORE_DENSITY {
+            let range = c.slot..c.slot + c.slots();
+            bins[range.clone()].copy_from_slice(&self.defaults[range]);
+        } else {
+            for &s in &slots[previous] {
+                let slot = c.slot + s.into() as usize;
+                bins[slot] = self.defaults[slot];
+            }
+        }
+        let range = self.exception_range(c, code);
+        for (&s, &word) in slots[range.clone()]
+            .iter()
+            .zip(&self.exception_words[range])
+        {
+            bins[c.slot + s.into() as usize] = word;
+        }
     }
 }
 
@@ -776,7 +815,8 @@ impl Layout {
                 books: Vec::new(),
                 defaults: vec![u32::MAX],
                 offsets: Vec::new(),
-                exceptions: Vec::new(),
+                exception_slots: ExceptionSlots::default(),
+                exception_words: Vec::new(),
                 shifts: false,
                 n_categorical: 0,
                 constant: Vec::new(),
