@@ -19,6 +19,9 @@ use crate::LoadError;
 use serde::Deserialize;
 use std::path::Path;
 
+#[cfg(feature = "layout-file")]
+mod layout_file;
+
 /// Raw JSON schema from the training pipeline.
 /// Only used for deserialization: fields are immediately converted to feature sets.
 #[derive(Deserialize)]

@@ -41,8 +41,12 @@ jobs:
         with:
           persist-credentials: false
       - run: grep -m1 'model name' /proc/cpuinfo
+      - name: clippy for production layout files
+        run: cargo clippy -p treewalker-gbdt --lib --features layout-file -- -D warnings
       - name: tests at the CPU's level
         run: cargo test --release --features research
+      - name: tests with layout files
+        run: cargo test --release --features research,layout-file
       - name: tests at x86-64-v3
         run: TREEWALKER_ISA=v3 cargo test --release --features research
       - name: tests at the base level

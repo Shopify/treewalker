@@ -8,6 +8,18 @@ while loading from a file or a reader is 55% lower than 3.2.1's, and the loaded
 model's heap 52% lower, with loads 30% faster. The layout and the outputs are
 unchanged.
 
+### Layout files
+
+- Behind the `layout-file` feature, forests can save their built layout and load it
+  with validation, either into owned arrays or, on 64-bit Unix, from an immutable
+  file mapping whose large arrays share file-backed pages across processes.
+  Files are production-only; research builds return `LoadError::Unsupported` and
+  rebuild from source. A build ID covering `build.rs` and `src/`, in addition to
+  crate/target fields, rejects layouts from different source inputs. Validation
+  checks kernel safety, not prediction agreement, and takes O(R log R) work plus
+  temporary heap beyond the stored arrays. Production API tests run in an
+  independent crate, including corruptions with recomputed checksums.
+
 ### Memory
 
 - The rank tables' exceptions keep their slots relative to their feature, separate

@@ -5,6 +5,8 @@
 use std::mem::MaybeUninit;
 
 use super::RunSink;
+#[cfg(feature = "layout-file")]
+mod layout_file;
 use super::{decompose, scaled};
 
 /// Bits of a wide accumulator's digit.

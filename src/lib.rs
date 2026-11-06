@@ -101,6 +101,8 @@ mod config;
 mod error;
 mod exact;
 mod forest;
+#[cfg(feature = "layout-file")]
+mod layout_file;
 
 mod load;
 mod model;
