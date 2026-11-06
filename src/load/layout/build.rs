@@ -14,7 +14,7 @@ use super::chains::{self, Cover, Sets};
 use super::{
     BOUND_BIAS, BinMap, CategoryBins, CategoryCodes, ChainPoint, DUMMY_SLOT, FIRST_CATEGORY,
     FLAG_LEAF, FeatureBins, Layout, LayoutNode, LeafValues, MASK_SHIFT, MAX_PREDICATES, MAX_SLOTS,
-    MISSING, Need, SHIFT_AT, SLOT_SHIFT, node_link,
+    MISSING, NO_CATEGORY, Need, SHIFT_AT, SLOT_SHIFT, node_link,
 };
 use crate::LoadError;
 use crate::config::WalkerConfig;
@@ -61,20 +61,6 @@ pub(crate) struct Built {
     /// The parsed nodes, for introspection and the full walk.
     #[cfg(any(test, feature = "research"))]
     pub(crate) nodes: Vec<crate::model::Node>,
-}
-
-/// A split's categories, from its inline word or its list in `categories`.
-fn split_categories(split: &Split, categories: &[u32], out: &mut Vec<u32>) {
-    out.clear();
-    if split.inline_cat() {
-        let mut w = split.value as u32;
-        while w != 0 {
-            out.push(w.trailing_zeros());
-            w &= w - 1;
-        }
-    } else {
-        out.extend_from_slice(category_list(categories, split.value as u32));
-    }
 }
 
 /// What [`category_slots`] reads of one categorical feature.
@@ -204,11 +190,44 @@ impl RawList<'_> {
             Self::Pool(list) => list.len(),
         }
     }
+
+    /// The largest category, or 0.
+    fn max(self) -> u32 {
+        match self {
+            Self::Inline(word) => word.checked_ilog2().unwrap_or(0),
+            Self::Pool(list) => list.last().copied().unwrap_or(0),
+        }
+    }
 }
+
+/// A table by category, or the distinct categories' bits, is used only when it has
+/// at most this many entries per list entry it replaces; else a search and a sort.
+const DENSE_SPREAD: usize = 8;
+
+/// The most entries of the category-to-code table: 8 MiB.
+const MAX_DENSE_CODES: usize = 1 << 21;
 
 /// The distinct heavy sets of the categorical splits of `f`.
 fn heavy_sets(f: &Feature<'_>) -> Result<HeavySets, LoadError> {
     let domain = f.codes.domain();
+    let book = f.codes.book(f.books);
+    let table = book.last().and_then(|&max| {
+        let max = max as usize;
+        if max >= MAX_DENSE_CODES || max >= book.len().saturating_mul(DENSE_SPREAD) {
+            return None;
+        }
+        let mut table = vec![NO_CATEGORY; max + 1];
+        for (i, &c) in book.iter().enumerate() {
+            table[c as usize] = i as u32 + FIRST_CATEGORY;
+        }
+        Some(table)
+    });
+    let code_of = |c: u32| {
+        table.as_ref().map_or_else(
+            || f.codes.of(f.books, c),
+            |table| table.get(c as usize).copied().unwrap_or(NO_CATEGORY),
+        )
+    };
     // Each split side's list, whether its set takes missing, and whether it is
     // complemented.
     let sides: Vec<(RawList<'_>, bool, bool)> = sides(f)
@@ -235,7 +254,7 @@ fn heavy_sets(f: &Feature<'_>) -> Result<HeavySets, LoadError> {
         let first = if missing {
             MISSING
         } else {
-            list.iter().next().map_or(0, |c| f.codes.of(f.books, c))
+            list.iter().next().map_or(0, code_of)
         };
         (size as u64) << 33 | u64::from(complement) << 32 | u64::from(first)
     };
@@ -257,7 +276,7 @@ fn heavy_sets(f: &Feature<'_>) -> Result<HeavySets, LoadError> {
                 let start = codes.len();
                 codes.push(MISSING);
                 codes.extend(list.iter().map(|c| {
-                    let code = f.codes.of(f.books, c);
+                    let code = code_of(c);
                     debug_assert!(
                         code >= FIRST_CATEGORY,
                         "a split's categories are in its codebook"
@@ -280,6 +299,7 @@ fn heavy_sets(f: &Feature<'_>) -> Result<HeavySets, LoadError> {
     // The sets stay until the second pass, so they are trimmed.
     drop(by_size);
     drop(held);
+    drop(table);
     codes.shrink_to_fit();
     ranges.shrink_to_fit();
     Ok(HeavySets {
@@ -609,28 +629,18 @@ fn bin_map(
 
     let (mut thresholds, mut books, mut tables) = (Vec::new(), Vec::new(), Tables::default());
     let (mut constant, mut varying) = (Vec::new(), Vec::new());
-    let (mut t, mut cats, mut members) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut t, mut cats) = (Vec::new(), Vec::new());
     // Each feature's thresholds and, if categorical, its cover; with the heavy sets'
     // lists so far, which the cap bounds.
     let mut first: Vec<(std::ops::Range<usize>, Option<Covered>)> = Vec::new();
     let (mut n_chains, mut n_sets, mut list_bytes) = (0, 0, 0);
     for ids in features() {
         t.clear();
-        cats.clear();
-        let (mut categorical, mut distinct) = (false, 0);
+        let mut categorical = false;
         for &s in ids {
             let split = &splits[s as usize];
             if split.is_categorical() {
                 categorical = true;
-                split_categories(split, categories, &mut members);
-                cats.extend_from_slice(&members);
-                // Deduplicated as they grow: the splits' lists can repeat a few
-                // categories many times over.
-                if cats.len() > 2 * distinct + 4096 {
-                    cats.sort_unstable();
-                    cats.dedup();
-                    distinct = cats.len();
-                }
             } else {
                 // Float32 thresholds arrive rounded, so comparing in f64 is exact.
                 debug_assert!(
@@ -646,8 +656,46 @@ fn bin_map(
         let start = thresholds.len();
         thresholds.extend_from_slice(&t);
         let covered = if categorical {
-            cats.sort_unstable();
-            cats.dedup();
+            cats.clear();
+            // Dense categories take bits up to the largest; sparse lists are
+            // deduplicated as they grow, since splits can repeat their categories.
+            let lists = || {
+                ids.iter()
+                    .map(|&s| &splits[s as usize])
+                    .filter(|split| split.is_categorical())
+                    .map(|split| RawList::of(split, categories))
+            };
+            let entries: usize = lists().map(RawList::len).sum();
+            let words = lists()
+                .map(RawList::max)
+                .max()
+                .map_or(0, |max| max as usize / 64 + 1);
+            if words <= entries.saturating_mul(DENSE_SPREAD).div_ceil(64)
+                && words <= MAX_DENSE_CODES / 2
+            {
+                let mut bits = vec![0u64; words];
+                for c in lists().flat_map(RawList::iter) {
+                    bits[c as usize / 64] |= 1 << (c % 64);
+                }
+                for (i, mut word) in bits.into_iter().enumerate() {
+                    while word != 0 {
+                        cats.push((i * 64) as u32 + word.trailing_zeros());
+                        word &= word - 1;
+                    }
+                }
+            } else {
+                let mut distinct = 0;
+                for list in lists() {
+                    cats.extend(list.iter());
+                    if cats.len() > 2 * distinct + 4096 {
+                        cats.sort_unstable();
+                        cats.dedup();
+                        distinct = cats.len();
+                    }
+                }
+                cats.sort_unstable();
+                cats.dedup();
+            }
             let codes = CategoryCodes::new(&mut books, &cats)?;
             let feature = Feature {
                 codes,
@@ -679,7 +727,6 @@ fn bin_map(
     }
     // The first pass's scratch, freed before the covers and the rank tables.
     drop(cats);
-    drop(members);
     if thresholds.len() >= u32::MAX as usize {
         return Err(LoadError::Limit("threshold count exceeds u32".into()));
     }
