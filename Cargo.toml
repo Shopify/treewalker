@@ -40,7 +40,7 @@ redundant_pub_crate = "allow"       # pub(crate) in private modules states that 
 
 [package]
 name = "treewalker-gbdt"
-version = "3.2.1"
+version = "3.2.2"
 edition.workspace = true
 rust-version.workspace = true
 description = "Grouped tree-ensemble inference via partial evaluation"
@@ -54,7 +54,6 @@ research = []  # ablations, work counters, prediction stages, full walk, introsp
 [dependencies]
 serde.workspace = true
 simd-json.workspace = true
-rustc-hash = "2.1.2"
 thiserror = "2.0.21"
 
 [dev-dependencies]

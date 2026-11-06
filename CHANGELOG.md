@@ -1,5 +1,41 @@
 # Changelog
 
+## 3.2.2
+
+3.2.2 closes a denial of service in the loader found by a security review: a model
+file could choose its thresholds, or a JSON dump its node IDs, so that they collided
+in the loader's hash tables, which hashed with fixed constants, and decoding took time
+quadratic in their number within the `LoadOptions` caps, which the loading guide said
+bound decoding work. The tables now hash with keys drawn at random for each load.
+Outputs are unchanged, and so is the serving API; `rustc-hash` leaves the library's
+dependencies.
+
+### Fixes
+
+- The split table (`Splits::intern`), which every split of a binary or JSON model
+  passes through, hashes with simple tabulation hashing whose 26 KiB of words are
+  drawn for each table from the standard library's random hash keys. Pătrașcu and
+  Thorup prove linear probing with it takes constant expected time per operation on
+  any set of keys. 3.2.1 hashed with two fixed multiplies, so thresholds could be
+  chosen whose hashes shared their top 32 bits: 2^18 such splits in one tree took
+  26 s to decode in a release build on an M-series core, 2^19 104 s, and the table
+  is forest-wide, so a model under the default caps could take days. A hash with
+  secret multipliers was measured and rejected: under linear probing it clusters
+  natural thresholds, such as small integers, for some of its draws. Loading costs
+  the hash: 3% more time on a tree of a million nodes over a thousand distinct
+  splits, 5% over a hundred thousand, and 18% where every node is a distinct split.
+- The JSON reader's node ID map, the interned category lists and the lists'
+  renumbering use the standard library's `HashMap`, keyed at random for each map,
+  instead of `FxHashMap`, whose hash of an integer is a public bijection: node IDs
+  could be chosen that probed one group of the map, before any validation of the
+  tree, so that a tree of 2^18 nodes with such IDs, a 46 MB dump, took 52 s to load.
+  Only the node ID map was shown floodable; the other two change for the policy.
+- `tests/limits.rs` loads a tree of 2^19 such thresholds from binary and one of 2^18
+  such node IDs from JSON within 20 s each, the colliding keys from
+  `tests/common/flood.rs`, which inverts 3.2.1's hashes; a unit test checks that
+  2^16 of the thresholds leave no run of the split table longer than 512 slots.
+  `docs/treelite-loading.md` says what the caps bound.
+
 ## 3.2.1
 
 3.2.1 fixes what the review of 3.0's and 3.1's changes found that 3.2.0 does not: the
