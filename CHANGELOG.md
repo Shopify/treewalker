@@ -8,9 +8,10 @@ in the loader's hash tables, which hashed with fixed constants, and decoding too
 quadratic in their number within the `LoadOptions` caps, which the loading guide said
 bound decoding work. The tables now hash with keys drawn at random for each load.
 Outputs are unchanged, and so is the serving API; `rustc-hash` leaves the library's
-dependencies. GitHub Actions publishes a `v*` tag to crates.io with Trusted
-Publishing (`.github/workflows/release.yml`), after the release tests and a
-maintainer's approval, where releases were `cargo publish` from a developer's machine.
+dependencies. GitHub Actions checks a `v*` tag, runs the release tests and creates
+the GitHub release with the crate attached (`.github/workflows/release.yml`); a
+maintainer then publishes from the tag, so that what crates.io holds is a tagged,
+tested commit.
 
 ### Fixes
 

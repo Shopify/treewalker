@@ -230,13 +230,19 @@ section to `CHANGELOG.md`, merged, then a signed tag pushed:
 git tag -s v3.2.2 -m "treewalker-gbdt 3.2.2" && git push origin v3.2.2
 ```
 
-`.github/workflows/release.yml` takes it from there: it checks that the tag is on
-`main` and names the manifest's and the changelog's version, that the version is not
-on crates.io, runs the release tests in the generic x86-64 build at every level,
-packages the crate and keeps it as the run's artifact; then, once a maintainer has
-approved the `crates-io` environment, publishes with a token crates.io issues to the
-run itself (Trusted Publishing, so no token is stored anywhere) and creates the
-GitHub release from the changelog section with the crate file attached.
+`.github/workflows/release.yml` checks that the tag is on `main` and names the
+manifest's and the changelog's version, that the version is not on crates.io, runs the
+release tests in the generic x86-64 build at every level, packages the crate, and
+creates the GitHub release from the changelog section with the crate file attached.
+Once that run is green, a maintainer publishes from the tag with the credentials on
+their machine; the repository and CI hold no registry token:
+
+```bash
+git checkout v3.2.2 && cargo publish --locked -p treewalker-gbdt
+```
+
+`cargo package` is deterministic, so the crate this uploads is the one the release
+carries; `shasum -a 256 target/package/treewalker-gbdt-3.2.2.crate` says so.
 
 ## Using the library
 
