@@ -61,8 +61,7 @@ E1_RELEASED = "neurips2026-submission:paper/experiments/data/scenario_credit_res
 
 # Suites the paper's camera-ready numbers come from: every forest must have exact sums off.
 PAPER_SUITES = {"camera-ready", "camera-ready-ablation", "scenario-v1"}
-# The output schema from which runs record the exact_sums setting per forest and
-# write the stages table.
+# From schema 6, runs record exact_sums per forest and write the stages table.
 EXACT_SUMS_SCHEMA = STAGES_SCHEMA = 6
 # The output schema from which every forest sums exactly (3.0), so runs record the
 # setting, always on, and no forest's.

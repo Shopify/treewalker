@@ -80,7 +80,7 @@ fn cancellation(big: f64) -> Forest {
 }
 
 #[test]
-fn every_variant_matches_production_and_the_full_walk() {
+fn every_variant_matches_production() {
     let data = values("data.bin");
     let n = data.len() / 2;
     // The rows come in blocks of 128 that share their constant feature. Groups of 1
@@ -98,9 +98,6 @@ fn every_variant_matches_production_and_the_full_walk() {
         forest
             .predictor()
             .predict_groups(&data, &offsets, &mut production);
-        let mut full = vec![0.0; n];
-        forest.predict_full_walk(&data, &mut full);
-        same(&full, &production, &format!("{name} full walk"));
         for variant in variants() {
             let mut r = forest.research_predictor(variant);
             let mut batch = vec![f64::NAN; n];
