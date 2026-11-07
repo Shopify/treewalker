@@ -8,6 +8,12 @@ while loading from a file or a reader is 55% lower than 3.2.1's, and the loaded
 model's heap 52% lower, with loads 30% faster. The layout and the outputs are
 unchanged.
 
+### Layout files
+
+- Behind the `layout-file` feature, forests can save their built layout and load it
+  with validation, either into owned arrays or, on 64-bit Unix, from an immutable
+  file mapping whose large arrays share file-backed pages across processes.
+
 ### Memory
 
 - The rank tables' exceptions keep their slots relative to their feature, separate

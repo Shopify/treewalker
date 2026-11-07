@@ -165,6 +165,8 @@
 mod build;
 mod chains;
 mod exceptions;
+#[cfg(feature = "layout-file")]
+mod layout_file;
 mod masks;
 #[cfg(test)]
 mod tests;
@@ -176,7 +178,20 @@ use crate::LoadError;
 use crate::exact::{FixedLeaf, WideLeaf};
 use crate::model::category;
 
+#[cfg(all(feature = "layout-file", unix, target_pointer_width = "64"))]
+use crate::layout_file::storage::Storage as Array;
 use exceptions::ExceptionSlots;
+#[cfg(not(all(feature = "layout-file", unix, target_pointer_width = "64")))]
+type Array<T> = Vec<T>;
+
+#[cfg(all(feature = "layout-file", unix, target_pointer_width = "64"))]
+fn array<T: crate::layout_file::codec::Pod>(values: Vec<T>) -> Array<T> {
+    values.into()
+}
+#[cfg(not(all(feature = "layout-file", unix, target_pointer_width = "64")))]
+const fn array<T>(values: Vec<T>) -> Array<T> {
+    values
+}
 
 pub(crate) use build::{Built, Input};
 pub(crate) use masks::{ChainPoint, MaskChain, MaskFeature, MaskPlan};
@@ -391,7 +406,7 @@ const SMALL_CATEGORIES: u32 = u64::BITS;
 
 /// How a feature's input value becomes a categorical code: its codebook, at
 /// `start..start + len` in [`BinMap::books`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CategoryCodes {
     start: u32,
     len: u32,
@@ -469,7 +484,7 @@ impl CategoryCodes {
 
 /// A categorical feature's slots: how its values become codes, and where each code's
 /// words of rank fields differ from no category's, its exceptions.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CategoryBins {
     pub(crate) codes: CategoryCodes,
     /// Its first slot, and its slots ([`Self::slots`]), each a word of rank fields.
@@ -521,7 +536,7 @@ pub(crate) struct BinMap {
     /// Feature-relative slots, separate so a restore need not read the words.
     exception_slots: ExceptionSlots,
     /// The word paired with each exception slot.
-    exception_words: Vec<u32>,
+    exception_words: Array<u32>,
     /// Whether some split shifts its word: a word holds two rank fields or more.
     shifts: bool,
     /// The categorical features.
@@ -765,25 +780,25 @@ fn count_below<const F32: bool>(thresholds: &[f64], x: f64) -> usize {
 #[derive(Clone, Debug)]
 pub(crate) struct Layout {
     /// Every tree's nodes, in input order, then the dummy.
-    pub(crate) nodes: Vec<LayoutNode>,
+    pub(crate) nodes: Array<LayoutNode>,
     pub(crate) bins: BinMap,
     /// A Wide plan's leaf values, in tree order; empty for a Fixed plan, whose
     /// values are in its leaf nodes.
     pub(crate) leaves: Vec<WideLeaf>,
     /// Share of internal nodes that split on varying features.
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) varying_share: f64,
     /// The categorical features' distinct heavy sets, and the chains that cover them.
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) chain_sets: u32,
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) chains: u32,
@@ -826,7 +841,7 @@ impl Layout {
     #[cfg(test)]
     pub(crate) fn empty() -> Self {
         Self {
-            nodes: vec![LayoutNode::dummy(0)],
+            nodes: array(vec![LayoutNode::dummy(0)]),
             bins: BinMap {
                 f32: false,
                 n_features: 0,
@@ -836,7 +851,7 @@ impl Layout {
                 defaults: vec![u32::MAX],
                 offsets: Vec::new(),
                 exception_slots: ExceptionSlots::default(),
-                exception_words: Vec::new(),
+                exception_words: array(Vec::new()),
                 shifts: false,
                 n_categorical: 0,
                 constant: Vec::new(),

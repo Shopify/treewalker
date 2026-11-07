@@ -22,6 +22,10 @@ pub enum LoadError {
     /// An import budget or compact representation limit was exceeded.
     #[error("import limit exceeded: {0}")]
     Limit(String),
+    /// A layout file has an incompatible header, corrupt data or invalid invariants.
+    #[cfg(feature = "layout-file")]
+    #[error("invalid layout file: {0}")]
+    Layout(String),
 }
 
 impl LoadError {

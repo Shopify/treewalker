@@ -861,7 +861,7 @@ fn bin_map(
         defaults,
         offsets,
         exception_slots,
-        exception_words,
+        exception_words: super::array(exception_words),
         shifts,
         n_categorical,
         constant,
@@ -1047,7 +1047,7 @@ fn encode_trees(
     };
     Built {
         layout: Layout {
-            nodes,
+            nodes: super::array(nodes),
             bins,
             leaves,
             varying_share,
