@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 3.3.0
 
-Loading a model with many categorical splits takes much less memory, and so does
-the loaded model. For a large model with many categorical splits, the heap's peak
-while loading from a file or a reader is 55% lower than 3.2.1's, and the loaded
-model's heap 52% lower, with loads 30% faster. The layout and the outputs are
-unchanged.
+3.3.0 loads and holds models with many categorical splits in much less memory, reads
+native LightGBM text models, and, behind the experimental `layout-file` feature,
+saves a forest's built layout so that it loads without being rebuilt. For a large
+model with many categorical splits, the loaded model's heap is 66% lower than
+3.2.2's, and the heap's peak while loading from a file or a reader is under half of
+3.2.2's. Outputs are unchanged. The API only gains: `ModelFormat::LightGbmText`, and
+with `layout-file`, `Forest::save_layout`, `Forest::load_layout`, on 64-bit Unix the
+unsafe `Forest::map_layout`, and `LoadError::Layout`.
 
 ### Layout files
 
@@ -48,9 +51,10 @@ unchanged.
 
 - A categorical feature's rank slots are filled only when a row's or a group's code
   differs from the last one's, and a code with many exceptions is undone by copying
-  the feature's default words back rather than one exception at a time. Requests
-  that repeat popular categories of a model with many categorical splits run 15 to
-  20% faster.
+  the feature's default words back rather than one exception at a time. On
+  generated requests for a large model with many categorical splits, whose
+  categories favor its most frequent, a request takes about 8 to 12% less time on
+  AVX-512 and 14 to 19% less on an Apple M4, from one candidate to 512.
 
 ### Load time
 

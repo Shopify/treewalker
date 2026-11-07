@@ -227,7 +227,7 @@ A release is a pull request that bumps `Cargo.toml`'s version and adds the versi
 section to `CHANGELOG.md`, merged, then a signed tag pushed:
 
 ```bash
-git tag -s v3.2.2 -m "treewalker-gbdt 3.2.2" && git push origin v3.2.2
+git tag -s v3.3.0 -m "treewalker-gbdt 3.3.0" && git push origin v3.3.0
 ```
 
 `.github/workflows/release.yml` checks that the tag is on `main` and names the
@@ -238,11 +238,11 @@ Once that run is green, a maintainer publishes from the tag with the credentials
 their machine; the repository and CI hold no registry token:
 
 ```bash
-git checkout v3.2.2 && cargo publish --locked -p treewalker-gbdt
+git checkout v3.3.0 && cargo publish --locked -p treewalker-gbdt
 ```
 
 `cargo package` is deterministic, so the crate this uploads is the one the release
-carries; `shasum -a 256 target/package/treewalker-gbdt-3.2.2.crate` says so.
+carries; `shasum -a 256 target/package/treewalker-gbdt-3.3.0.crate` says so.
 
 ## Using the library
 
