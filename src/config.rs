@@ -19,6 +19,9 @@ use crate::LoadError;
 use serde::Deserialize;
 use std::path::Path;
 
+#[cfg(feature = "layout-file")]
+mod layout_file;
+
 /// Raw JSON schema from the training pipeline.
 /// Only used for deserialization: fields are immediately converted to feature sets.
 #[derive(Deserialize)]
@@ -43,11 +46,13 @@ struct WalkerConfigFile {
 pub struct LoadOptions {
     /// Bytes a binary model may take in all; default 4 GiB.
     pub max_binary_bytes: u64,
-    /// Bytes one array field of a binary model may take; default 64 MiB. It also
+    /// Bytes one array field of a binary or LightGBM text model may take in the
+    /// decoded representation; default 64 MiB. It also
     /// bounds the trees (4 bytes each in `target_id`) and the nodes and category
     /// entries of each tree.
     pub max_binary_array_bytes: u64,
-    /// Bytes of a JSON model; default 64 MiB. Large models should use binary.
+    /// Bytes of a JSON or LightGBM text model; default 64 MiB. Large models should
+    /// use binary, or raise this cap for native text.
     pub max_json_bytes: u64,
     /// Bytes of a model's `attributes` string; default 16 MiB.
     pub max_attributes_bytes: u64,
@@ -58,9 +63,10 @@ pub struct LoadOptions {
     pub max_config_bytes: u64,
     /// Bytes of the categorical rank tables built at load; default 256 MiB. A
     /// categorical feature with C categories whose splits' sets need W chains takes
-    /// 4 × (W + C + 3) bytes, and 8 more per exception, a code's rank in a chain
+    /// 4 × (W + C + 3) bytes, and 6 more per exception (a code's rank in a chain
     /// where it differs from an unlisted category's: at most one per listed category
-    /// (or missing sent left) of each distinct heavy set. A model whose chains' rank
+    /// or missing sent left of each distinct heavy set), or 8 if any feature needs
+    /// more than 65,536 categorical slots. A model whose chains' rank
     /// fields pack several to a 32-bit word takes a word where it took a chain, and an
     /// exception per word where it took one per chain, so no more. A categorical
     /// feature the walker configuration declares varying also takes, for the masks its

@@ -3,7 +3,8 @@
 //! Resolve reads a walk pass's stops in item order, turns leaves into leaf entries and
 //! splits each varying stop's rows with its heavy side's mask into the next pass's
 //! items. The precompute writes both sides' masks of each predicate, so the split
-//! needs no flip. By value, leaves read the all-rows mask as their heavy side, so one
+//! needs no flip. By value, leaves read the all-rows mask as their heavy side (selected
+//! explicitly for inline Fixed values, whose mask bits carry the value), so one
 //! branch-free loop treats both kinds alike. An arena carrier's split reads and writes
 //! its slots, which a leaf must not pay:
 //!
@@ -505,6 +506,8 @@ pub(super) const LISTED_SLACK: usize = if compress::<Native>() || DISPATCH {
 /// arena as [`Carrier::split`] requires, and for fixed-width handles `pass.leaves` has
 /// [`LISTED_SLACK`] more entries and `pass.listed` room for `n_items` positions plus
 /// [`LISTED_SLACK`].
+/// `INLINE` matches the model's plan: Fixed leaves carry values in word 1, not mask
+/// fields or table indices. Their entries carry the stop link instead.
 #[inline(always)]
 pub(super) unsafe fn resolve<
     X: Isa,
@@ -513,6 +516,7 @@ pub(super) unsafe fn resolve<
     const SCAN: bool,
     const EMPTY: bool,
     const STATS: bool,
+    const INLINE: bool,
 >(
     pass: &mut Resolve<M, C>,
     n_items: usize,
@@ -521,7 +525,9 @@ pub(super) unsafe fn resolve<
 ) -> usize {
     if C::ARENA && !C::RUNTIME {
         // SAFETY: the caller guarantees the bounds above.
-        return unsafe { resolve_listed::<X, M, C, SCAN, EMPTY, STATS>(pass, n_items, scan, seen) };
+        return unsafe {
+            resolve_listed::<X, M, C, SCAN, EMPTY, STATS, INLINE>(pass, n_items, scan, seen)
+        };
     }
     let u = pass.units;
     // The split of an item, given its word 1, carry and kind, as (heavy, light,
@@ -535,6 +541,11 @@ pub(super) unsafe fn resolve<
             let (w1, carry, is_leaf) = ($w1, $carry, $is_leaf);
             let is_varying = !is_leaf;
             let field = ((w1 >> MASK_SHIFT) & MASK_FIELD) as usize;
+            let field = if INLINE {
+                select_unpredictable(is_leaf, 0, field)
+            } else {
+                field
+            };
             let side = if SCAN && is_varying {
                 let (pred, right) = ((field - 1) / 2, field.is_multiple_of(2));
                 carry.scan_side(pass.arena, pred, right, scan, pass.scratch, u)
@@ -571,7 +582,10 @@ pub(super) unsafe fn resolve<
                 (w, it, st) = (w.add(1), it.add(1), st.add(1));
                 let child = w1 as u32;
                 let is_leaf = w1 & FLAG_LEAF != 0;
-                *leaf_at = Item { node: child, carry };
+                *leaf_at = Item {
+                    node: if INLINE { node } else { child },
+                    carry,
+                };
                 leaf_at = leaf_at.add(usize::from(is_leaf));
                 let is_varying = !is_leaf;
                 let (heavy, light, has_heavy, has_light) = split_of!(w1, carry, is_leaf);
@@ -599,7 +613,10 @@ pub(super) unsafe fn resolve<
             let carry = (*pass.items.add(j)).carry;
             let child = w1 as u32;
             let is_leaf = w1 & FLAG_LEAF != 0;
-            *pass.leaves.add(pass.n_leaves) = Item { node: child, carry };
+            *pass.leaves.add(pass.n_leaves) = Item {
+                node: if INLINE { *pass.stops.add(j) } else { child },
+                carry,
+            };
             pass.n_leaves += usize::from(is_leaf);
             let is_varying = !is_leaf;
             let node = *pass.stops.add(j);
@@ -636,6 +653,7 @@ unsafe fn resolve_listed<
     const SCAN: bool,
     const EMPTY: bool,
     const STATS: bool,
+    const INLINE: bool,
 >(
     pass: &mut Resolve<M, C>,
     n_items: usize,
@@ -645,8 +663,9 @@ unsafe fn resolve_listed<
     let u = pass.units;
     // SAFETY: the caller guarantees the bounds of [`resolve`], with the slack.
     let (n_leaves, listed) = unsafe {
-        list::<X, C>(
+        list::<X, C, INLINE>(
             pass.words,
+            pass.stops,
             pass.items,
             n_items,
             pass.leaves,
@@ -733,12 +752,14 @@ unsafe fn resolve_listed<
 ///
 /// # Safety
 ///
-/// `words` and `items` hold `n_items` entries; `leaves` has room for the leaf entries
+/// `words` and `items` hold `n_items` entries, as does `stops` with `INLINE`;
+/// `leaves` has room for the leaf entries
 /// past `n_leaves` plus 1 + [`LISTED_SLACK`], and `listed` for `n_items` +
 /// [`LISTED_SLACK`] positions.
 #[inline(always)]
-unsafe fn list<X: Isa, C: Copy>(
+unsafe fn list<X: Isa, C: Copy, const INLINE: bool>(
     words: *const u64,
+    stops: *const u32,
     items: *const Item<C>,
     n_items: usize,
     leaves: *mut Item<C>,
@@ -749,10 +770,12 @@ unsafe fn list<X: Isa, C: Copy>(
     if compress::<X>() && size_of::<C>() == 4 {
         // SAFETY: the caller guarantees the bounds, and the carrier's size; the level
         // has AVX-512F, VL and DQ.
-        return unsafe { list_avx512(words, items, n_items, leaves, n_leaves, listed) };
+        return unsafe {
+            list_avx512::<C, INLINE>(words, stops, items, n_items, leaves, n_leaves, listed)
+        };
     }
     // SAFETY: the caller guarantees the bounds.
-    unsafe { list_scalar(words, items, n_items, leaves, n_leaves, listed) }
+    unsafe { list_scalar::<C, INLINE>(words, stops, items, n_items, leaves, n_leaves, listed) }
 }
 
 /// [`list`] item by item, without branches: every item writes a leaf entry and a
@@ -762,8 +785,9 @@ unsafe fn list<X: Isa, C: Copy>(
 ///
 /// As for [`list`], without the slack.
 #[inline(always)]
-unsafe fn list_scalar<C: Copy>(
+unsafe fn list_scalar<C: Copy, const INLINE: bool>(
     words: *const u64,
+    stops: *const u32,
     items: *const Item<C>,
     n_items: usize,
     leaves: *mut Item<C>,
@@ -779,7 +803,7 @@ unsafe fn list_scalar<C: Copy>(
             let carry = (*items.add(j)).carry;
             let is_leaf = w1 & FLAG_LEAF != 0;
             *leaves.add(n_leaves) = Item {
-                node: w1 as u32,
+                node: if INLINE { *stops.add(j) } else { w1 as u32 },
                 carry,
             };
             n_leaves += usize::from(is_leaf);
@@ -791,7 +815,8 @@ unsafe fn list_scalar<C: Copy>(
 }
 
 /// [`list`] for 4-byte carriers, 8 items at a time: a mask of the leaves by
-/// `vptestmq`, the entries (word 1's low half, the item's carry) by a bitwise select,
+/// `vptestmq`, the entries (the stop link with `INLINE`, otherwise word 1's low
+/// half, and the item's carry) by a bitwise select,
 /// then the leaves' entries and the varying stops' positions compressed into
 /// registers by `vpcompressq` and `vpcompressd`, stored whole, and the counts
 /// advanced by the masks' populations. The register form and a plain store, because
@@ -805,8 +830,9 @@ unsafe fn list_scalar<C: Copy>(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512vl,avx512dq")]
 #[inline]
-unsafe fn list_avx512<C: Copy>(
+unsafe fn list_avx512<C: Copy, const INLINE: bool>(
     words: *const u64,
+    stops: *const u32,
     items: *const Item<C>,
     n_items: usize,
     leaves: *mut Item<C>,
@@ -815,9 +841,9 @@ unsafe fn list_avx512<C: Copy>(
 ) -> (usize, usize) {
     use std::arch::x86_64::{
         __m256i, __m512i, __mmask8, _mm256_add_epi32, _mm256_maskz_compress_epi32,
-        _mm256_set1_epi32, _mm256_setr_epi32, _mm256_storeu_si256, _mm512_maskz_compress_epi64,
-        _mm512_maskz_loadu_epi64, _mm512_set1_epi64, _mm512_storeu_si512,
-        _mm512_ternarylogic_epi64, _mm512_test_epi64_mask,
+        _mm256_maskz_loadu_epi32, _mm256_set1_epi32, _mm256_setr_epi32, _mm256_storeu_si256,
+        _mm512_cvtepu32_epi64, _mm512_maskz_compress_epi64, _mm512_maskz_loadu_epi64,
+        _mm512_set1_epi64, _mm512_storeu_si512, _mm512_ternarylogic_epi64, _mm512_test_epi64_mask,
     };
     /// `!leaf & block` by one `kandnb` (AVX512DQ), a mask-register instruction on
     /// port 0. Written in Rust, LLVM folds the complement into a second test of the
@@ -857,8 +883,13 @@ unsafe fn list_avx512<C: Copy>(
             let it = _mm512_maskz_loadu_epi64(block, items.add(j).cast());
             let leaf = _mm512_test_epi64_mask(w, flag);
             let varying = others(leaf, block);
-            // Odd dwords, the items' high halves, are the carries: `low ? w : it`.
-            let entries: __m512i = _mm512_ternarylogic_epi64::<0xCA>(low, w, it);
+            // Odd dwords, the items' high halves, are the carries: `low ? refs : it`.
+            let refs = if INLINE {
+                _mm512_cvtepu32_epi64(_mm256_maskz_loadu_epi32(block, stops.add(j).cast()))
+            } else {
+                w
+            };
+            let entries: __m512i = _mm512_ternarylogic_epi64::<0xCA>(low, refs, it);
             _mm512_storeu_si512(
                 leaves.add(n_leaves).cast(),
                 _mm512_maskz_compress_epi64(leaf, entries),
@@ -890,6 +921,7 @@ mod tests {
 
     type List = unsafe fn(
         *const u64,
+        *const u32,
         *const Item<Handle>,
         usize,
         *mut Item<Handle>,
@@ -925,10 +957,12 @@ mod tests {
         let written = n_leaves + count + 1 + slack;
         let mut leaves = vec![guard; written + 8];
         let mut listed = vec![GUARD; n + slack + 8];
+        let stops: Vec<u32> = (0..n).map(|j| !(j as u32)).collect();
         // SAFETY: the buffers are sized as `list` requires, and a handle is 4 bytes.
         let (end, n_listed) = unsafe {
             f(
                 words.as_ptr(),
+                stops.as_ptr(),
                 items.as_ptr(),
                 n,
                 leaves.as_mut_ptr(),
@@ -952,7 +986,8 @@ mod tests {
 
     #[test]
     fn listed_leaves_stay_within_the_promised_room() {
-        check_lists(None);
+        check_lists::<false>(None);
+        check_lists::<true>(None);
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -964,10 +999,11 @@ mod tests {
         {
             return;
         }
-        check_lists(Some(super::list_avx512::<Handle>));
+        check_lists::<false>(Some(super::list_avx512::<Handle, false>));
+        check_lists::<true>(Some(super::list_avx512::<Handle, true>));
     }
 
-    fn check_lists(compressed: Option<List>) {
+    fn check_lists<const INLINE: bool>(compressed: Option<List>) {
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
         let mut next = move || {
             state ^= state << 13;
@@ -995,7 +1031,15 @@ mod tests {
                     })
                     .collect();
                 let start = (next() % 9) as usize;
-                let a = lists(&words, &items, start, list_scalar::<Handle>, 0);
+                let a = lists(&words, &items, start, list_scalar::<Handle, INLINE>, 0);
+                let expected = words
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, w)| *w & FLAG_LEAF != 0)
+                    .map(|(j, w)| (if INLINE { !(j as u32) } else { *w as u32 }, items[j].carry));
+                for (entry, (node, carry)) in a.leaves[start..a.n_leaves].iter().zip(expected) {
+                    assert_eq!((entry.node, entry.carry), (node, carry));
+                }
                 let Some(f) = compressed else { continue };
                 // The direct call needs AVX-512's slack even when this build's
                 // native level does not use compression (for example x86-64-v3).

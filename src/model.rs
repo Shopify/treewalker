@@ -6,9 +6,9 @@
 //!
 //! Loading decodes each tree into packed nodes ([`crate::load::parse::decoded`]) and
 //! writes the prediction layout from them ([`crate::load::layout`]). Production keeps
-//! the layout, the categorical splits' lists, the trees and the varying predicates.
-//! With the `research` feature, the layout's build also writes each node as a parsed
-//! [`Node`], kept for introspection and the full walk.
+//! the layout, the trees and the varying predicates. With the `research` feature, the
+//! layout's build also writes each node as a parsed [`Node`], and the categorical
+//! splits' lists are kept, for introspection, the full walk and research's scans.
 //!
 //! # Node layout (24 bytes, fall-through)
 //!
@@ -312,13 +312,13 @@ pub(crate) fn category_list(categories: &[u32], offset: u32) -> &[u32] {
 pub struct Tree {
     /// Index of this tree's root in the parsed nodes and in the layout.
     #[cfg_attr(
-        not(feature = "research"),
+        not(any(feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "read through the research introspection")
     )]
     pub node_start: u32,
     /// Total nodes (internal + leaves) in this tree.
     #[cfg_attr(
-        not(feature = "research"),
+        not(any(feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "read through the research introspection")
     )]
     pub node_count: u32,
@@ -328,7 +328,7 @@ pub struct Tree {
     /// into earlier regions. Nodes hold absolute offsets (in `Node.value`), not this
     /// field. Retained for diagnostics and memory accounting.
     #[cfg_attr(
-        not(feature = "research"),
+        not(any(feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "read through the research introspection")
     )]
     pub category_start: u32,
@@ -420,6 +420,7 @@ pub(crate) struct Model {
     pub(crate) trees: Vec<Tree>,
     pub(crate) config: WalkerConfig,
     /// The categorical splits' lists: each its length, then its sorted categories.
+    /// Empty in production, which frees them once loaded; research and the tests read them.
     pub(crate) categories: Vec<u32>,
     pub(crate) varying_predicates: Vec<VaryingPredicate>,
     /// Each varying feature's predicates, and the categorical ones' left regions.
@@ -436,8 +437,6 @@ pub(crate) struct Model {
     pub(crate) steps: crate::rules::Steps,
     /// How the leaf values are summed exactly.
     pub(crate) plan: Plan,
-    /// The kernel's nodes, bins, pooled regions and leaf values, the trees' nodes in
-    /// input order and their leaf values in tree order.
     pub(crate) layout: crate::load::layout::Layout,
     /// What each tree's passes need of a predictor's scratch.
     pub(crate) needs: Vec<crate::load::layout::Need>,

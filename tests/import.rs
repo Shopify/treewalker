@@ -135,7 +135,7 @@ fn leaves_past_the_126_bit_rule_use_the_wide_layout() {
     )
     .unwrap();
     // The wide accumulator's leaf table holds each leaf's first slot and three
-    // digits, 16 bytes, as an i128 leaf takes.
+    // digits: 16 bytes per leaf.
     let leaves = forest.nodes().iter().filter(|n| n.is_leaf()).count();
     assert_eq!(forest.layout_stats().leaf_bytes, 16 * leaves);
     let data = values("data.bin");
@@ -858,14 +858,14 @@ fn input_caps_are_options() {
     ));
     // A split on 41 categories with missing sent left takes, in its one chain, a
     // default rank, the bounds of its 43 codes' exceptions (the categories, no
-    // category and missing), 44 of 4 bytes, and 42 exceptions of 8 bytes: 516 bytes.
+    // category and missing), 44 of 4 bytes, and 42 exceptions of 6 bytes: 432 bytes.
     let mut v = simd_json::to_owned_value(&mut json.clone()).unwrap();
     v["trees"][0]["nodes"][0]["category_list"] =
         Value::Array(Box::new((0..=40).map(Value::from).collect()));
     let pooled = simd_json::to_vec(&v).unwrap();
     assert!(with(defaults, &pooled, json_format).is_ok());
     let capped = LoadOptions {
-        max_rank_table_bytes: 4 + 4 * 44 + 8 * 42 - 1,
+        max_rank_table_bytes: 4 + 4 * 44 + 6 * 42 - 1,
         ..defaults
     };
     assert!(limit(capped, &pooled, json_format));
@@ -898,4 +898,177 @@ fn input_caps_are_options() {
         Err(LoadError::Limit(msg)) => assert!(msg.starts_with("JSON nesting exceeds 1"), "{msg}"),
         other => panic!("{other:?}"),
     }
+}
+
+/// The deep decoded comparison covers every fixture; one fixture suffices to
+/// check format dispatch through paths, bytes and readers into prediction.
+#[test]
+fn lightgbm_format_paths_predict_same_bits() {
+    let name = "lightgbm/category_words.txt";
+    let text = bytes(name);
+    for forest in [
+        Forest::load(fixtures::path(name), fixtures::path("walker_config.json")),
+        load(name, ModelFormat::LightGbmText, 128),
+        Forest::from_reader(
+            Cursor::new(&text),
+            ModelFormat::LightGbmText,
+            config(128),
+            &LoadOptions::default(),
+        ),
+        load(
+            "lightgbm/category_words.bin",
+            ModelFormat::TreeliteBinaryV4,
+            128,
+        ),
+    ] {
+        let mut output = [0.0];
+        forest
+            .unwrap()
+            .predictor()
+            .predict_group(&[f64::NAN, 64.5], &mut output);
+        assert_eq!(output[0].to_bits(), 4.0f64.to_bits(), "{name}");
+    }
+}
+
+#[test]
+fn lightgbm_rejects_unsupported_malformed_and_capped_inputs() {
+    let original = String::from_utf8(bytes("lightgbm/missing_types.txt")).unwrap();
+    let parse = |text: &str, options: &LoadOptions| {
+        Forest::from_bytes(
+            text.as_bytes(),
+            ModelFormat::LightGbmText,
+            config(128),
+            options,
+        )
+    };
+    let defaults = LoadOptions::default();
+    for (old, new) in [
+        ("objective=regression", "objective=multiclass num_class:2"),
+        (
+            "objective=regression",
+            "objective=multiclassova num_class:2 sigmoid:1",
+        ),
+        ("objective=regression", "objective=regression sqrt"),
+        ("objective=regression", "objective=poisson"),
+        ("objective=regression", "objective=gamma"),
+        ("objective=regression", "objective=tweedie"),
+        ("objective=regression", "objective=cross_entropy_lambda"),
+        ("objective=regression", "objective=unknown"),
+        ("objective=regression", "objective=binary sigmoid:0"),
+        ("objective=regression", "objective=binary sigmoid:1e40"),
+        ("objective=regression", "objective=binary sigmoid:1e-50"),
+        ("num_class=1", "num_class=2"),
+        ("num_tree_per_iteration=1", "num_tree_per_iteration=2"),
+        ("num_cat=0", "num_cat=0\nis_linear=1"),
+    ] {
+        assert!(
+            matches!(
+                parse(&original.replace(old, new), &defaults),
+                Err(LoadError::Unsupported(_))
+            ),
+            "{new}"
+        );
+    }
+    for (old, new) in [
+        ("num_leaves=4", "num_leaves=0"),
+        ("num_cat=0", "num_cat=-1"),
+        ("num_cat=0", "num_cat=0\nnum_cat=0"),
+        ("threshold=0.5 -0.5 1", "threshold=garbage"),
+        ("left_child=1 -1 -3", "left_child=999 -1 -3"),
+        ("left_child=1 -1 -3", "left_child=-2147483648 -1 -3"),
+        ("left_child=1 -1 -3", "left_child=0 -1 -3"),
+        ("left_child=1 -1 -3", "left_child=2 -1 -3"),
+        ("split_feature=0 1 0", "split_feature=0 2 0"),
+        ("internal_count=31 7 24", "internal_count=-1 7 24"),
+        ("decision_type=0 2 4\n", ""),
+        ("leaf_count=0 7 11 13\n", ""),
+        ("internal_count=31 7 24\n", ""),
+        ("objective=regression", "objective=binary"),
+        ("objective=regression", "objective="),
+        ("num_class=1", "not a field"),
+    ] {
+        assert!(
+            matches!(
+                parse(&original.replace(old, new), &defaults),
+                Err(LoadError::MalformedModel(_))
+            ),
+            "{new}"
+        );
+    }
+    // Every line boundary before the first complete tree is truncated.
+    for (end, _) in original[..original.find("leaf_value=").unwrap()].match_indices('\n') {
+        assert!(
+            parse(&original[..end], &defaults).is_err(),
+            "accepted truncation {end}"
+        );
+    }
+    let n = original.len() as u64;
+    assert!(
+        parse(
+            &original,
+            &LoadOptions {
+                max_json_bytes: n,
+                ..defaults
+            }
+        )
+        .is_ok()
+    );
+    assert!(matches!(
+        parse(
+            &original,
+            &LoadOptions {
+                max_json_bytes: n - 1,
+                ..defaults
+            }
+        ),
+        Err(LoadError::Limit(_))
+    ));
+    assert!(matches!(
+        parse(
+            &original,
+            &LoadOptions {
+                max_binary_array_bytes: 8,
+                ..defaults
+            }
+        ),
+        Err(LoadError::Limit(_))
+    ));
+    let cat = String::from_utf8(bytes("lightgbm/category_words.txt")).unwrap();
+    for (old, new) in [
+        ("cat_boundaries=0 3 7", "cat_boundaries=0 7 3"),
+        ("threshold=0 1", "threshold=0 2"),
+        ("threshold=0 1", "threshold=0 NaN"),
+        ("threshold=0 1", "threshold=0 0"),
+    ] {
+        assert!(
+            matches!(
+                parse(&cat.replace(old, new), &defaults),
+                Err(LoadError::MalformedModel(_))
+            ),
+            "{new}"
+        );
+    }
+    // Words with every bit set expand eleven bytes into 32 categories: four such
+    // trees exceed half the text cap together, though each is within it.
+    let dense = cat.replace(
+        "cat_threshold=2147483650 2147483905 2147483649 1 4 2 8",
+        &format!("cat_threshold={}", ["4294967295"; 7].join(" ")),
+    );
+    let (head, tree) = dense.split_once("Tree=0").unwrap();
+    let tree = tree.trim_end().strip_suffix("end of trees").unwrap();
+    let trees = (0..4)
+        .map(|i| format!("Tree={i}{tree}"))
+        .collect::<Vec<_>>();
+    let four = format!("{head}{}end of trees\n", trees.concat());
+    let entries = 4 * 7 * 32;
+    assert!(four.len() < 2 * entries);
+    let options = |max_json_bytes| LoadOptions {
+        max_json_bytes: max_json_bytes as u64,
+        ..defaults
+    };
+    assert!(parse(&four, &options(2 * entries)).is_ok());
+    assert!(matches!(
+        parse(&four, &options(2 * entries - 1)),
+        Err(LoadError::Limit(m)) if m.contains("categories")
+    ));
 }

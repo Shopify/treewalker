@@ -43,7 +43,9 @@ lane_native() {
   step 1 fmt cargo fmt --all --check
   step 2 clippy cargo clippy --workspace --all-targets -- -D warnings
   step 3 clippy-research cargo clippy --workspace --all-targets --features treewalker-bench/research -- -D warnings
+  step 45 clippy-layout-file-production cargo clippy -p treewalker-gbdt --lib --features layout-file -- -D warnings
   step 4 test cargo test --workspace
+  step 46 test-layout-file-production cargo test --release --manifest-path experiments/layout-file/Cargo.toml --locked
   [ "$MODE" = full ] || return 0
   step 5 test-release cargo test --release --features research
   step 6 test-bench cargo test -p treewalker-bench

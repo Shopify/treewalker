@@ -1,5 +1,5 @@
 //! The prediction layout, built at load from the decoded forest: integer bins per
-//! slot, 16-byte pre-oriented nodes and the leaf-value table.
+//! slot, 16-byte pre-oriented nodes and, for Wide plans, a leaf-value table.
 //!
 //! Every split is one test, `bin[slot] <= k`: heavy when it holds. A slot is a chain
 //! of nested sets over its feature's values, and a row's bin in it is its rank, the
@@ -15,7 +15,7 @@
 //! too, so tree starts and prefix groups index both; one dummy node follows the last
 //! tree. Tree order is the order of the tree starts, so a chunk's trees need not be
 //! adjacent: a group reaches each node at most once, through one path per tree. The
-//! leaf values are in tree order. A node is two words:
+//! Wide leaf values are in tree order. Splits and Wide leaves use two words:
 //!
 //! ```text
 //! Word 0:
@@ -31,6 +31,27 @@
 //!          mask, 2i + 1 when that is the left side and 2i + 2 when it is the right
 //!   63     unused
 //! ```
+//!
+//! Fixed leaves have word 0 = 0 and carry their packed value entirely in word 1:
+//!
+//! ```text
+//! Word 0: 0 (bound 0, shift 0, bin slot 0)
+//! Word 1:
+//!   0-6    shift, 0..=124
+//!   7      0
+//!   8-31   signed odd significand's low 24 bits
+//!   32     leaf flag, 1
+//!   33-62  signed odd significand's remaining 30 bits (sign at 62)
+//!   63     sign extension
+//! ```
+//!
+//! That is [`FixedLeaf`]'s packed integer, significand << 8 | shift, with a gap
+//! opened at the leaf flag; removing the gap restores it exactly. Every leaf's slot
+//! is 0, as the lanes evaluate a leaf's test before its flag, and no walk follows a
+//! leaf's low word as a link. A Fixed leaf's bits 33-62 are not a mask field, so
+//! resolve selects the all-rows mask for it, and its leaf entry carries the stop's
+//! link, through which the leaf pass reads word 1. Constant walks decode word 1
+//! directly. Wide leaves keep their table indices.
 //!
 //! What bounds each field: links and leaf indices are 32-bit, and a model has at
 //! most [`MAX_NODES`], 2^28 - 1, nodes with the dummy, a pool below 4 GiB, on every
@@ -112,8 +133,10 @@
 //! code of each heavy set, so the tables grow with the model's lists, not with its
 //! codes times its chains. A bins buffer holds the defaults and, after the slots,
 //! each categorical feature's held code, whose exceptions its chain slots hold; a
-//! fill restores the held code's exceptions and writes the new code's. The tables
-//! take at most [`crate::LoadOptions::max_rank_table_bytes`] in all.
+//! fill restores the held code's exceptions and writes the new code's. Slots are
+//! feature-relative, separate from the words, 16 bits each unless a feature needs
+//! more than 65,536 slots, when every slot is 32 bits. Restores read only the slots.
+//! The tables take at most [`crate::LoadOptions::max_rank_table_bytes`] in all.
 //!
 //! # Packed fields
 //!
@@ -141,6 +164,9 @@
 
 mod build;
 mod chains;
+mod exceptions;
+#[cfg(feature = "layout-file")]
+mod layout_file;
 mod masks;
 #[cfg(test)]
 mod tests;
@@ -149,8 +175,23 @@ use std::hint::select_unpredictable;
 use std::ops::Range;
 
 use crate::LoadError;
-use crate::exact::WideLeaf;
+use crate::exact::{FixedLeaf, WideLeaf};
 use crate::model::category;
+
+#[cfg(all(feature = "layout-file", unix, target_pointer_width = "64"))]
+use crate::layout_file::storage::Storage as Array;
+use exceptions::ExceptionSlots;
+#[cfg(not(all(feature = "layout-file", unix, target_pointer_width = "64")))]
+type Array<T> = Vec<T>;
+
+#[cfg(all(feature = "layout-file", unix, target_pointer_width = "64"))]
+fn array<T: crate::layout_file::codec::Pod>(values: Vec<T>) -> Array<T> {
+    values.into()
+}
+#[cfg(not(all(feature = "layout-file", unix, target_pointer_width = "64")))]
+const fn array<T>(values: Vec<T>) -> Array<T> {
+    values
+}
 
 pub(crate) use build::{Built, Input};
 pub(crate) use masks::{ChainPoint, MaskChain, MaskFeature, MaskPlan};
@@ -248,7 +289,7 @@ pub(crate) const MASK_SHIFT: u32 = 33;
 pub(crate) const MASK_BITS: u32 = 30;
 pub(crate) const MASK_FIELD: u64 = (1 << MASK_BITS) - 1;
 /// The bits of word 1 that stop a walk at varying splits: the leaf flag and the
-/// mask field. Bit 63 stays clear: a test of word 1's top 32 bits would compile to
+/// mask field. Splits keep bit 63 clear: a test of word 1's top 32 bits would compile to
 /// a shift and a compare rather than one AArch64 logical immediate.
 pub(crate) const STOPS_VARYING: u64 = FLAG_LEAF | MASK_FIELD << MASK_SHIFT;
 /// Varying predicates a model may have: predicate i takes the fields 2i + 1 and
@@ -264,6 +305,25 @@ const _: () = assert!(MASK_SHIFT + MASK_BITS == 63);
 const _: () = assert!(2 * MAX_PREDICATES as u64 <= MASK_FIELD);
 
 impl LayoutNode {
+    /// A fixed leaf: slot and shift zero, with its value around word 1's leaf flag.
+    pub(crate) const fn fixed(value: FixedLeaf) -> Self {
+        let bits = value.0 as u64;
+        Self {
+            w0: 0,
+            w1: (bits & CHILD_MASK) | ((bits & !CHILD_MASK) << 1) | FLAG_LEAF,
+        }
+    }
+
+    /// Decode a fixed leaf's word 1, also returned directly by constant walks.
+    #[expect(
+        clippy::inline_always,
+        reason = "the leaf pass must decode without a call"
+    )]
+    #[inline(always)]
+    pub(crate) const fn fixed_value(word: u64) -> FixedLeaf {
+        FixedLeaf(((word as i64 >> 1) & !(CHILD_MASK as i64)) | (word & CHILD_MASK) as i64)
+    }
+
     /// The dummy at `link`: a numeric split on slot 0 whose bound is 0, so that it
     /// always takes its light child, itself (the module documentation).
     const fn dummy(link: u32) -> Self {
@@ -273,14 +333,15 @@ impl LayoutNode {
         }
     }
 
-    /// The light child's link; a leaf's leaf-value index.
+    /// The light child's link; a Wide leaf's table index (not meaningful for Fixed leaves).
     #[inline]
     pub(crate) const fn child(self) -> u32 {
         (self.w1 & CHILD_MASK) as u32
     }
 
-    /// The mask field: 0 for leaves and constant splits, else the index of the
+    /// The mask field: 0 for Wide leaves and constant splits, else the index of the
     /// heavy side's mask, `2i + 1` (left) or `2i + 2` (right) for predicate `i`.
+    /// Fixed leaves carry value bits here, and resolve selects mask 0 for them.
     #[cfg(test)]
     #[inline]
     pub(crate) const fn mask_field(self) -> usize {
@@ -304,7 +365,7 @@ impl LayoutNode {
         !self.is_leaf() && self.mask_field() != 0
     }
 
-    /// Word 0's low 32 bits: a split's bound or a leaf's leaf-value index.
+    /// Word 0's low 32 bits: a split's bound, Wide leaf's table index, or Fixed leaf's 0.
     #[inline]
     pub(crate) const fn payload(self) -> u32 {
         (self.w0 & PAYLOAD_MASK) as u32
@@ -345,7 +406,7 @@ const SMALL_CATEGORIES: u32 = u64::BITS;
 
 /// How a feature's input value becomes a categorical code: its codebook, at
 /// `start..start + len` in [`BinMap::books`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CategoryCodes {
     start: u32,
     len: u32,
@@ -423,7 +484,7 @@ impl CategoryCodes {
 
 /// A categorical feature's slots: how its values become codes, and where each code's
 /// words of rank fields differ from no category's, its exceptions.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CategoryBins {
     pub(crate) codes: CategoryCodes,
     /// Its first slot, and its slots ([`Self::slots`]), each a word of rank fields.
@@ -472,7 +533,10 @@ pub(crate) struct BinMap {
     /// slot order, code `e`'s at `offsets[e]..offsets[e + 1]` from its feature's
     /// offsets.
     pub(crate) offsets: Vec<u32>,
-    pub(crate) exceptions: Vec<[u32; 2]>,
+    /// Feature-relative slots, separate so a restore need not read the words.
+    exception_slots: ExceptionSlots,
+    /// The word paired with each exception slot.
+    exception_words: Array<u32>,
     /// Whether some split shifts its word: a word holds two rank fields or more.
     shifts: bool,
     /// The categorical features.
@@ -484,6 +548,10 @@ pub(crate) struct BinMap {
 
 /// The dummy's slot.
 const DUMMY_SLOT: usize = 0;
+
+/// Restore a feature's slots in one copy from the defaults, rather than one
+/// exception at a time, when its held code has more exceptions than its slots / this.
+const RESTORE_DENSITY: usize = 8;
 
 impl BinMap {
     /// Slots in a bins buffer.
@@ -500,11 +568,21 @@ impl BinMap {
         bins
     }
 
-    /// Code `code`'s exceptions in the words of `c`.
     #[inline]
-    pub(crate) fn exceptions(&self, c: CategoryBins, code: u32) -> &[[u32; 2]] {
+    fn exception_range(&self, c: CategoryBins, code: u32) -> Range<usize> {
         let at = c.offsets + code as usize;
-        &self.exceptions[self.offsets[at] as usize..self.offsets[at + 1] as usize]
+        self.offsets[at] as usize..self.offsets[at + 1] as usize
+    }
+
+    /// Code `code`'s feature-relative slots and words.
+    #[inline]
+    pub(crate) fn exceptions(
+        &self,
+        c: CategoryBins,
+        code: u32,
+    ) -> impl ExactSizeIterator<Item = (usize, u32)> + '_ {
+        self.exception_range(c, code)
+            .map(move |i| (self.exception_slots.at(i), self.exception_words[i]))
     }
 
     /// Whether some split shifts its word, so that the walks shift.
@@ -517,15 +595,16 @@ impl BinMap {
     /// exception bounds and the exceptions.
     pub(crate) fn rank_table_bytes(&self) -> usize {
         size_of::<u32>() * (self.chain_slots() + self.offsets.len())
-            + size_of_val(self.exceptions.as_slice())
+            + self.exception_slots.bytes()
+            + size_of_val(self.exception_words.as_slice())
     }
 
     /// Code `code`'s words in the slots of `c`.
     #[cfg(test)]
     pub(crate) fn ranks_of(&self, c: CategoryBins, code: u32) -> Vec<u32> {
         let mut words = self.defaults[c.slot..c.slot + c.slots()].to_vec();
-        for &[s, w] in self.exceptions(c, code) {
-            words[s as usize - c.slot] = w;
+        for (s, w) in self.exceptions(c, code) {
+            words[s] = w;
         }
         words
     }
@@ -610,8 +689,7 @@ impl BinMap {
     /// with `F32`, else a float64 model: the constant features' slots, and with `all`
     /// the varying features' too, as a single row needs. Slots of features without
     /// splits are left as they are. A categorical feature's chain slots hold the
-    /// defaults but for its held code's exceptions, so it restores those and writes
-    /// its code's: work in the exceptions, not the words.
+    /// defaults but for its held code's exceptions.
     #[inline]
     pub(crate) fn fill_with<const F32: bool>(&self, row: &[f64], bins: &mut [u32], all: bool) {
         debug_assert_eq!(F32, self.f32);
@@ -636,16 +714,45 @@ impl BinMap {
             if let Some(c) = b.categories {
                 let code = c.codes.code::<F32>(&self.books, x);
                 let held = self.n_slots + c.held;
-                for &[s, _] in self.exceptions(c, bins[held]) {
-                    bins[s as usize] = self.defaults[s as usize];
+                if code == bins[held] {
+                    continue;
                 }
-                for &[s, word] in self.exceptions(c, code) {
-                    bins[s as usize] = word;
+                match &self.exception_slots {
+                    ExceptionSlots::Narrow(slots) => self.fill_category(slots, c, code, bins),
+                    ExceptionSlots::Wide(slots) => self.fill_category(slots, c, code, bins),
                 }
                 bins[held] = code;
             }
         }
         bins[DUMMY_SLOT] = u32::MAX;
+    }
+
+    /// Restore and apply with the model's slot width chosen outside both loops.
+    #[inline]
+    fn fill_category<S: Copy + Into<u32>>(
+        &self,
+        slots: &[S],
+        c: CategoryBins,
+        code: u32,
+        bins: &mut [u32],
+    ) {
+        let previous = self.exception_range(c, bins[self.n_slots + c.held]);
+        if previous.len() > c.slots() / RESTORE_DENSITY {
+            let range = c.slot..c.slot + c.slots();
+            bins[range.clone()].copy_from_slice(&self.defaults[range]);
+        } else {
+            for &s in &slots[previous] {
+                let slot = c.slot + s.into() as usize;
+                bins[slot] = self.defaults[slot];
+            }
+        }
+        let range = self.exception_range(c, code);
+        for (&s, &word) in slots[range.clone()]
+            .iter()
+            .zip(&self.exception_words[range])
+        {
+            bins[c.slot + s.into() as usize] = word;
+        }
     }
 }
 
@@ -665,29 +772,6 @@ fn count_below<const F32: bool>(thresholds: &[f64], x: f64) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// Leaf values
-// ---------------------------------------------------------------------------
-
-/// Leaf values by leaf-value index.
-#[derive(Clone, Debug)]
-pub(crate) enum LeafValues {
-    /// Values times 2^e for the model's [`crate::exact::Plan::Fixed`] scale e.
-    Fixed(Vec<i128>),
-    /// The values in the digits of the model's [`crate::exact::Plan::Wide`] accumulator.
-    Wide(Vec<WideLeaf>),
-}
-
-impl LeafValues {
-    #[cfg(test)]
-    pub(crate) const fn len(&self) -> usize {
-        match self {
-            Self::Fixed(values) => values.len(),
-            Self::Wide(values) => values.len(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
 
@@ -696,23 +780,25 @@ impl LeafValues {
 #[derive(Clone, Debug)]
 pub(crate) struct Layout {
     /// Every tree's nodes, in input order, then the dummy.
-    pub(crate) nodes: Vec<LayoutNode>,
+    pub(crate) nodes: Array<LayoutNode>,
     pub(crate) bins: BinMap,
-    pub(crate) leaves: LeafValues,
+    /// A Wide plan's leaf values, in tree order; empty for a Fixed plan, whose
+    /// values are in its leaf nodes.
+    pub(crate) leaves: Vec<WideLeaf>,
     /// Share of internal nodes that split on varying features.
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) varying_share: f64,
     /// The categorical features' distinct heavy sets, and the chains that cover them.
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) chain_sets: u32,
     #[cfg_attr(
-        not(any(test, feature = "research")),
+        not(any(test, feature = "research", feature = "layout-file")),
         expect(dead_code, reason = "for the research module's model statistics")
     )]
     pub(crate) chains: u32,
@@ -755,7 +841,7 @@ impl Layout {
     #[cfg(test)]
     pub(crate) fn empty() -> Self {
         Self {
-            nodes: vec![LayoutNode::dummy(0)],
+            nodes: array(vec![LayoutNode::dummy(0)]),
             bins: BinMap {
                 f32: false,
                 n_features: 0,
@@ -764,13 +850,14 @@ impl Layout {
                 books: Vec::new(),
                 defaults: vec![u32::MAX],
                 offsets: Vec::new(),
-                exceptions: Vec::new(),
+                exception_slots: ExceptionSlots::default(),
+                exception_words: array(Vec::new()),
                 shifts: false,
                 n_categorical: 0,
                 constant: Vec::new(),
                 varying: Vec::new(),
             },
-            leaves: LeafValues::Wide(Vec::new()),
+            leaves: Vec::new(),
             varying_share: 0.0,
             chain_sets: 0,
             chains: 0,

@@ -1,5 +1,71 @@
 # Changelog
 
+## Unreleased
+
+Loading a model with many categorical splits takes much less memory, and so does
+the loaded model. For a large model with many categorical splits, the heap's peak
+while loading from a file or a reader is 55% lower than 3.2.1's, and the loaded
+model's heap 52% lower, with loads 30% faster. The layout and the outputs are
+unchanged.
+
+### Layout files
+
+- Behind the `layout-file` feature, forests can save their built layout and load it
+  with validation, either into owned arrays or, on 64-bit Unix, from an immutable
+  file mapping whose large arrays share file-backed pages across processes.
+  Files are production-only; research builds return `LoadError::Unsupported` and
+  rebuild from source. A build ID covering `build.rs` and `src/`, in addition to
+  crate/target fields, rejects layouts from different source inputs. Validation
+  checks kernel safety, not prediction agreement, and takes O(R log R) work plus
+  temporary heap beyond the stored arrays. Production API tests run in an
+  independent crate, including corruptions with recomputed checksums.
+
+### Memory
+
+- The rank tables' exceptions keep their slots relative to their feature, separate
+  from their words: entries take 6 bytes rather than 8, or 8 throughout when a
+  feature has more than 65,536 slots.
+- The rank tables' exceptions are counted, then written in place in a table of
+  their exact size, so the build no longer holds every (code, chain, rank) triple
+  and a sorted copy, and the loaded model keeps no spare capacity. The cap on the
+  rank tables is checked before they grow.
+- A categorical feature's heavy sets hold each distinct category list's codes once,
+  shared by its sets with and without missing, listed and complemented, rather
+  than every split side's list and every set's.
+- The build frees its categorical scratch sooner: the heavy sets are trimmed, the
+  split sides recomputed rather than stored, the distinct categories deduplicated
+  as they grow, and the splits' words allocated for the pass that writes them.
+- The decoders intern category lists by their hash and pool offset rather than by
+  a copy of each list.
+- Production frees the category lists once a model is loaded: it tests categorical
+  splits through the rank tables only. Research and the tests keep them.
+- A fixed-point plan's leaf values are packed as an odd significand and a shift
+  and held in their leaf nodes rather than in a table beside them: a leaf takes
+  its node's 16 bytes and nothing more. Its 128-bit value is rebuilt exactly where
+  it is added. Wide plans keep their table.
+
+### Prediction
+
+- A categorical feature's rank slots are filled only when a row's or a group's code
+  differs from the last one's, and a code with many exceptions is undone by copying
+  the feature's default words back rather than one exception at a time. Requests
+  that repeat popular categories of a model with many categorical splits run 15 to
+  20% faster.
+
+### Load time
+
+- Where a categorical feature's categories are dense enough, the build looks their
+  codes up by table and collects the distinct categories in bits, rather than by
+  binary search and a sort of every split's list.
+
+### Formats
+
+- Load native LightGBM text models directly with `.txt` paths or
+  `ModelFormat::LightGbmText`, without exporting through Treelite. The reader
+  matches Treelite 4.7.2's frontend, including its NaN-as-zero routing for None
+  and Zero missing types, rather than LightGBM's zero-as-missing policy. Linear
+  trees and objectives outside the supported identity/sigmoid subset are rejected.
+
 ## 3.2.2
 
 3.2.2 closes a denial of service in the loader found by a security review: a model

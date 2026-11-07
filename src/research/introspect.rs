@@ -4,7 +4,6 @@
 use super::{Node, ThresholdType, Tree};
 use crate::exact::Plan;
 use crate::forest::Forest;
-use crate::load::layout::LeafValues;
 use crate::rules::machine;
 use crate::rules::{self, Tuning};
 
@@ -28,7 +27,7 @@ pub struct LayoutStats {
     pub vector_bits: usize,
     /// Bytes of the node pool, 16 per node including the dummy.
     pub pool_bytes: usize,
-    /// Bytes of the leaf-value table.
+    /// Bytes of the leaf-value table: zero for Fixed plans, whose values live in nodes.
     pub leaf_bytes: usize,
     /// Slots of a wide accumulator, 8 bytes each, or 0 when the model's sums fit the
     /// 126-bit rule and take an `i128`.
@@ -132,10 +131,7 @@ impl Forest {
             registers: machine::GENERAL_REGISTERS,
             vector_bits: machine::VECTOR_BITS,
             pool_bytes: size_of_val(layout.nodes.as_slice()),
-            leaf_bytes: match &layout.leaves {
-                LeafValues::Fixed(v) => size_of_val(v.as_slice()),
-                LeafValues::Wide(v) => size_of_val(v.as_slice()),
-            },
+            leaf_bytes: size_of_val(layout.leaves.as_slice()),
             wide_limbs: match model.plan {
                 Plan::Fixed(_) => 0,
                 Plan::Wide(wide) => wide.limbs(),

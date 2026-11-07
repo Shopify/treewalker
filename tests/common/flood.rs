@@ -68,3 +68,11 @@ pub fn colliding_node_ids(n: usize) -> Vec<u64> {
     }
     out
 }
+
+/// Sorted lists whose fixed Fx slice hash agreed on little-endian hosts. Its last
+/// eight bytes XORed with seed 0x13198a2e03707344 to zero, so multiply_mix returned
+/// zero whatever the first two categories were; the length was the same too.
+pub fn colliding_category_lists(n: usize) -> impl ExactSizeIterator<Item = [u32; 4]> {
+    assert!(n <= 0x0370_7344 / 2);
+    (0..n as u32).map(|i| [2 * i, 2 * i + 1, 0x0370_7344, 0x1319_8a2e])
+}

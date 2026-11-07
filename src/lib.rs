@@ -81,6 +81,11 @@
 //! The `research` feature adds the `research` module: runtime ablations, work
 //! counters and phase times, the stages of a prediction, a reference full walk and
 //! model introspection. Serving needs none of it.
+//!
+//! The opt-in `layout-file` feature adds experimental, versioned layout files through
+//! `Forest::save_layout` and `Forest::load_layout`; 64-bit Unix also supports
+//! `unsafe Forest::map_layout` for shared file-backed arrays. The default
+//! build keeps its ordinary owned representation.
 
 #![deny(clippy::undocumented_unsafe_blocks)]
 
@@ -101,6 +106,8 @@ mod config;
 mod error;
 mod exact;
 mod forest;
+#[cfg(feature = "layout-file")]
+mod layout_file;
 
 mod load;
 mod model;

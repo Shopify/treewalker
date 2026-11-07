@@ -1,4 +1,4 @@
-//! The checks both decoders share: the model's metadata against what the library
+//! The checks the decoders share: the model's metadata against what the library
 //! supports, thresholds and leaves, and the input caps.
 //!
 //! The only fixed bounds on untrusted input are the caps of
@@ -7,6 +7,19 @@
 
 use crate::model::{Output, Postprocessor, ThresholdType};
 use crate::{LoadError, WalkerConfig};
+use std::io::Read;
+
+/// Read a materialized model document under the shared text/JSON input cap.
+pub(super) fn document(reader: impl Read, max: u64, what: &str) -> Result<Vec<u8>, LoadError> {
+    let mut bytes = Vec::new();
+    reader.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
+        return Err(LoadError::Limit(format!(
+            "{what} exceeds {max} bytes (LoadOptions::max_json_bytes); use binary for large models"
+        )));
+    }
+    Ok(bytes)
+}
 
 /// What a decoder hands to the build: the decoded forest, the precision its splits
 /// compare in and the output transform.
@@ -16,7 +29,7 @@ pub struct ParsedModel {
     pub output: Output,
 }
 
-/// The model-level fields both formats carry, which [`Self::validate`] checks.
+/// The model-level fields the decoders supply, which [`Self::validate`] checks.
 pub(super) struct Metadata {
     pub num_tree: usize,
     pub num_feature: i64,

@@ -1,11 +1,34 @@
 //! The leaf pass: each leaf entry's value added to its rows' runs in the difference
-//! arrays.
+//! arrays. A Fixed entry carries its node's link; a Wide entry keeps its table index.
 
 use super::isa::Isa;
 use super::mask::Mask;
 use super::resolve::Carrier;
 use super::walk::Item;
 use crate::exact::RunSink;
+use crate::load::layout::{LayoutNode, node_index};
+
+/// Values addressed by a leaf entry: a Wide table index or a Fixed node link.
+pub(super) trait Values<T> {
+    fn at(&self, leaf: u32) -> T;
+}
+
+impl<T, V: Copy + Into<T>> Values<T> for [V] {
+    #[inline(always)]
+    fn at(&self, leaf: u32) -> T {
+        self[leaf as usize].into()
+    }
+}
+
+/// Fixed leaves read the word a walk has just loaded, not a separate value table.
+pub(super) struct InlineLeaves<'a>(pub(super) &'a [LayoutNode]);
+
+impl Values<i128> for InlineLeaves<'_> {
+    #[inline(always)]
+    fn at(&self, leaf: u32) -> i128 {
+        LayoutNode::fixed_value(self.0[node_index(leaf)].w1).into()
+    }
+}
 
 /// [`leaf_pass`] at level `X` ([`Isa`]): where the build dispatches, out of line,
 /// with the body compiled inside the level's trampoline; elsewhere inlined.
@@ -15,23 +38,24 @@ pub(super) fn leaf_pass_at<
     M: Mask,
     C: Carrier<M>,
     S: RunSink + ?Sized,
+    V: Values<S::Value> + ?Sized,
     const STATS: bool,
 >(
     entries: &[Item<C>],
     full: &[Item<C>],
     arena: &[M],
     u: usize,
-    values: &[S::Value],
+    values: &V,
     even: &mut S,
     odd: &mut S,
 ) -> u64 {
     if X::NATIVE {
-        return leaf_pass::<M, C, S, STATS>(entries, full, arena, u, values, even, odd);
+        return leaf_pass::<M, C, S, V, STATS>(entries, full, arena, u, values, even, odd);
     }
     X::with7(
         #[inline(always)]
         |entries, full, arena, u, values, even, odd| {
-            leaf_pass::<M, C, S, STATS>(entries, full, arena, u, values, even, odd)
+            leaf_pass::<M, C, S, V, STATS>(entries, full, arena, u, values, even, odd)
         },
         entries,
         full,
@@ -48,12 +72,18 @@ pub(super) fn leaf_pass_at<
 /// runs, alternating between the sinks `even` and `odd`; with `STATS`, returns the
 /// number of runs, a full entry being one. Arena masks have `u` units of `M`.
 #[cfg_attr(dispatch, inline(always))]
-pub(super) fn leaf_pass<M: Mask, C: Carrier<M>, S: RunSink + ?Sized, const STATS: bool>(
+pub(super) fn leaf_pass<
+    M: Mask,
+    C: Carrier<M>,
+    S: RunSink + ?Sized,
+    V: Values<S::Value> + ?Sized,
+    const STATS: bool,
+>(
     entries: &[Item<C>],
     full: &[Item<C>],
     arena: &[M],
     u: usize,
-    values: &[S::Value],
+    values: &V,
     even: &mut S,
     odd: &mut S,
 ) -> u64 {
@@ -76,24 +106,24 @@ pub(super) fn leaf_pass<M: Mask, C: Carrier<M>, S: RunSink + ?Sized, const STATS
 /// any, the sum is zero, and flushing it would add zeros, so neither runs. The
 /// others go two at a time.
 #[inline(always)]
-fn add_entries<M: Mask, C: Carrier<M>, S: RunSink + ?Sized>(
+fn add_entries<M: Mask, C: Carrier<M>, S: RunSink + ?Sized, V: Values<S::Value> + ?Sized>(
     entries: &[Item<C>],
     full: &[Item<C>],
     arena: &[M],
     u: usize,
-    values: &[S::Value],
+    values: &V,
     even: &mut S,
     odd: &mut S,
 ) {
     if !full.is_empty() {
         let mut sum = S::Sum::default();
-        even.add_all_of(&mut sum, full.iter().map(|e| values[e.node as usize]));
+        even.add_all_of(&mut sum, full.iter().map(|e| values.at(e.node)));
         even.flush(sum);
     }
     let mut pairs = entries.chunks_exact(2);
     for pair in &mut pairs {
         let (a, b) = (&pair[0], &pair[1]);
-        let (va, vb) = (values[a.node as usize], values[b.node as usize]);
+        let (va, vb) = (values.at(a.node), values.at(b.node));
         // SAFETY: a leaf entry's handle is a slot its passes wrote.
         unsafe {
             a.carry.add_runs(arena.as_ptr(), va, even, u);
@@ -101,7 +131,7 @@ fn add_entries<M: Mask, C: Carrier<M>, S: RunSink + ?Sized>(
         }
     }
     for e in pairs.remainder() {
-        let v = values[e.node as usize];
+        let v = values.at(e.node);
         // SAFETY: as above.
         unsafe { e.carry.add_runs(arena.as_ptr(), v, even, u) };
     }
