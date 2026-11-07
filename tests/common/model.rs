@@ -211,16 +211,6 @@ impl Model {
         v
     }
 
-    pub fn leaves(&self) -> impl Iterator<Item = f64> + '_ {
-        self.trees
-            .iter()
-            .flat_map(|t| &t.nodes)
-            .filter_map(|n| match *n {
-                Node::Leaf { value, .. } => Some(self.leaf(value)),
-                _ => None,
-            })
-    }
-
     /// Whether a threshold is infinite, which JSON cannot hold.
     pub fn has_infinite_threshold(&self) -> bool {
         self.trees

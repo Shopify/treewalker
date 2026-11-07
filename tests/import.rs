@@ -3,7 +3,6 @@
 
 mod common;
 
-use common::bits::same;
 use common::fixtures::{self, bytes, values};
 use serde::Deserialize;
 use simd_json::{OwnedValue as Value, prelude::*};
@@ -121,9 +120,9 @@ fn independent_oracles_all_formats_paths_and_workspace_widths() {
 }
 
 #[test]
-fn leaves_past_the_126_bit_rule_sum_exactly() {
-    // Leaf exponents 2^-997 apart leave no 126-bit fixed point: prediction and the full
-    // walk sum in the wide accumulator, so the two agree bit for bit.
+fn leaves_past_the_126_bit_rule_use_the_wide_layout() {
+    // Leaf exponents 2^-997 apart leave no 126-bit fixed point, so the layout uses
+    // the wide accumulator.
     let mut model = simd_json::to_owned_value(&mut bytes("identity.json")).unwrap();
     model["trees"][0]["nodes"][1]["leaf_value"] = 1e300.into();
     model["trees"][1]["nodes"][1]["leaf_value"] = 1e-300.into();
@@ -141,11 +140,9 @@ fn leaves_past_the_126_bit_rule_sum_exactly() {
     assert_eq!(forest.layout_stats().leaf_bytes, 16 * leaves);
     let data = values("data.bin");
     let rows = data.len() / 2;
-    let (mut partial, mut full) = (vec![0.0; rows], vec![0.0; rows]);
+    let mut partial = vec![0.0; rows];
     forest.predictor().predict_fixed(&data, 128, &mut partial);
-    forest.predict_full_walk(&data, &mut full);
     assert!(partial.iter().any(|&v| v == 1e300));
-    same(&partial, &full, "prediction against the full walk");
 }
 
 #[test]

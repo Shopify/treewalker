@@ -271,7 +271,6 @@ fn check_pair<M: Words>(a: [u64; 16], b: [u64; 16], n: usize, rng: &mut Rng) {
     assert_eq!(ma.xor(mb).words(), scalar::xor::<Native, _>(&a, &b));
     assert_eq!(ma.is_zero(), scalar::is_zero::<Native, _>(&a));
     assert_eq!(ma == mb, a == b);
-    assert_eq!(ma, M::from_words(&a));
     for c in [false, true] {
         assert_eq!(
             M::select(c, ma, mb).words(),

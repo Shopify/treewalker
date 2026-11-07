@@ -141,10 +141,7 @@ fn single_row_groups_skip_the_masked_paths_unless_their_constant_path_is_off() {
             masked.then_some("no group takes the masked path"),
             "{flag}"
         );
-        assert!(
-            signature(flag, &counted(&f, &rows, &[flag]), &facts),
-            "{flag}"
-        );
+        assert!(signature(flag, &counted(&f, &rows, &[flag])), "{flag}");
         if masked {
             assert_eq!(counted(&f, &rows, &[flag]), counted(&f, &rows, &[]));
             let spec = VariantSpec {
@@ -197,12 +194,8 @@ fn single_row_groups_skip_the_masked_paths_unless_their_constant_path_is_off() {
 fn two_identical_rows_show_every_path() {
     let f = fixture_forest(&[0]);
     let rows = [0.5, 1.0, 0.5, 1.0];
-    let facts = facts(&f, &rows);
     for flag in PATH_FLAGS {
-        assert!(
-            signature(flag, &counted(&f, &rows, &[flag]), &facts),
-            "{flag}"
-        );
+        assert!(signature(flag, &counted(&f, &rows, &[flag])), "{flag}");
     }
     // One row stopping at varying splits leaves a side of every varying event
     // empty.

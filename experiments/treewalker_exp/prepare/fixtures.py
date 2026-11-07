@@ -17,7 +17,6 @@ from .store import put_bytes, put_matrix, put_npy, rel
 # --- fixture cells ---------------------------------------------------------------------
 
 
-# Cells built from the import fixtures for runner coverage their shape lacks.
 # fallback_sums: identity.bin's model with leaves 1e300 and 1e-300, 2^-997 apart,
 # so no i128 fixed point holds both and it sums in the wide accumulator
 # (tests/import.rs builds the same model). wide_pieces: sigmoid_f64 over groups

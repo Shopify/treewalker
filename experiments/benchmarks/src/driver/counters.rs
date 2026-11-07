@@ -238,7 +238,7 @@ pub fn no_op(flag: &str, spec: &VariantSpec, facts: &Facts) -> Option<&'static s
 ///
 /// Judged by the path's own counters, never by totals differing from all-on: with
 /// two identical rows, exact and per-row accumulation both make 4 leaf adds.
-pub fn signature(flag: &str, v: &WorkCounters, _facts: &Facts) -> bool {
+pub fn signature(flag: &str, v: &WorkCounters) -> bool {
     match flag {
         // The event scans ran, and the precompute did not.
         "disable_varying_precompute" => {
@@ -342,7 +342,7 @@ pub(super) fn counters(
         for flag in &spec.runtime {
             let status = match no_op(flag, &spec, &facts) {
                 Some(why) => format!("no-op: {why}"),
-                None if signature(flag, &v, &facts) => "active".to_string(),
+                None if signature(flag, &v) => "active".to_string(),
                 None => {
                     failed[i] = true;
                     "failed: the counters do not show this flag's path".to_string()
