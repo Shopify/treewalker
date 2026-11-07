@@ -33,7 +33,7 @@ impl std::fmt::Debug for Forest {
 }
 
 impl Forest {
-    /// Load a supported Treelite `.bin` or `.json` model and its grouping
+    /// Load a supported Treelite `.bin` or `.json`, or LightGBM `.txt` model and its grouping
     /// configuration file, with the default [`LoadOptions`].
     ///
     /// The model format follows the file extension. Unsupported model semantics, such

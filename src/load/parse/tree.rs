@@ -1,6 +1,6 @@
-//! A tree as either decoder reads it, and its validation and heavy-first order.
+//! A tree as the decoders read it, and its validation and heavy-first order.
 //!
-//! Both the JSON and binary parsers convert framework-specific tree representations
+//! The parsers convert framework-specific tree representations
 //! into `TempNode` arrays, then call [`order_tree`], which validates each tree and
 //! adds it to the decoded forest in heavy-first preorder.
 
@@ -22,7 +22,7 @@ use crate::model::{
 
 /// Intermediate node representation before heavy-path reordering.
 ///
-/// Both parsers build a `Vec<TempNode>` per tree (preserving original tree
+/// The parsers build a `Vec<TempNode>` per tree (preserving original tree
 /// structure with left/right child indices), then [`order_tree`] adds it to the
 /// decoded forest in heavy-first preorder.
 pub struct TempNode {

@@ -1,0 +1,21 @@
+tree
+version=v4
+num_class=1
+num_tree_per_iteration=1
+max_feature_idx=1
+objective=regression
+Tree=0
+num_leaves=3
+num_cat=2
+split_feature=0 1
+threshold=0 1
+decision_type=7 11
+left_child=1 -1
+right_child=-3 -2
+leaf_value=1 -2 4
+leaf_count=3 5 7
+internal_count=15 8
+cat_boundaries=0 3 7
+cat_threshold=2147483650 2147483905 2147483649 1 4 2 8
+
+end of trees

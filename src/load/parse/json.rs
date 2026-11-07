@@ -100,14 +100,7 @@ pub(super) fn parse(
     options: &LoadOptions,
     choices: &Choices,
 ) -> Result<ParsedModel, LoadError> {
-    let mut bytes = Vec::new();
-    let max = options.max_json_bytes;
-    reader.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > max {
-        return Err(LoadError::Limit(format!(
-            "JSON input exceeds {max} bytes (LoadOptions::max_json_bytes); use binary for large models"
-        )));
-    }
+    let mut bytes = validation::document(reader, options.max_json_bytes, "JSON input")?;
     validation::validate_json_depth(&bytes, options.max_json_nesting)?;
     // The tape is the document as one flat array of tokens whose strings borrow the
     // input: no allocation per object or key.
