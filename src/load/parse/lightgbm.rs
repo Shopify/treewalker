@@ -60,12 +60,30 @@ fn array<T: FromStr>(
     options: &LoadOptions,
 ) -> Result<Vec<T>, LoadError> {
     let text = field(fields, key)?;
-    // Do not allocate from a declared count without its corresponding input.
-    if text.split_whitespace().count() != n {
-        return Err(malformed(format!("{key}: expected {n} entries")));
+    let expected = || malformed(format!("{key}: expected {n} entries"));
+    // A wrong count is malformed rather than over the cap, and rather than an
+    // invalid entry; only those errors count the entries separately.
+    let or_count = |error| {
+        if text.split_ascii_whitespace().count() == n {
+            error
+        } else {
+            expected()
+        }
+    };
+    cap(n, size_of::<T>(), options).map_err(or_count)?;
+    // Do not allocate from a declared count without its corresponding input: an
+    // entry and its separator take two bytes, but the last.
+    let mut values = Vec::with_capacity(n.min(text.len() / 2 + 1));
+    for entry in text.split_ascii_whitespace() {
+        if values.len() == n {
+            return Err(expected());
+        }
+        values.push(number(entry, key).map_err(or_count)?);
     }
-    cap(n, size_of::<T>(), options)?;
-    text.split_whitespace().map(|v| number(v, key)).collect()
+    if values.len() != n {
+        return Err(expected());
+    }
+    Ok(values)
 }
 
 pub(super) fn parse(
@@ -395,6 +413,25 @@ mod tests {
             array::<f64>(&fields, "threshold", 1, &options),
             Err(LoadError::Limit(_))
         ));
+    }
+
+    #[test]
+    fn a_wrong_count_is_malformed_before_an_invalid_entry() {
+        let mut fields = Fields::default();
+        fields.insert("threshold", "0.5 x");
+        let options = LoadOptions::default();
+        let message = |n| match array::<f64>(&fields, "threshold", n, &options) {
+            Err(LoadError::MalformedModel(message)) => message,
+            other => panic!("{other:?}"),
+        };
+        for n in [1, 3] {
+            assert!(message(n).contains(&format!("expected {n} entries")));
+        }
+        assert!(message(2).contains("invalid threshold"));
+        // Any ASCII whitespace separates entries.
+        fields.insert("threshold", " 0.5\t1 \x0c2 ");
+        let values = array::<f64>(&fields, "threshold", 3, &options).unwrap();
+        assert_eq!(values, [0.5, 1.0, 2.0]);
     }
 
     fn same(a: &ParsedModel, b: &ParsedModel) {
