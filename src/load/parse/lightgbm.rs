@@ -209,6 +209,21 @@ fn objective(text: Option<&str>) -> Result<(&'static str, f64), LoadError> {
     }
 }
 
+/// A word's set bits, lowest first: a word costs its categories, not its 32 bits.
+struct SetBits(u32);
+
+impl Iterator for SetBits {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        (self.0 != 0).then(|| {
+            let bit = self.0.trailing_zeros();
+            self.0 &= self.0 - 1;
+            bit
+        })
+    }
+}
+
 /// `category_entries` counts the model's categories so far: a bitset word of
 /// eleven bytes expands to 32 of them, so the text cap alone does not bound them.
 fn process_tree(
@@ -324,11 +339,10 @@ fn process_tree(
             if range.len() as u64 > (u64::from(u32::MAX) + 1) / 32 {
                 return Err(malformed("category ID exceeds u32"));
             }
-            let categories = range.iter().enumerate().flat_map(|(word, &bits)| {
-                (0..32).filter_map(move |bit| {
-                    (bits & (1 << bit) != 0).then_some((word * 32 + bit) as u32)
-                })
-            });
+            let categories = range
+                .iter()
+                .enumerate()
+                .flat_map(|(word, &bits)| SetBits(bits).map(move |bit| (word * 32) as u32 + bit));
             let (value, inline) = encode_categories(categories, ctx)?;
             (value, inline, false)
         } else {
