@@ -96,13 +96,15 @@ TreeWalker predictions are bitwise identical through either route.
   trees are supported. Each tree needs `num_cat`, `decision_type`, `leaf_count`
   and `internal_count`, as LightGBM writes them.
 
-The text document is materialized under `max_json_bytes` (64 MiB by default),
-which bounds text input as well as JSON. `max_binary_array_bytes` also bounds its
-decoded arrays, tree count and per-tree nodes before allocation. Its categories,
+The text is read and decoded one tree at a time, and array entries are separated
+by ASCII whitespace, as LightGBM writes them. `max_json_bytes` (64 MiB by
+default) bounds its bytes, the lines after the trees included, as it bounds a JSON
+document. `max_binary_array_bytes` also bounds its decoded arrays, tree count and
+per-tree nodes before allocation. Its categories,
 counted over the whole model before their bitset words expand, are bounded by
 `max_json_bytes / 2`, as a JSON document's are (two bytes per category at least);
 the shared node and rank-table bounds still apply. Raise the text
-cap for larger trusted models, or export binary to avoid holding a text document.
+cap for larger trusted models; binary decodes faster.
 Malformed fields and topology return `LoadError`, never a partial model.
 
 Every loader returns `Result`. `LoadError` distinguishes `Io`,
@@ -280,7 +282,7 @@ before sharing it.
 |---|---:|---|
 | Binary bytes consumed (`max_binary_bytes`) | 4 GiB | unbounded reads |
 | Individual decoded field array (`max_binary_array_bytes`) | 64 MiB | allocations from binary or LightGBM text declared lengths; it also bounds the trees (`target_id`), each tree's nodes, and a binary tree's category entries |
-| JSON or LightGBM text input (`max_json_bytes`) | 64 MiB | the materialized document; half of it bounds LightGBM text's category entries, over the whole model |
+| JSON or LightGBM text input (`max_json_bytes`) | 64 MiB | the materialized JSON document, or LightGBM text's bytes, read a tree at a time; half of it bounds LightGBM text's category entries, over the whole model |
 | Config JSON (`max_config_bytes`) | 64 KiB | oversized configurations |
 | Attributes (`max_attributes_bytes`) | 16 MiB | the attributes document |
 | JSON nesting (`max_json_nesting`) | 64 | parser recursion, in models, attributes and configurations |
@@ -312,15 +314,16 @@ if it is negative or not finite; the other statistics, gain among them, are not 
 ## Load time and memory
 
 Loading takes one decoding pass and one build pass, single-threaded. The decoder
-reads each tree's fields once (in place from `Forest::from_bytes`, through one
-reused buffer from a reader), validates it and puts its nodes in heavy-first order,
+reads each tree's fields once (a binary's in place from `Forest::from_bytes`,
+through one reused buffer from a reader), validates it and puts its nodes in heavy-first order,
 each in the 16-byte layout node it becomes, in input order: a leaf's value, or a
 split's ID in a table of the forest's distinct splits with its heavy side and
 training share. When the node count is known before the first tree, the nodes are
 allocated once, where the loaded model keeps them: from the bytes of
 `Forest::from_bytes`, from a JSON document, and from a model file, whose trees'
 node counts `Forest::load` reads first (one or two positioned reads per tree,
-about 0.5 µs each). From another reader the nodes are decoded in segments and
+about 0.5 µs each, for a binary; a first read of the whole text for LightGBM text,
+as from bytes). From another reader the nodes are decoded in segments and
 copied into place once, which holds them twice for a moment. Trees are then ordered
 by their heavy paths, and the build rewrites each tree's nodes in place, in that
 order, from the distinct splits' bins, codebooks and chains. A fixed-point plan's
@@ -328,14 +331,17 @@ leaf values go into their leaf nodes; a wide plan's into a table in tree order, 
 order of the trees' starts and leaf values, not of their nodes.
 Peak memory is therefore the loaded model plus the split table (small for binned
 models: thousands of splits against millions of nodes) and a reader's buffer of at
-most 1 MiB or one tree's fields. A model with categorical splits also holds its
+most 1 MiB or one tree's fields (LightGBM text's: 64 KiB and one tree's lines). A
+model with categorical splits also holds its
 category lists, each distinct one once, while it loads, and each categorical
 feature's heavy sets and rank tables while its layout is built; production frees
 the lists once loaded. For Expedia's 1,000-tree, depth-16 LightGBM model
 (7.7 million nodes, a 636 MB file), `Forest::load` takes 0.27 s with a heap peak of
 191 MB, against a loaded model of 186 MB. JSON keeps a
 document in memory: simd-json's tape over the input, whose strings it borrows,
-about five times the file at its peak; prefer binary for large models. Predictor
+about five times the file at its peak; prefer binary for large models. LightGBM
+text holds a copy of one tree's lines at a time, read from a file or a reader
+through a 64 KiB buffer. Predictor
 creation reads per-tree scratch needs computed at load, so it costs no pass over
 the nodes.
 

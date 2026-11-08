@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+LightGBM text from a file or from memory now loads with its Treelite binary's heap
+peak or less: it is decoded a tree at a time, its nodes counted first, rather than
+held whole. The saving is the text, so it grows with the text's size against the
+loaded model's. On a public numeric model of 800 trees, the peak falls from 39.7 to
+7.0 MiB, against 7.8 MiB for its binary; on a public model with high-cardinality
+categorical features, whose layout build sets its peak, from 74.2 to 68.7 MiB, its
+binary's. Both load in 76% to 77% of 3.3.0's time. `experiments/layout-file`
+generates these models and measures their loads. Outputs are unchanged.
+
+### Memory
+
+- LightGBM text is read and decoded one tree at a time, rather than read whole
+  first. From a file or from memory it is read twice, first to count the nodes, so
+  that they are allocated once, where the loaded model keeps them; from another
+  reader they are decoded in segments and copied into place, as a binary reader's
+  are. `max_json_bytes` still bounds every byte of the text, the lines after the
+  trees included.
+- A small model's text takes its 64 KiB read buffer more from a file, about 90 KiB
+  at its peak against 30 KiB, and the first 256 KiB node segment more from another
+  reader.
+
+### Load time
+
+- The LightGBM text decoder parses each array in one pass rather than counting its
+  entries first, and expands a categorical split's bitset words by their set bits
+  rather than by testing all 32. Counting the nodes first adds up to 12% to the
+  load's time on the measured models.
+
+### Formats
+
+- LightGBM text arrays are split on ASCII whitespace, as LightGBM writes them; other
+  Unicode whitespace no longer separates their entries.
+- A UTF-8 error in LightGBM text gives the invalid byte's offset in the input, and
+  an error in a tree's lines names the tree.
+
 ## 3.3.0
 
 3.3.0 loads and holds models with many categorical splits in much less memory, reads
