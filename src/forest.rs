@@ -84,14 +84,15 @@ impl Forest {
         Self::from_bytes_with(bytes, format, config, options, &Choices::default())
     }
 
-    /// Load a model from a reader. Binary decoding streams with reusable tree buffers;
-    /// JSON decoding materializes a bounded document. Structural validation precedes
-    /// optimized layout, and unsupported prediction semantics return an error.
+    /// Load a model from a reader. Binary decoding streams with reusable tree buffers,
+    /// LightGBM text one tree's lines at a time; JSON decoding materializes a bounded
+    /// document. Structural validation precedes optimized layout, and unsupported
+    /// prediction semantics return an error.
     ///
-    /// A binary reader's node count is not known before its last tree, so its nodes
-    /// are decoded in segments and copied into place once, which holds them twice
-    /// for a moment; [`Self::load`] and [`Self::from_bytes`] count them first and
-    /// decode them in place.
+    /// A reader's node count is not known before its last tree, so its nodes are
+    /// decoded in segments and copied into place once, which holds them twice for a
+    /// moment; [`Self::load`] and [`Self::from_bytes`] count them first and decode
+    /// them in place.
     pub fn from_reader(
         reader: impl Read,
         format: ModelFormat,

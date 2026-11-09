@@ -14,11 +14,16 @@ pub(super) fn document(reader: impl Read, max: u64, what: &str) -> Result<Vec<u8
     let mut bytes = Vec::new();
     reader.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > max {
-        return Err(LoadError::Limit(format!(
-            "{what} exceeds {max} bytes (LoadOptions::max_json_bytes); use binary for large models"
-        )));
+        return Err(too_long(what, max));
     }
     Ok(bytes)
+}
+
+/// The error for a text or JSON input over the cap of `max` bytes.
+pub(super) fn too_long(what: &str, max: u64) -> LoadError {
+    LoadError::Limit(format!(
+        "{what} exceeds {max} bytes (LoadOptions::max_json_bytes); use binary for large models"
+    ))
 }
 
 /// What a decoder hands to the build: the decoded forest, the precision its splits

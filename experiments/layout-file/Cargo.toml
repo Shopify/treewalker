@@ -11,3 +11,7 @@ treewalker-gbdt = { path = "../..", default-features = false, features = ["layou
 [[test]]
 name = "layout_file"
 path = "tests/layout_file.rs"
+
+[[test]]
+name = "memory"
+path = "tests/memory.rs"

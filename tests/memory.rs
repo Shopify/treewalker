@@ -146,6 +146,61 @@ fn binary_models_past_the_byte_limit_reserve_no_nodes() {
     assert!(bytes < 64 << 10, "{bytes} bytes at the peak");
 }
 
+/// LightGBM text is held a tree at a time, from a reader and from memory: a model
+/// whose text is mostly a field the decoder does not read loads in a small part of
+/// its size.
+#[test]
+fn lightgbm_text_is_held_one_tree_at_a_time() {
+    use std::fmt::Write as _;
+    let gain = ["0.123456789012345678"; 512].join(" ");
+    let mut trees = String::new();
+    for i in 0..512 {
+        write!(
+            trees,
+            "Tree={i}\nnum_leaves=2\nnum_cat=0\nsplit_feature=0\nthreshold=0.5\n\
+             decision_type=2\nleft_child=-1\nright_child=-2\nleaf_value=0.25 -0.5\n\
+             leaf_count=3 4\ninternal_count=7\nsplit_gain={gain}\n\n"
+        )
+        .unwrap();
+    }
+    let text = format!(
+        "tree\nversion=v4\nnum_class=1\nnum_tree_per_iteration=1\nmax_feature_idx=0\n\
+         objective=regression\n{trees}end of trees\n"
+    );
+    assert!(text.len() > 5 << 20);
+    let options = LoadOptions {
+        max_json_bytes: 8 << 20,
+        ..LoadOptions::default()
+    };
+    let config = || {
+        WalkerConfig::builder(1)
+            .max_group_width(1)
+            .varying([])
+            .build()
+            .unwrap()
+    };
+    let (forest, bytes) = peak(|| {
+        Forest::from_reader(
+            text.as_bytes(),
+            ModelFormat::LightGbmText,
+            config(),
+            &options,
+        )
+    });
+    forest.unwrap();
+    assert!(bytes < 1 << 20, "{bytes} bytes at the peak from a reader");
+    let (forest, bytes) = peak(|| {
+        Forest::from_bytes(
+            text.as_bytes(),
+            ModelFormat::LightGbmText,
+            config(),
+            &options,
+        )
+    });
+    forest.unwrap();
+    assert!(bytes < 1 << 20, "{bytes} bytes at the peak from memory");
+}
+
 /// A text header cannot reserve the decoded node store without enough leaf text
 /// to back its count, even when the caller raises the decoded-array cap.
 #[test]

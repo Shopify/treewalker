@@ -52,7 +52,7 @@ pub struct LoadOptions {
     /// entries of each tree.
     pub max_binary_array_bytes: u64,
     /// Bytes of a JSON or LightGBM text model; default 64 MiB. Large models should
-    /// use binary, or raise this cap for native text.
+    /// use binary, or raise this cap for native text, which is held a tree at a time.
     pub max_json_bytes: u64,
     /// Bytes of a model's `attributes` string; default 16 MiB.
     pub max_attributes_bytes: u64,

@@ -1033,6 +1033,45 @@ fn lightgbm_rejects_unsupported_malformed_and_capped_inputs() {
         ),
         Err(LoadError::Limit(_))
     ));
+    // The lines after the trees are not decoded, but count against the cap and must
+    // be UTF-8, as the trees' lines.
+    let tailed = format!("{original}\nparameters:\n[boosting: gbdt]\n\nend of parameters\n");
+    let n = tailed.len() as u64;
+    let capped = |max_json_bytes| LoadOptions {
+        max_json_bytes,
+        ..defaults
+    };
+    assert!(parse(&tailed, &capped(n)).is_ok());
+    assert!(matches!(
+        parse(&tailed, &capped(n - 1)),
+        Err(LoadError::Limit(_))
+    ));
+    let mut invalid = tailed.into_bytes();
+    invalid.extend_from_slice(b"pandas_categorical:\xff\n");
+    assert!(matches!(
+        Forest::from_bytes(&invalid, ModelFormat::LightGbmText, config(128), &defaults),
+        Err(LoadError::MalformedModel(_))
+    ));
+    // An invalid byte in a tree is reported where it is in the input, with the tree,
+    // from memory and from a reader.
+    let at = original.find("Tree=1\n").unwrap() + "Tree=1\nnum".len();
+    let mut invalid = original.into_bytes();
+    invalid[at] = 0xff;
+    let expected = format!("tree 1: LightGBM text: invalid UTF-8 at byte offset {at}");
+    for result in [
+        Forest::from_bytes(&invalid, ModelFormat::LightGbmText, config(128), &defaults),
+        Forest::from_reader(
+            invalid.as_slice(),
+            ModelFormat::LightGbmText,
+            config(128),
+            &defaults,
+        ),
+    ] {
+        let Err(LoadError::MalformedModel(message)) = result else {
+            panic!("expected a malformed model");
+        };
+        assert_eq!(message, expected);
+    }
     let cat = String::from_utf8(bytes("lightgbm/category_words.txt")).unwrap();
     for (old, new) in [
         ("cat_boundaries=0 3 7", "cat_boundaries=0 7 3"),

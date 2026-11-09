@@ -21,7 +21,7 @@ mod lightgbm;
 pub(crate) mod tree;
 mod validation;
 use crate::LoadError;
-use std::io::Read;
+use std::io::{Read, Seek};
 pub(crate) use validation::{ParsedModel, validate_json_depth};
 
 use std::path::Path;
@@ -68,13 +68,19 @@ pub(crate) fn parse_reader(
     match format {
         ModelFormat::TreeliteBinaryV4 => binary::parse(reader, None, config, options, choices),
         ModelFormat::TreeliteJson => json::parse(reader, config, options, choices),
-        ModelFormat::LightGbmText => lightgbm::parse(reader, config, options, choices),
+        ModelFormat::LightGbmText => lightgbm::parse(text(reader), None, config, options, choices),
     }
 }
 
+/// A buffered text reader, its buffer as large as the binary reader's first.
+fn text<R: Read>(reader: R) -> std::io::BufReader<R> {
+    std::io::BufReader::with_capacity(64 << 10, reader)
+}
+
 /// [`parse_reader`] of a model file. Binary decoding first counts the nodes from the
-/// trees' headers with positioned reads (6 per tree), so that they are allocated
-/// once; a reader of unknown length cannot be read twice.
+/// trees' headers with positioned reads (6 per tree), and LightGBM text from a first
+/// read of a regular file, so that they are allocated once; a reader of unknown
+/// length cannot be read twice.
 pub(crate) fn parse_file(
     file: std::fs::File,
     format: ModelFormat,
@@ -91,12 +97,23 @@ pub(crate) fn parse_file(
             binary::parse(file, nodes, config, options, choices)
         }
         ModelFormat::TreeliteJson => json::parse(file, config, options, choices),
-        ModelFormat::LightGbmText => lightgbm::parse(file, config, options, choices),
+        ModelFormat::LightGbmText => {
+            let mut reader = text(file);
+            let nodes = if reader.get_ref().metadata().is_ok_and(|m| m.is_file()) {
+                let nodes = lightgbm::count_nodes(&mut reader, options);
+                reader.rewind()?;
+                nodes
+            } else {
+                None
+            };
+            lightgbm::parse(reader, nodes, config, options, choices)
+        }
     }
 }
 
 /// [`parse_reader`] of a model in memory. Binary decoding reads the fields in place;
-/// JSON decoding parses a copy, which its parser rewrites.
+/// JSON decoding parses a copy, which its parser rewrites; LightGBM text is read
+/// twice, to count its nodes first.
 pub(crate) fn parse_bytes(
     bytes: &[u8],
     format: ModelFormat,
@@ -107,6 +124,9 @@ pub(crate) fn parse_bytes(
     match format {
         ModelFormat::TreeliteBinaryV4 => binary::parse_bytes(bytes, config, options, choices),
         ModelFormat::TreeliteJson => json::parse(bytes, config, options, choices),
-        ModelFormat::LightGbmText => lightgbm::parse(bytes, config, options, choices),
+        ModelFormat::LightGbmText => {
+            let nodes = lightgbm::count_nodes(bytes, options);
+            lightgbm::parse(bytes, nodes, config, options, choices)
+        }
     }
 }
