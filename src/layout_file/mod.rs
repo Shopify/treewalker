@@ -16,9 +16,12 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
+/// The start of every layout file, whatever its schema or build.
+const MAGIC: &str = "TWLAYOUT\0";
+
 fn header() -> Vec<u8> {
     format!(
-        "TWLAYOUT\0v1\0{}\0build={}\0{}\0{}\0{}\0links={}\0",
+        "{MAGIC}v1\0{}\0build={}\0{}\0{}\0{}\0links={}\0",
         env!("CARGO_PKG_VERSION"),
         env!("TREEWALKER_BUILD_ID"),
         std::env::consts::ARCH,
@@ -40,6 +43,27 @@ fn open_layout(path: &Path) -> Result<(std::fs::File, usize), LoadError> {
         .filter(|&n| n >= 8)
         .ok_or_else(|| LoadError::Layout("layout file size".into()))?;
     Ok((file, len))
+}
+
+/// A layout file whose header, `found`, is not this build's: its fields and this
+/// build's, for the caller that rebuilds it from its source model to report. The
+/// file's bytes are untrusted, so all but printable ASCII are escaped.
+fn mismatch(found: &[u8]) -> LoadError {
+    let fields = |header: &[u8]| {
+        header
+            .split(|&b| b == 0)
+            .filter(|field| !field.is_empty())
+            .map(|field| field.escape_ascii().to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    // The header's last whole field; a shorter header runs into the body.
+    let found = &found[..found.iter().rposition(|&b| b == 0).map_or(0, |i| i + 1)];
+    LoadError::LayoutMismatch(format!(
+        "the file says {}, this build {}",
+        fields(found),
+        fields(&header())
+    ))
 }
 
 fn fingerprint(config: &crate::WalkerConfig) -> io::Result<u64> {
@@ -100,7 +124,7 @@ impl Forest {
             checksum: Checksum::default(),
             mapping: Some(mapping),
         };
-        Self::read_layout(&mut r).map_err(error)
+        Self::read_layout(&mut r)
     }
 
     /// Load a layout file into owned arrays (`layout-file` feature).
@@ -126,16 +150,25 @@ impl Forest {
             #[cfg(all(unix, target_pointer_width = "64"))]
             mapping: None,
         };
-        Self::read_layout(&mut r).map_err(error)
+        Self::read_layout(&mut r)
     }
 
-    fn read_layout<R: Read>(r: &mut Decoder<R>) -> io::Result<Self> {
+    /// A layout file whose header, read first, is this build's. A header that starts
+    /// as one but differs is from another schema, crate version, build or target.
+    fn read_layout<R: Read>(r: &mut Decoder<R>) -> Result<Self, LoadError> {
         let expected = header();
         let mut got = vec![0; expected.len()];
-        r.bytes(&mut got)?;
-        if got != expected {
-            return Err(invalid("layout format/crate/build/target mismatch"));
+        r.bytes(&mut got).map_err(error)?;
+        if !got.starts_with(MAGIC.as_bytes()) {
+            return Err(LoadError::Layout("not a layout file".into()));
         }
+        if got != expected {
+            return Err(mismatch(&got));
+        }
+        Self::read_body(r).map_err(error)
+    }
+
+    fn read_body<R: Read>(r: &mut Decoder<R>) -> io::Result<Self> {
         let config_hash = u64::get(r)?;
         let threshold_type = crate::model::ThresholdType::get(r)?;
         let model = crate::model::Model::get(r)?;

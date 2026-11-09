@@ -254,14 +254,26 @@ fn corrupt_truncated_and_extended_files_are_errors_not_panics() {
         let bytes = std::fs::read(&path.0).unwrap();
         let link = bytes.windows(6).position(|b| b == b"links=").unwrap();
         let header_end = link + bytes[link..].iter().position(|&b| b == 0).unwrap() + 1;
+        // A header that starts as a layout file's is another build's, else not one.
+        // Its message escapes the file's bytes: an escape character, a byte that is
+        // not UTF-8.
         for i in 0..if fixture_index == 0 { header_end } else { 0 } {
-            let mut corrupt = bytes.clone();
-            corrupt[i] ^= 1;
-            std::fs::write(&path.0, corrupt).unwrap();
-            assert!(matches!(
-                Forest::load_layout(&path.0),
-                Err(LoadError::Layout(_))
-            ));
+            for byte in [bytes[i] ^ 1, 0x1b, 0xff] {
+                let mut corrupt = bytes.clone();
+                corrupt[i] = byte;
+                std::fs::write(&path.0, corrupt).unwrap();
+                let error = Forest::load_layout(&path.0).unwrap_err();
+                if i < b"TWLAYOUT\0".len() {
+                    assert!(matches!(error, LoadError::Layout(_)), "{error}");
+                } else {
+                    assert!(matches!(error, LoadError::LayoutMismatch(_)), "{error}");
+                }
+                let message = error.to_string();
+                assert!(
+                    message.bytes().all(|b| (0x20..0x7f).contains(&b)),
+                    "{message:?}"
+                );
+            }
         }
         for n in [0, 1, 7, 8, bytes.len() / 2, bytes.len() - 1] {
             std::fs::write(&path.0, &bytes[..n]).unwrap();
@@ -483,11 +495,32 @@ fn rechecksummed_body_corruption_is_rejected_by_production_readers() {
         std::str::from_utf8(&bytes[build..build + 16]).unwrap(),
         source_build_id()
     );
+    // Another build's file is a mismatch, to rebuild from the source model, that
+    // names both builds, even with its checksum repaired.
     let mut other_build = bytes;
     other_build[build] = if other_build[build] == b'0' {
         b'1'
     } else {
         b'0'
     };
-    reject_rechecksummed(&path, other_build);
+    let theirs = String::from_utf8(other_build[build..build + 16].to_vec()).unwrap();
+    let end = other_build.len() - 8;
+    let sum = checksum(&other_build[..end]);
+    other_build[end..].copy_from_slice(&sum.to_le_bytes());
+    std::fs::write(&path.0, other_build).unwrap();
+    let mismatched = |error: LoadError| {
+        let LoadError::LayoutMismatch(message) = &error else {
+            panic!("{error}");
+        };
+        assert!(message.contains(&format!("build={theirs}")), "{message}");
+        assert!(
+            message.contains(&format!("build={}", source_build_id())),
+            "{message}"
+        );
+    };
+    mismatched(Forest::load_layout(&path.0).unwrap_err());
+    #[cfg(all(unix, target_pointer_width = "64"))]
+    // SAFETY: the test owns the file, and no write occurs while the call's result
+    // lives.
+    mismatched(unsafe { Forest::map_layout(&path.0) }.unwrap_err());
 }
