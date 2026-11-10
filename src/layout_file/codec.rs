@@ -2,7 +2,7 @@
 //! padding, bool representations or Rust enum discriminants.
 
 use crate::exact::Plan;
-use crate::load::layout::{MaskChain, MaskFeature, MaskPlan};
+use crate::load::layout::MaskPlan;
 use crate::model::{
     Model, Output, Postprocessor, PrefixGroup, Threshold, ThresholdType, Tree, VaryingPredicate,
 };
@@ -287,24 +287,6 @@ fields!(PrefixStats {
     saved,
     cost
 });
-fields!(
-    MaskFeature {
-        feature,
-        num,
-        chains,
-        flips,
-        categories
-    },
-    49
-);
-fields!(MaskChain { start, points, len }, 12);
-fields!(MaskPlan {
-    features,
-    chains,
-    points,
-    flip_bounds,
-    flips
-});
 tagged!(ThresholdType { 0 => F64, 1 => F32 });
 tagged!(Postprocessor { 0 => Identity, 1 => Sigmoid(value) });
 tagged!(Plan { 0 => Fixed(value), 1 => Wide(value) });
@@ -373,7 +355,7 @@ impl Codec for Model {
         self.trees.put(w)?;
         self.config.put(w)?;
         self.varying_predicates.put(w)?;
-        self.masks.put(w)?;
+        // Not the mask plan, which the loader rebuilds from what it validates.
         self.threshold_type.put(w)?;
         self.prefix_groups.put(w)?;
         self.prefix.put(w)?;
@@ -393,7 +375,7 @@ impl Codec for Model {
             config: Codec::get(r)?,
             categories: Vec::new(),
             varying_predicates: Codec::get(r)?,
-            masks: Codec::get(r)?,
+            masks: MaskPlan::default(),
             threshold_type: Codec::get(r)?,
             prefix_groups: Codec::get(r)?,
             prefix: Codec::get(r)?,
@@ -490,16 +472,14 @@ mod tests {
     use super::*;
     #[test]
     fn fieldwise_lengths_use_minimum_wire_sizes() {
-        let shortest = MaskFeature {
+        let shortest = VaryingPredicate::CatInline {
             feature: 0,
-            num: 0..0,
-            chains: 0..0,
-            flips: 0,
-            categories: None,
+            default_left: false,
+            word: 0,
         };
         let mut encoded = Encoder::new(io::sink());
         shortest.put(&mut encoded).unwrap();
-        assert_eq!(encoded.at, 49); // 8 + 16 + 16 + 8 + 1, independently of MIN_BYTES.
+        assert_eq!(encoded.at, 10); // 1 + 4 + 1 + 4, independently of MIN_BYTES.
         let mut w = Encoder::new(Vec::new());
         100usize.put(&mut w).unwrap();
         w.align().unwrap();
@@ -512,8 +492,8 @@ mod tests {
             #[cfg(all(unix, target_pointer_width = "64"))]
             mapping: None,
         };
-        r.total = 16 + 100 * 49 - 1;
-        assert!(r.length::<MaskFeature>().is_err());
+        r.total = 16 + 100 * 10 - 1;
+        assert!(r.length::<VaryingPredicate>().is_err());
         let error = <(u32, bool)>::get_vec(usize::MAX, &mut r).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }

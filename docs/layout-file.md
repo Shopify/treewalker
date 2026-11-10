@@ -28,7 +28,7 @@ Validation checks the configuration, precision, dummy behavior, node fields, lin
 leaves, full binary tree topology and coverage, recomputed scratch counts, constant
 prefixes, categorical domains, matching exception slot/word lengths, monotone bounded
 offsets and relative slots within each feature's extent,
-mask-chain and flip ranges, predicate coverage and exact-sum bounds. Packed fixed
+predicate coverage and exact-sum bounds. Packed fixed
 leaf nodes must round-trip through `fixed_value`/`fixed`. Their values must have a
 canonical zero or an odd nonzero significand with magnitude below 2^53 and a shift
 below 125; shifted magnitudes and forest sums must fit the fixed plan. Leaves are
@@ -43,30 +43,34 @@ codebooks, offset tables and exception tables also have non-overlapping per-feat
 ownership. Ownership is checked before per-feature scans.
 
 Slot ownership decides whether a node needs a varying mask and bounds its feature
-and predicate kind. The loader reconstructs chain points from nodes, rebuilds the
-mask plan from validated bins/predicates, and compares every feature, chain, point and
-flip; it never follows untrusted mask-plan ranges. Features are unique. Tree extents
+and predicate kind. The file stores no mask plan: the loader reconstructs chain
+points from nodes and builds the plan from validated bins/predicates, as a source
+build does, so there are no untrusted mask-plan ranges to follow. Tree extents
 and their disjoint coverage are checked before visiting any tree's nodes.
 
 Validation is O(R log R) in the file's records: ownership sorts and per-split
 binary searches are not linear. It allocates O(R) temporary heap in addition to
-the decoded arrays, including ownership tables, traversal scratch and a second
-MaskPlan while the stored plan is still alive. Reconstruction uses the stored
-plan's flip-byte budget, not an independent multi-gigabyte allowance; that budget
-is not a strict heap-peak bound, because vectors also have capacities and scratch.
+the decoded arrays, including ownership tables and traversal scratch. The mask
+plan it builds stays with the forest, on the heap under either loader. Its flip
+lists take 4 bytes per code of a varying categorical feature and at most 8 per
+exception for each chain of the exception's word, of which a word holds at most 32.
+The file's own codes and exceptions bound the plan, not a stored size, so a plan
+can be larger than its file.
 
-Measured with dhat in release builds, retaining only the loaded forest (no
-predictor), a private model with many categorical splits had peak/live heap
-ratios of 1.00x owned and 1.05x mapped with its own configuration. With every feature varying, they were 1.84x and 2.51x:
-predicate-heavy validation can require substantial temporary heap. A public
-generated forest with 1,024 two-sided categorical predicates used 0.345/0.251 MiB
-peak/live owned and 0.220/0.134 MiB mapped. These are heap measurements, not RSS;
-file-backed mapped pages are not counted by dhat.
+Measured with a counting allocator in release builds, retaining only the loaded
+forest (no predictor), a private model with many categorical splits had peak/live
+heap ratios of 1.00x owned and 1.05x mapped with its own configuration. With every
+feature varying, they were 1.37x and 1.66x: predicate-heavy validation can require
+substantial temporary heap, most of it here the capacity the plan's flip list
+reserves as it grows, which the build then returns. A public generated forest with
+1,024 two-sided categorical predicates used 0.313/0.251 MiB peak/live owned and
+0.188/0.134 MiB mapped. These are heap measurements, not RSS; file-backed mapped
+pages are not counted.
 
 Checks needed only for prediction agreement are deliberately omitted: threshold
 and codebook order, code-zero exceptions and agreement between a predicate's
-two split sides. Bounds, predicate (feature, kind) ordering and mask-plan
-correspondence remain safety requirements. A hostile writer can choose arbitrary
+two split sides. Bounds and predicate (feature, kind) ordering remain safety
+requirements. A hostile writer can choose arbitrary
 predictions; neither structural validation nor the checksum authenticates a model.
 
 On 64-bit Unix, `unsafe Forest::map_layout(path)` borrows the layout nodes,
@@ -95,9 +99,9 @@ pointers, Rust enum representations, padding or mutable latency cache are saved.
 The field order is specified by `layout_file::codec` and the colocated schemas
 that need private access, not Rust layout.
 
-The `TWLAYOUT` format starts at schema version 1. It stores exception words
-separately from feature-relative slots. The slots section starts with an explicit
-u8 width tag: 2 for u16 slots, 4 for u32 slots,
+The `TWLAYOUT` format is at schema version 2; version 1 also stored the mask plan.
+It stores exception words separately from feature-relative slots. The slots
+section starts with an explicit u8 width tag: 2 for u16 slots, 4 for u32 slots,
 followed by that width's aligned array. Both widths are supported model-wide.
 The layout has one Wide-leaf vector, empty under a Fixed plan. Fixed values live
 in layout nodes: word 0 is zero; word 1 has shift bits 0-6, zero at bit 7, the

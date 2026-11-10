@@ -447,11 +447,7 @@ fn rechecksummed_body_corruption_is_rejected_by_production_readers() {
     assert_eq!(predicates, 1);
     assert_eq!(c.byte(), 0); // numeric: feature u32, threshold f64, missing bool
     c.at += 13;
-    assert_eq!(c.array(49).len(), 49); // one MaskFeature, no categorical metadata
-    for width in [12, 5, 4, 4] {
-        assert!(c.array(width).is_empty());
-    }
-    c.byte(); // threshold precision
+    c.byte(); // threshold precision; no mask plan, which the loader rebuilds
     assert!(c.array(16).is_empty()); // no constant prefixes
     c.at += 48; // PrefixStats
     assert_eq!(c.array(4).len(), 4); // one root

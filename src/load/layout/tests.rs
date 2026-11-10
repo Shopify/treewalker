@@ -350,6 +350,13 @@ fn random_rows(rng: &mut Rng, model: &Model, n_rows: usize) -> Vec<Vec<f64>> {
 fn check_model(rng: &mut Rng, forest: &Forest, n_rows: usize) {
     let model = &*forest.model;
     check_structure(model);
+    // A layout file stores no mask plan: its loader's is the builder's again, built
+    // within the bytes that the bins' codes and exceptions bound.
+    #[cfg(feature = "layout-file")]
+    assert_eq!(
+        crate::layout_file::validate::model(model).unwrap(),
+        model.masks
+    );
     let bins = &model.layout.bins;
     let mut reused = [bins.new_bins(), bins.new_bins()];
     for row in random_rows(rng, model, n_rows) {

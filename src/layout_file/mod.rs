@@ -21,7 +21,7 @@ const MAGIC: &str = "TWLAYOUT\0";
 
 fn header() -> Vec<u8> {
     format!(
-        "{MAGIC}v1\0{}\0build={}\0{}\0{}\0{}\0links={}\0",
+        "{MAGIC}v2\0{}\0build={}\0{}\0{}\0{}\0links={}\0",
         env!("CARGO_PKG_VERSION"),
         env!("TREEWALKER_BUILD_ID"),
         std::env::consts::ARCH,
@@ -171,7 +171,7 @@ impl Forest {
     fn read_body<R: Read>(r: &mut Decoder<R>) -> io::Result<Self> {
         let config_hash = u64::get(r)?;
         let threshold_type = crate::model::ThresholdType::get(r)?;
-        let model = crate::model::Model::get(r)?;
+        let mut model = crate::model::Model::get(r)?;
         if r.at != r.total
             || fingerprint(&model.config)? != config_hash
             || model.threshold_type != threshold_type
@@ -185,7 +185,8 @@ impl Forest {
         if u64::from_le_bytes(footer) != checksum {
             return Err(invalid("layout checksum mismatch"));
         }
-        validate::model(&model)?;
+        // The file stores no mask plan: validation builds it from what it checked.
+        model.masks = validate::model(&model)?;
         Ok(Self {
             model: Arc::new(model),
         })
