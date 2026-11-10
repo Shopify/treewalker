@@ -92,6 +92,33 @@ by atomic rename is fine if the old file remains immutable. This unsafe API is
 deliberate: validation cannot protect a live slice from subsequent external writes.
 An immutable artifact/ownership abstraction for a safe mapped API remains open.
 
+## Converting models for serving
+
+Convert a model once for each target that serves it, when it is trained; a server
+then loads the file rather than decoding the model and building its layout. The
+`convert` example of `experiments/layout-file` is the whole procedure:
+
+```text
+cargo run --release --manifest-path experiments/layout-file/Cargo.toml \
+    --example convert -- MODEL CONFIG LAYOUT.twl
+```
+
+It loads the model with its grouping configuration, saves the forest's layout to a
+new file, loads that file with `Forest::load_layout`, compares its predictions with
+the forest's on generated rows, and only then renames the file into place:
+validation checks that a layout is safe to run, not that it predicts as its source
+model does. It raises `max_json_bytes`, which bounds the length of LightGBM text
+rather than its memory, since text is read a tree at a time. Build a converter with
+`layout-file` and without `research`.
+
+A server loads the file with `Forest::load_layout`. Keep the source model with it:
+a build of another schema version or target gets `LoadError::LayoutMismatch` and
+can rebuild from the source, while `LoadError::Layout` is a corrupt file and
+should fail the load. `Forest::map_layout` loads little faster, since both
+validate the whole file, and a process's resident memory is about the same either
+way; mapping pays when several processes map one file, whose pages they share.
+`load_peak` in `experiments/layout-file` measures each load.
+
 ## Format
 
 The header is the magic and seven NUL-terminated fields: the schema version; the
