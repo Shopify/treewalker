@@ -2,8 +2,8 @@
 
 The opt-in `layout-file` feature saves an already built forest, avoiding the source
 model's decoding, categorical chain construction and temporary build allocations.
-The default build and representation are unchanged. This is an experimental local
-cache format, not a replacement for a portable Treelite checkpoint.
+The default build and representation are unchanged. This is an experimental format
+for one target, not a replacement for a portable Treelite checkpoint.
 
 Layout files are production-only. With `research` enabled, all three public
 layout-file methods return `LoadError::Unsupported`; research builds rebuild from
@@ -15,8 +15,12 @@ Write a new file and rename it into place; do not overwrite files used by mapped
 readers.
 
 `Forest::load_layout(path)` streams into owned vectors and validates before
-returning. I/O failures use `LoadError::Io`, incompatible/corrupt layouts use
-`LoadError::Layout`, and the file-size cap uses `LoadError::Limit`. The initial
+returning. I/O failures use `LoadError::Io`. A file of another schema version or
+target uses `LoadError::LayoutMismatch`, so that a caller can rebuild it from the
+source model. A corrupt or invalid layout, or a file that is not a layout file,
+uses `LoadError::Layout`, with one exception: the schema version and target are
+read from the header before anything is checked, so a file corrupted there reads
+as a mismatch. The file-size cap uses `LoadError::Limit`. The initial
 limits are 4 GiB per file, 2^28 entries per array (also bounded by file size), and
 2^20 rows per group. No timing or heap-inventory API is exposed.
 Readers also apply a conservative scratch address-space bound, particularly for
@@ -90,9 +94,13 @@ An immutable artifact/ownership abstraction for a safe mapped API remains open.
 
 ## Format
 
-The header identifies the magic, schema version, crate version, source build ID,
-architecture, endianness, pointer width, link stride, configuration
-fingerprint and threshold type. Readers reject mismatches. Arrays have a u64
+The header is the magic and seven NUL-terminated fields: the schema version; the
+crate version and source build ID of the build that wrote the file; and the
+target's architecture, pointer width, endianness and link stride. A reader requires
+its own schema version and target, and returns `LoadError::LayoutMismatch` for any
+other before reading further. It does not compare the writer's crate version and
+build ID, which a mismatch's message reports. The configuration fingerprint and
+threshold type follow, and must match the body. Arrays have a u64
 element count and begin on a 16-byte boundary. Numeric arrays use native bytes;
 all other metadata uses explicit scalar fields and checked enum/bool tags. No
 pointers, Rust enum representations, padding or mutable latency cache are saved.
@@ -116,20 +124,26 @@ It then consumes the zero-padded final partial word and its byte count. This
 detects accidental corruption, not malicious replacement; it is not authentication.
 The configuration fingerprint uses the same algorithm on its encoded fields.
 
+A file loads in every build of its schema version and target, whatever the crate
+version and sources of the build that wrote it; regenerate it from the source model
+for another target, or after a schema version bump. It keeps the layout its writer
+chose: a later build's rules may lay the same model out otherwise, and load the
+file as it is. A change to the format, or to what the kernel makes of its fields,
+must bump the schema version. Layout files committed for x86-64 and AArch64
+(`experiments/layout-file/tests/fixtures`), which an earlier build wrote, guard
+this: CI loads them on both architectures and compares their predictions with their
+source models', so a change that forgets the bump fails there. Rank-table and
+leaf-width schemas remain colocated in `load/layout/layout_file.rs`.
+
 The build ID is a fixed 16-hex-digit multiply-rotate checksum of `build.rs` and
 every file under `src/`, in sorted relative-path order, each path followed by its
-contents. It excludes Cargo.toml, which packaging rewrites. Files from different
-source inputs, crate versions or incompatible targets are rejected with
-`LoadError::Layout`; regenerate them from the source model after such a change.
-The ID enforces a conservative source-identity policy, not authenticity. Schema
-changes still require a version bump. Rank-table and leaf-width schemas remain
-colocated in `load/layout/layout_file.rs`.
+contents. It excludes Cargo.toml, which packaging rewrites. It names the writer's
+sources; it does not authenticate them.
 
 Production API tests live in the excluded `experiments/layout-file` crate, whose
 only treewalker feature is `layout-file`. CI runs it separately to avoid workspace
-research-feature unification. Tests cover owned/mapped round trips and malformed
-bodies with independently recomputed checksums. In-crate white-box tests call
-internal entry points for this same production format.
+research-feature unification. Tests cover owned/mapped round trips, the committed
+layout files, and malformed bodies with independently recomputed checksums.
+In-crate white-box tests call internal entry points for this same production format.
 
-Open design questions include cache compatibility across source changes,
-configurable limits and atomic/durable publication.
+Open design questions include configurable limits and atomic/durable publication.

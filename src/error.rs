@@ -26,10 +26,10 @@ pub enum LoadError {
     #[cfg(feature = "layout-file")]
     #[error("invalid layout file: {0}")]
     Layout(String),
-    /// A layout file was written in another schema, or by another crate version,
-    /// build or target; rebuild it from the source model.
+    /// A layout file was written in another schema version or for another target;
+    /// rebuild it from the source model.
     #[cfg(feature = "layout-file")]
-    #[error("layout file from another build: {0}")]
+    #[error("layout file of another schema version or target: {0}")]
     LayoutMismatch(String),
 }
 
