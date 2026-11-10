@@ -753,7 +753,7 @@ fn bin_map(
             return false;
         }
         // Covers cut short may keep extra chains, which packed take fields, not slots.
-        if !minimum || !pack::resident_here(4 * unpacked) {
+        if !minimum || !pack::resident(4 * unpacked) {
             return true;
         }
         // A group fills its constant features; a single row every one.

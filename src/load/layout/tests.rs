@@ -1101,6 +1101,22 @@ fn a_cover_cut_short_packs() {
 }
 
 #[test]
+fn bins_past_the_least_share_of_l1_pack() {
+    // Singletons take a chain each, and varying, no fill the rule counts saves
+    // anything, so the bins' size decides. With the dummy's slot, 4,095 chains take
+    // 16 KiB unpacked, the least share of L1, and keep a word each; 4,096 pass it and
+    // pack, into 128 words, whatever the L1 of the machine that builds the layout.
+    let layout = |chains: u32| {
+        let splits: Vec<_> = (0..chains).map(|c| (vec![c], false, true)).collect();
+        let forest = categorical_load(&splits, true, &LoadOptions::default(), None).unwrap();
+        let bins = &forest.model.layout.bins;
+        (bins.chain_slots(), bins.has_shifts())
+    };
+    assert_eq!(layout(4_095), (4_095, false));
+    assert_eq!(layout(4_096), (128, true));
+}
+
+#[test]
 fn a_lone_field_takes_its_word() {
     // One chain, packed: its word holds no other field, so it takes the word whole.
     let splits = [(vec![1], false, true), (vec![1, 2], false, true)];
