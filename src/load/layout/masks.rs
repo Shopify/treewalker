@@ -79,7 +79,7 @@ pub(crate) struct MaskChain {
 
 /// Per varying feature, its predicates; per chain, its categorical predicates; per
 /// code of a varying categorical feature, the masks its rows flip.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct MaskPlan {
     pub(crate) features: Vec<MaskFeature>,
     pub(crate) chains: Vec<MaskChain>,
@@ -209,6 +209,36 @@ impl MaskPlan {
                 categories,
             });
         }
+        // The model keeps the plan: return what the lists' growth reserved past them.
+        plan.chains.shrink_to_fit();
+        plan.points.shrink_to_fit();
+        plan.flip_bounds.shrink_to_fit();
+        plan.flips.shrink_to_fit();
         Ok(plan)
     }
+
+    /// The most bytes the flip lists of [`Self::build`] take over `bins` for the
+    /// features of `ranges`: for each with categorical predicates, a bound per code
+    /// and one more, and two flips per exception and chain of its word, which holds
+    /// a field per shift ([`WORD_SHIFTS`]). A layout file stores no plan: its loader
+    /// rebuilds one within these bytes, which the file's own codes and exceptions set.
+    #[cfg(feature = "layout-file")]
+    pub(crate) fn max_flip_bytes(bins: &BinMap, ranges: &[FeatureRange]) -> u64 {
+        let entries: u64 = ranges
+            .iter()
+            .filter(|range| !range.cat.is_empty())
+            .filter_map(|range| bins.varying_categories(range.feature as usize))
+            .map(|c| {
+                let codes = c.codes.domain();
+                let exceptions = bins.offsets[c.offsets + codes] - bins.offsets[c.offsets];
+                codes as u64 + 1 + 2 * WORD_SHIFTS * u64::from(exceptions)
+            })
+            .sum();
+        size_of::<u32>() as u64 * entries
+    }
 }
+
+/// The shifts a word's fields can take, each field its own: the most chains of one
+/// slot ([`super`], "Packed fields").
+#[cfg(feature = "layout-file")]
+const WORD_SHIFTS: u64 = 32;

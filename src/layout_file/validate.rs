@@ -2,12 +2,14 @@
 //!
 //! Check before exposing Model: config/precision, bin/code domains and exception
 //! extents; dummy/node/link/mask/leaf fields; disjoint full binary trees (not DAGs)
-//! and exact per-tree scratch needs; constant prefixes; all numeric/chain/flip
-//! ranges and predicate coverage; fixed/wide accumulator bounds. Chunks and scratch are
-//! rebuilt by the predictor, not trusted from disk. Keep this list in sync with
-//! every new unchecked index in predict/ and exact/.
+//! and exact per-tree scratch needs; constant prefixes; predicate coverage;
+//! fixed/wide accumulator bounds. The MaskPlan, with its numeric/chain/flip ranges,
+//! is not stored: the builder's own, from the checked fields, is the model's. Chunks
+//! and scratch are rebuilt by the predictor, not trusted from disk. Keep this list in
+//! sync with every new unchecked index in predict/ and exact/.
 //! Ownership sorts and per-split owner searches take O(R log R) work; the
-//! ownership/traversal tables and reconstructed MaskPlan require O(R) scratch.
+//! ownership/traversal tables require O(R) scratch, and the MaskPlan at most two
+//! flips per exception and chain of its word.
 
 use super::codec::invalid;
 use crate::exact::Plan;
@@ -42,7 +44,8 @@ pub(crate) fn partition(
     check(end == total, message)
 }
 
-pub(crate) fn model(m: &Model) -> io::Result<()> {
+/// Check `m`, decoded without its mask plan, and build that plan.
+pub(crate) fn model(m: &Model) -> io::Result<MaskPlan> {
     m.config.validate_layout()?;
     check(
         m.output.base_score.is_finite() && m.output.divisor.is_finite() && m.output.divisor > 0.0,
@@ -252,23 +255,14 @@ pub(crate) fn model(m: &Model) -> io::Result<()> {
     }
     check(seen.iter().all(|&used| used), "node predicate coverage")?;
     drop(seen);
-    check(
-        m.masks
-            .features
-            .windows(2)
-            .all(|f| f[0].feature < f[1].feature),
-        "unique mask features",
-    )?;
     let ranges = crate::load::predicates::build_feature_ranges(&m.varying_predicates);
-    // Disjoint feature tables and at most 32 shift fields per slot bound the
-    // builder's work. Never traverse untrusted MaskPlan ranges before equality.
-    // Match the builder's cap accounting exactly. A corrupt stored plan must
-    // not give reconstruction a larger flip budget than the file supplied.
-    let mask_bytes = b.rank_table_bytes() as u64
-        + 4 * (m.masks.flip_bounds.len() as u64 + m.masks.flips.len() as u64);
-    let expected = MaskPlan::build(b, &ranges, &points, mask_bytes)
-        .map_err(|_| invalid("mask plan correspondence"))?;
-    check(m.masks == expected, "mask plan correspondence")?;
+    // The file stores no MaskPlan to check or to follow: the builder's, from the
+    // checked bins, predicates and chain points, is the model's. Disjoint feature
+    // tables and at most 32 shift fields per slot bound the builder's work, and the
+    // file's own codes and exceptions its flips.
+    let mask_bytes = b.rank_table_bytes() as u64 + MaskPlan::max_flip_bytes(b, &ranges);
+    let masks =
+        MaskPlan::build(b, &ranges, &points, mask_bytes).map_err(|_| invalid("mask plan size"))?;
     // Bound the scratch arithmetic before a predictor can run it. Chunks normally
     // make scratch much smaller, but one large tree can occupy a chunk alone.
     // This deliberately loose upper bound covers all queue/arena/mask carriers,
@@ -280,7 +274,7 @@ pub(crate) fn model(m: &Model) -> io::Result<()> {
         scratch_bound <= isize::MAX as u128,
         "layout scratch address-space limit",
     )?;
-    Ok(())
+    Ok(masks)
 }
 
 impl crate::exact::FixedLeaf {
@@ -378,58 +372,42 @@ mod tests {
     }
 
     #[test]
-    fn in_range_mask_plan_mutations_are_not_just_bounds_checked() {
-        saved_corruption(
-            categories(),
-            |m| m.masks.points.swap(0, 1),
-            "mask plan correspondence",
-        );
-        saved_corruption(
-            categories(),
-            |m| {
-                m.masks.chains[0].start =
-                    (m.masks.chains[0].start + 1) % (m.masks.chains[0].len + 1);
-            },
-            "mask plan correspondence",
-        );
-        saved_corruption(
-            categories(),
-            |m| m.masks.flips[0] = 1 - m.masks.flips[0],
-            "mask plan correspondence",
-        );
-        saved_corruption(
-            categories(),
-            |m| {
-                m.masks.features.push(m.masks.features[0].clone());
-            },
-            "unique mask features",
-        );
+    fn the_mask_plan_is_rebuilt_not_stored() {
+        let mut forest = categories();
+        let built = forest.model.masks.clone();
+        assert!(!built.flips.is_empty());
+        assert_eq!(model(&forest.model).unwrap(), built);
+        // Whatever plan the saved forest holds, a loaded one has the builder's.
+        std::sync::Arc::get_mut(&mut forest.model).unwrap().masks = MaskPlan::default();
+        let file = support::File::new();
+        forest.save_layout_impl(&file.0).unwrap();
+        let loaded = Forest::load_layout_impl(&file.0).unwrap();
+        assert_eq!(loaded.model.masks, built);
+        #[cfg(all(unix, target_pointer_width = "64", not(miri)))]
+        {
+            // SAFETY: the test owns the file and does not write it while it is mapped.
+            let mapped = unsafe { Forest::map_layout_impl(&file.0) }.unwrap();
+            assert_eq!(mapped.model.masks, built);
+        }
     }
 
     #[test]
-    fn mask_rebuild_is_capped_at_stored_flip_bytes() {
-        let mut forest = categories();
-        let m = std::sync::Arc::get_mut(&mut forest.model).unwrap();
-        let points: Vec<_> = m
-            .tree_roots
-            .iter()
-            .map(|&root| {
-                let n = m.layout.nodes[node_index(root)];
-                ChainPoint {
-                    slot: n.slot() as u32,
-                    shift: ((n.w0 >> 32) & 31) as u32,
-                    bound: n.payload(),
-                    invert: ((n.w1 >> MASK_SHIFT) & MASK_FIELD) & 1 == 0,
-                }
-            })
-            .collect();
-        let ranges = crate::load::predicates::build_feature_ranges(&m.varying_predicates);
-        let b = &m.layout.bins;
-        assert!(!m.masks.flips.is_empty());
-        m.masks.flips.clear();
-        let cap = b.rank_table_bytes() as u64 + 4 * m.masks.flip_bounds.len() as u64;
-        assert!(MaskPlan::build(b, &ranges, &points, cap).is_err());
-        support::rejects(&forest, "mask plan correspondence");
+    fn the_mask_plans_flips_are_bounded_by_the_codes_and_exceptions() {
+        let flips = |forest: &Forest| {
+            let m = &forest.model;
+            let ranges = crate::load::predicates::build_feature_ranges(&m.varying_predicates);
+            (
+                4 * (m.masks.flip_bounds.len() + m.masks.flips.len()) as u64,
+                MaskPlan::max_flip_bytes(&m.layout.bins, &ranges),
+            )
+        };
+        // Four codes, no category, missing and two categories, and four exceptions, a
+        // split's category and missing in each of the two chains: five bounds and four
+        // flips, within five bounds and two flips for each exception and each of a
+        // word's 32 shifts.
+        assert_eq!(flips(&categories()), (4 * (5 + 4), 4 * (5 + 2 * 4 * 32)));
+        // Without varying categorical predicates there is nothing to bound.
+        assert_eq!(flips(&support::numeric(2, true)), (0, 0));
     }
 
     #[test]

@@ -121,6 +121,8 @@ GitHub Actions runs the fast checks on every pull request and push to `main`
 (`.github/workflows/checks.yml`), and the release tests with the research API in a
 generic x86-64 build (`-C target-cpu=x86-64`) at the CPU's level, at `TREEWALKER_ISA=v3`
 and at `base`, so that the levels a default build dispatches to run on x86-64 hardware.
+It also runs the layout-file tests on AArch64, whose committed layout files
+(`docs/layout-file.md`) no x86-64 run loads.
 
 The fast checks are `cargo fmt --check`, `cargo clippy --workspace --all-targets --
 -D warnings` with and without the research features, `cargo test --workspace`, and the

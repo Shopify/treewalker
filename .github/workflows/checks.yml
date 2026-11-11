@@ -1,6 +1,7 @@
-# The fast development checks on every pull request and push to main, and the
-# library's release tests in a generic x86-64 build at each instruction-set level it
-# dispatches to. The README's full checks (cross clippy, Miri, the spill checks, the
+# The fast development checks on every pull request and push to main, the library's
+# release tests in a generic x86-64 build at each instruction-set level it dispatches
+# to, and the layout-file tests on AArch64, whose committed layout files no x86-64
+# run loads. The README's full checks (cross clippy, Miri, the spill checks, the
 # artifacts) stay local.
 name: checks
 
@@ -53,3 +54,16 @@ jobs:
         run: TREEWALKER_ISA=v3 cargo test --release --features research
       - name: tests at the base level
         run: TREEWALKER_ISA=base cargo test --release --features research
+
+  aarch64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: lscpu | grep -m1 'Model name'
+      - name: layout validator white-box tests
+        run: cargo test --release --features research,layout-file
+      - name: production layout-file tests
+        run: cargo test --release --manifest-path experiments/layout-file/Cargo.toml --locked

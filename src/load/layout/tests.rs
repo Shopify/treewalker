@@ -350,6 +350,13 @@ fn random_rows(rng: &mut Rng, model: &Model, n_rows: usize) -> Vec<Vec<f64>> {
 fn check_model(rng: &mut Rng, forest: &Forest, n_rows: usize) {
     let model = &*forest.model;
     check_structure(model);
+    // A layout file stores no mask plan: its loader's is the builder's again, built
+    // within the bytes that the bins' codes and exceptions bound.
+    #[cfg(feature = "layout-file")]
+    assert_eq!(
+        crate::layout_file::validate::model(model).unwrap(),
+        model.masks
+    );
     let bins = &model.layout.bins;
     let mut reused = [bins.new_bins(), bins.new_bins()];
     for row in random_rows(rng, model, n_rows) {
@@ -1091,6 +1098,22 @@ fn a_cover_cut_short_packs() {
     assert_eq!((layout.chain_sets, layout.chains), (16_382, 3_432));
     assert_eq!((bins.chain_slots(), bins.has_shifts()), (276, true));
     check_model(&mut Rng::new(47), &forest, 100);
+}
+
+#[test]
+fn bins_past_the_least_share_of_l1_pack() {
+    // Singletons take a chain each, and varying, no fill the rule counts saves
+    // anything, so the bins' size decides. With the dummy's slot, 4,095 chains take
+    // 16 KiB unpacked, the least share of L1, and keep a word each; 4,096 pass it and
+    // pack, into 128 words, whatever the L1 of the machine that builds the layout.
+    let layout = |chains: u32| {
+        let splits: Vec<_> = (0..chains).map(|c| (vec![c], false, true)).collect();
+        let forest = categorical_load(&splits, true, &LoadOptions::default(), None).unwrap();
+        let bins = &forest.model.layout.bins;
+        (bins.chain_slots(), bins.has_shifts())
+    };
+    assert_eq!(layout(4_095), (4_095, false));
+    assert_eq!(layout(4_096), (128, true));
 }
 
 #[test]

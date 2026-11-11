@@ -11,6 +11,46 @@ categorical features, whose layout build sets its peak, from 74.2 to 68.7 MiB, i
 binary's. Both load in 76% to 77% of 3.3.0's time. `experiments/layout-file`
 generates these models and measures their loads. Outputs are unchanged.
 
+A layout file now loads in every build of its schema version and target, and no
+longer stores the mask plan that its loader rebuilds. A file of another schema
+version or target is `LoadError::LayoutMismatch`, with `layout-file`: the API's
+only addition.
+
+### Layout files
+
+- A layout file loads in every build of its schema version and target, rather than
+  only in the build that wrote it: the reader compares the header's schema version,
+  architecture, pointer width, endianness and link stride. The crate version and
+  the hash of the sources stay in the header, for messages. Layout files committed
+  for x86-64 and AArch64, which the tests load on both, fail a change to the format
+  that keeps its schema version.
+- A file of another schema version or target is `LoadError::LayoutMismatch` rather
+  than `LoadError::Layout`, so that a server can tell a file to rebuild from its
+  source model from a corrupt one. Its message gives the file's header fields and
+  the reader's. A file that does not start as a layout file stays
+  `LoadError::Layout`.
+- The format is at schema version 2, and 3.3.0's files are a mismatch. A file no
+  longer stores the mask plan of its varying predicates: the loader built one to
+  check the stored one, and now keeps it. On the public categorical model, the file
+  goes from 37.7 to 13.2 MiB; `load_layout`'s heap peak from 72.9 to 48.3 MiB and
+  its peak resident memory from 67.9 to 44.1 MiB; `map_layout`'s from 60.8 to
+  36.2 MiB and from 93.3 to 45.1 MiB; and both load in 7% less time.
+- `experiments/layout-file` gains a `convert` example, which saves a model's layout
+  file, checks its predictions against the model's and then puts it in place, as
+  `docs/layout-file.md` describes for serving. `load_peak` also measures a layout
+  file's load, owned or mapped.
+
+### Prediction
+
+- A model's categorical rank fields pack once its unpacked bins pass 16 KiB, on
+  every machine; for larger bins the rule asked the loading machine's L1. A layout
+  now follows from the model, its configuration and the target alone, so a model
+  converts to the same layout file anywhere. Nothing changes on a machine with
+  16 KiB of L1 a thread. On one with more, a model whose unpacked bins lie between
+  16 KiB and that share, and which the rule left unpacked, now packs: on an Apple
+  M4, generated models of that kind predicted groups of 64 rows up to 10% faster
+  and single rows up to 9% slower.
+
 ### Memory
 
 - LightGBM text is read and decoded one tree at a time, rather than read whole
@@ -22,6 +62,8 @@ generates these models and measures their loads. Outputs are unchanged.
 - A small model's text takes its 64 KiB read buffer more from a file, about 90 KiB
   at its peak against 30 KiB, and the first 256 KiB node segment more from another
   reader.
+- The mask plan of a model's varying categorical features keeps no spare capacity:
+  the loaded public categorical model holds 38.2 MiB rather than 46.9.
 
 ### Load time
 

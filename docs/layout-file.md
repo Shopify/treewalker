@@ -2,8 +2,8 @@
 
 The opt-in `layout-file` feature saves an already built forest, avoiding the source
 model's decoding, categorical chain construction and temporary build allocations.
-The default build and representation are unchanged. This is an experimental local
-cache format, not a replacement for a portable Treelite checkpoint.
+The default build and representation are unchanged. This is an experimental format
+for one target, not a replacement for a portable Treelite checkpoint.
 
 Layout files are production-only. With `research` enabled, all three public
 layout-file methods return `LoadError::Unsupported`; research builds rebuild from
@@ -15,8 +15,12 @@ Write a new file and rename it into place; do not overwrite files used by mapped
 readers.
 
 `Forest::load_layout(path)` streams into owned vectors and validates before
-returning. I/O failures use `LoadError::Io`, incompatible/corrupt layouts use
-`LoadError::Layout`, and the file-size cap uses `LoadError::Limit`. The initial
+returning. I/O failures use `LoadError::Io`. A file of another schema version or
+target uses `LoadError::LayoutMismatch`, so that a caller can rebuild it from the
+source model. A corrupt or invalid layout, or a file that is not a layout file,
+uses `LoadError::Layout`, with one exception: the schema version and target are
+read from the header before anything is checked, so a file corrupted there reads
+as a mismatch. The file-size cap uses `LoadError::Limit`. The initial
 limits are 4 GiB per file, 2^28 entries per array (also bounded by file size), and
 2^20 rows per group. No timing or heap-inventory API is exposed.
 Readers also apply a conservative scratch address-space bound, particularly for
@@ -28,7 +32,7 @@ Validation checks the configuration, precision, dummy behavior, node fields, lin
 leaves, full binary tree topology and coverage, recomputed scratch counts, constant
 prefixes, categorical domains, matching exception slot/word lengths, monotone bounded
 offsets and relative slots within each feature's extent,
-mask-chain and flip ranges, predicate coverage and exact-sum bounds. Packed fixed
+predicate coverage and exact-sum bounds. Packed fixed
 leaf nodes must round-trip through `fixed_value`/`fixed`. Their values must have a
 canonical zero or an odd nonzero significand with magnitude below 2^53 and a shift
 below 125; shifted magnitudes and forest sums must fit the fixed plan. Leaves are
@@ -43,30 +47,34 @@ codebooks, offset tables and exception tables also have non-overlapping per-feat
 ownership. Ownership is checked before per-feature scans.
 
 Slot ownership decides whether a node needs a varying mask and bounds its feature
-and predicate kind. The loader reconstructs chain points from nodes, rebuilds the
-mask plan from validated bins/predicates, and compares every feature, chain, point and
-flip; it never follows untrusted mask-plan ranges. Features are unique. Tree extents
+and predicate kind. The file stores no mask plan: the loader reconstructs chain
+points from nodes and builds the plan from validated bins/predicates, as a source
+build does, so there are no untrusted mask-plan ranges to follow. Tree extents
 and their disjoint coverage are checked before visiting any tree's nodes.
 
 Validation is O(R log R) in the file's records: ownership sorts and per-split
 binary searches are not linear. It allocates O(R) temporary heap in addition to
-the decoded arrays, including ownership tables, traversal scratch and a second
-MaskPlan while the stored plan is still alive. Reconstruction uses the stored
-plan's flip-byte budget, not an independent multi-gigabyte allowance; that budget
-is not a strict heap-peak bound, because vectors also have capacities and scratch.
+the decoded arrays, including ownership tables and traversal scratch. The mask
+plan it builds stays with the forest, on the heap under either loader. Its flip
+lists take 4 bytes per code of a varying categorical feature and at most 8 per
+exception for each chain of the exception's word, of which a word holds at most 32.
+The file's own codes and exceptions bound the plan, not a stored size, so a plan
+can be larger than its file.
 
-Measured with dhat in release builds, retaining only the loaded forest (no
-predictor), a private model with many categorical splits had peak/live heap
-ratios of 1.00x owned and 1.05x mapped with its own configuration. With every feature varying, they were 1.84x and 2.51x:
-predicate-heavy validation can require substantial temporary heap. A public
-generated forest with 1,024 two-sided categorical predicates used 0.345/0.251 MiB
-peak/live owned and 0.220/0.134 MiB mapped. These are heap measurements, not RSS;
-file-backed mapped pages are not counted by dhat.
+Measured with a counting allocator in release builds, retaining only the loaded
+forest (no predictor), a private model with many categorical splits had peak/live
+heap ratios of 1.00x owned and 1.05x mapped with its own configuration. With every
+feature varying, they were 1.37x and 1.66x: predicate-heavy validation can require
+substantial temporary heap, most of it here the capacity the plan's flip list
+reserves as it grows, which the build then returns. A public generated forest with
+1,024 two-sided categorical predicates used 0.313/0.251 MiB peak/live owned and
+0.188/0.134 MiB mapped. These are heap measurements, not RSS; file-backed mapped
+pages are not counted.
 
 Checks needed only for prediction agreement are deliberately omitted: threshold
 and codebook order, code-zero exceptions and agreement between a predicate's
-two split sides. Bounds, predicate (feature, kind) ordering and mask-plan
-correspondence remain safety requirements. A hostile writer can choose arbitrary
+two split sides. Bounds and predicate (feature, kind) ordering remain safety
+requirements. A hostile writer can choose arbitrary
 predictions; neither structural validation nor the checksum authenticates a model.
 
 On 64-bit Unix, `unsafe Forest::map_layout(path)` borrows the layout nodes,
@@ -84,20 +92,51 @@ by atomic rename is fine if the old file remains immutable. This unsafe API is
 deliberate: validation cannot protect a live slice from subsequent external writes.
 An immutable artifact/ownership abstraction for a safe mapped API remains open.
 
+## Converting models for serving
+
+Convert a model once for each target that serves it, when it is trained; a server
+then loads the file rather than decoding the model and building its layout. The
+`convert` example of `experiments/layout-file` is the whole procedure:
+
+```text
+cargo run --release --manifest-path experiments/layout-file/Cargo.toml \
+    --example convert -- MODEL CONFIG LAYOUT.twl
+```
+
+It loads the model with its grouping configuration, saves the forest's layout to a
+new file, loads that file with `Forest::load_layout`, compares its predictions with
+the forest's on generated rows, and only then renames the file into place:
+validation checks that a layout is safe to run, not that it predicts as its source
+model does. It raises `max_json_bytes`, which bounds the length of LightGBM text
+rather than its memory, since text is read a tree at a time. Build a converter with
+`layout-file` and without `research`.
+
+A server loads the file with `Forest::load_layout`. Keep the source model with it:
+a build of another schema version or target gets `LoadError::LayoutMismatch` and
+can rebuild from the source, while `LoadError::Layout` is a corrupt file and
+should fail the load. `Forest::map_layout` loads little faster, since both
+validate the whole file, and a process's resident memory is about the same either
+way; mapping pays when several processes map one file, whose pages they share.
+`load_peak` in `experiments/layout-file` measures each load.
+
 ## Format
 
-The header identifies the magic, schema version, crate version, source build ID,
-architecture, endianness, pointer width, link stride, configuration
-fingerprint and threshold type. Readers reject mismatches. Arrays have a u64
+The header is the magic and seven NUL-terminated fields: the schema version; the
+crate version and source build ID of the build that wrote the file; and the
+target's architecture, pointer width, endianness and link stride. A reader requires
+its own schema version and target, and returns `LoadError::LayoutMismatch` for any
+other before reading further. It does not compare the writer's crate version and
+build ID, which a mismatch's message reports. The configuration fingerprint and
+threshold type follow, and must match the body. Arrays have a u64
 element count and begin on a 16-byte boundary. Numeric arrays use native bytes;
 all other metadata uses explicit scalar fields and checked enum/bool tags. No
 pointers, Rust enum representations, padding or mutable latency cache are saved.
 The field order is specified by `layout_file::codec` and the colocated schemas
 that need private access, not Rust layout.
 
-The `TWLAYOUT` format starts at schema version 1. It stores exception words
-separately from feature-relative slots. The slots section starts with an explicit
-u8 width tag: 2 for u16 slots, 4 for u32 slots,
+The `TWLAYOUT` format is at schema version 2; version 1 also stored the mask plan.
+It stores exception words separately from feature-relative slots. The slots
+section starts with an explicit u8 width tag: 2 for u16 slots, 4 for u32 slots,
 followed by that width's aligned array. Both widths are supported model-wide.
 The layout has one Wide-leaf vector, empty under a Fixed plan. Fixed values live
 in layout nodes: word 0 is zero; word 1 has shift bits 0-6, zero at bit 7, the
@@ -112,20 +151,26 @@ It then consumes the zero-padded final partial word and its byte count. This
 detects accidental corruption, not malicious replacement; it is not authentication.
 The configuration fingerprint uses the same algorithm on its encoded fields.
 
+A file loads in every build of its schema version and target, whatever the crate
+version and sources of the build that wrote it; regenerate it from the source model
+for another target, or after a schema version bump. It keeps the layout its writer
+chose: a later build's rules may lay the same model out otherwise, and load the
+file as it is. A change to the format, or to what the kernel makes of its fields,
+must bump the schema version. Layout files committed for x86-64 and AArch64
+(`experiments/layout-file/tests/fixtures`), which an earlier build wrote, guard
+this: CI loads them on both architectures and compares their predictions with their
+source models', so a change that forgets the bump fails there. Rank-table and
+leaf-width schemas remain colocated in `load/layout/layout_file.rs`.
+
 The build ID is a fixed 16-hex-digit multiply-rotate checksum of `build.rs` and
 every file under `src/`, in sorted relative-path order, each path followed by its
-contents. It excludes Cargo.toml, which packaging rewrites. Files from different
-source inputs, crate versions or incompatible targets are rejected with
-`LoadError::Layout`; regenerate them from the source model after such a change.
-The ID enforces a conservative source-identity policy, not authenticity. Schema
-changes still require a version bump. Rank-table and leaf-width schemas remain
-colocated in `load/layout/layout_file.rs`.
+contents. It excludes Cargo.toml, which packaging rewrites. It names the writer's
+sources; it does not authenticate them.
 
 Production API tests live in the excluded `experiments/layout-file` crate, whose
 only treewalker feature is `layout-file`. CI runs it separately to avoid workspace
-research-feature unification. Tests cover owned/mapped round trips and malformed
-bodies with independently recomputed checksums. In-crate white-box tests call
-internal entry points for this same production format.
+research-feature unification. Tests cover owned/mapped round trips, the committed
+layout files, and malformed bodies with independently recomputed checksums.
+In-crate white-box tests call internal entry points for this same production format.
 
-Open design questions include cache compatibility across source changes,
-configurable limits and atomic/durable publication.
+Open design questions include configurable limits and atomic/durable publication.

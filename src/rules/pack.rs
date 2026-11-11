@@ -1,8 +1,9 @@
 //! Whether a model packs its categorical chains' rank fields ([`crate::load::layout`],
-//! "Packed fields"): when its unpacked bins would leave L1, or when the fill work
-//! packing saves a group outweighs the shift its walk then takes at every lane step.
-//! A model whose chain covers ran out of steps packs regardless, so that an extra
-//! chain costs a field rather than a slot.
+//! "Packed fields"): when its unpacked bins would leave the least share of L1 a core
+//! gives a thread ([`LEAST_L1`]), or when the fill work packing saves a group
+//! outweighs the shift its walk then takes at every lane step. A model whose chain
+//! covers ran out of steps packs regardless, so that an extra chain costs a field
+//! rather than a slot.
 //!
 //! The lane rule ([`super::lanes()`]) prices a lane step at the larger of its issue
 //! bound and its chain, `σ = max(U / W, C / k)` cycles, with `U` the step's uops, `W`
@@ -48,8 +49,13 @@
 //!
 //! Bins within 16 KiB, the assumed 32 KiB of L1 over two threads of a core
 //! ([`LEAST_L1`]), stay in L1 on any core with that L1 or more and at most two
-//! threads, so the rule probes the caches only for larger ones; the first predictor
-//! probes them anyway.
+//! threads. Larger ones pack, whatever the L1 of the machine that builds the layout:
+//! a layout saved to a file serves on other machines, so it follows from the model,
+//! its configuration and the target alone. The grid above was measured when the rule
+//! read the machine's own share of L1 instead, 128 KiB on the M4. There, over
+//! generated models of one-against-the-rest splits with 17 to 65 KiB of unpacked
+//! bins, which that rule left unpacked and this one packs, packing took 0.90 to 0.99
+//! of the unpacked time for groups of 64 rows and 1.01 to 1.09 for single rows.
 //!
 //! The rule reads the bins' size first, then counts `ΔE`, and takes `S` in a pass over
 //! the trees that stops past the most at which packing pays: over the grid's 554
@@ -57,7 +63,7 @@
 //! at most 1.0 ms.
 
 use super::lanes::shift_uops;
-use super::machine::{self, Caches};
+use super::machine;
 
 /// The fill's uops per exception it restores and writes, in the units of the issue
 /// width (x86-64 uops, a macro-fused compare-and-branch once; AArch64 instructions).
@@ -76,18 +82,11 @@ const FILL_UOPS: [usize; 2] = if cfg!(target_arch = "x86_64") {
 /// ([`machine::ASSUMED`]) and at most two threads.
 pub(crate) const LEAST_L1: usize = machine::ASSUMED[0].bytes / 2;
 
-/// [`resident`] on this machine, probing its caches only for bins past [`LEAST_L1`].
-pub(crate) fn resident_here(bytes: usize) -> bool {
-    bytes <= LEAST_L1 || resident(bytes, machine::caches())
-}
-
-/// Whether bins of `bytes` stay in L1: within one CPU's share of it, as the chunk
-/// budget takes L2's ([`super::chunk_budget`]).
-pub(crate) fn resident(bytes: usize, caches: &Caches) -> bool {
-    bytes
-        <= caches
-            .level(1)
-            .map_or(machine::ASSUMED[0].bytes, machine::Cache::per_cpu)
+/// Whether bins of `bytes` stay in L1 on every such core: within [`LEAST_L1`], not
+/// this machine's share, which is not the share of the machines a saved layout
+/// serves on.
+pub(crate) const fn resident(bytes: usize) -> bool {
+    bytes <= LEAST_L1
 }
 
 /// The most lane slots of a group for which packing pays with the bins in L1, on the
@@ -100,30 +99,13 @@ pub(crate) fn max_lane_slots(saved: f64, varying: bool) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::machine::{Cache, Source};
 
     #[test]
-    fn bins_stay_in_l1_up_to_one_cpus_share() {
-        let caches = |levels: Vec<Cache>| Caches {
-            line: 64,
-            levels,
-            source: Source::Assumed,
-        };
-        // 48 KiB shared by two logical CPUs: 24 KiB each.
-        let smt = caches(vec![Cache {
-            level: 1,
-            bytes: 48 << 10,
-            shared_by: 2,
-        }]);
-        assert!(resident(24 << 10, &smt));
-        assert!(!resident((24 << 10) + 1, &smt));
-        // Without an L1, the assumed one.
-        let none = caches(Vec::new());
-        assert!(resident(machine::ASSUMED[0].bytes, &none));
-        assert!(!resident(machine::ASSUMED[0].bytes + 1, &none));
-        // Within the least share, whatever this machine's caches.
+    fn bins_stay_in_l1_up_to_the_least_share() {
+        // Half the assumed 32 KiB, whatever this machine's caches.
         assert_eq!(LEAST_L1, 16 << 10);
-        assert!(resident_here(LEAST_L1));
+        assert!(resident(LEAST_L1));
+        assert!(!resident(LEAST_L1 + 1));
     }
 
     #[test]
