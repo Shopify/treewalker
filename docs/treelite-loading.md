@@ -257,12 +257,14 @@ is assumed. Creating the first predictor of a process also measures the caches'
 load latencies, which set the walk's prefetch distance, in about a millisecond; a
 model whose nodes exceed one CPU's share of the last cache has its own nodes'
 latency measured instead, by a random walk over them when its first predictor is
-created (a few milliseconds, allocating nothing), which reads whatever holds them,
-including caches the system does not report;
-`TREEWALKER_LATENCY_NS` (nanoseconds per cache level, then memory's, comma-separated)
-replaces the measurement. Every group runs whole: groups of up to 1,024 rows take
-masks of 32 to 1,024 bits, a power of two, and wider ones masks of their own width
-in 128-bit units. A loaded model keeps the prediction layout,
+created, which allocates nothing and reads whatever holds them, including caches
+the system does not report. The walk first makes as many loads as the last cache
+has lines, or twice the nodes' lines if those are fewer: for a model of 6 million
+nodes it took about 20 ms on an Apple M4 Pro and 50 to 75 ms on a Zen 5 EPYC with
+a 32 MiB L3. `TREEWALKER_LATENCY_NS` (nanoseconds per cache level, then memory's,
+comma-separated) replaces the measurement. Every group runs whole: groups of up to
+1,024 rows take masks of 32 to 1,024 bits, a power of two, and wider ones masks of
+their own width in 128-bit units. A loaded model keeps the prediction layout,
 16 bytes per node plus the bins and the leaf table; the parsed nodes and the
 category lists are kept only with the `research` feature.
 
