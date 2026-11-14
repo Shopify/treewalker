@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 3.4.0
+
+3.4.0 loads LightGBM text in less memory and time, loads a layout file in every
+build of its schema version and target, and rejects LightGBM text that was cut
+short, which 3.3.0 loaded as the trees before the cut. Outputs are unchanged.
 
 LightGBM text from a file or from memory now loads with its Treelite binary's heap
 peak or less: it is decoded a tree at a time, its nodes counted first, rather than
@@ -9,7 +13,7 @@ loaded model's. On a public numeric model of 800 trees, the peak falls from 39.7
 7.0 MiB, against 7.8 MiB for its binary; on a public model with high-cardinality
 categorical features, whose layout build sets its peak, from 74.2 to 68.7 MiB, its
 binary's. Both load in 76% to 77% of 3.3.0's time. `experiments/layout-file`
-generates these models and measures their loads. Outputs are unchanged.
+generates these models and measures their loads.
 
 A layout file now loads in every build of its schema version and target, and no
 longer stores the mask plan that its loader rebuilds. A file of another schema
