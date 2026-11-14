@@ -74,6 +74,10 @@ only addition.
 
 ### Formats
 
+- LightGBM text that ends before `end of trees`, which LightGBM writes after the
+  last tree, is `LoadError::MalformedModel`. 3.3.0 loaded text cut short after a
+  tree's required fields, or inside the last number of the last of them, as the
+  trees before the cut.
 - LightGBM text arrays are split on ASCII whitespace, as LightGBM writes them; other
   Unicode whitespace no longer separates their entries.
 - A UTF-8 error in LightGBM text gives the invalid byte's offset in the input, and

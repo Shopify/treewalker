@@ -995,12 +995,37 @@ fn lightgbm_rejects_unsupported_malformed_and_capped_inputs() {
             "{new}"
         );
     }
-    // Every line boundary before the first complete tree is truncated.
-    for (end, _) in original[..original.find("leaf_value=").unwrap()].match_indices('\n') {
-        assert!(
-            parse(&original[..end], &defaults).is_err(),
-            "accepted truncation {end}"
-        );
+    // Text cut anywhere before the end of `end of trees` fails to load, rather than
+    // loading the trees before the cut.
+    for name in [
+        "binary",
+        "categorical_trained",
+        "category_words",
+        "custom",
+        "lambdarank",
+        "missing_types",
+        "rf",
+        "single_leaf",
+        "xentropy",
+    ] {
+        let text = bytes(&format!("lightgbm/{name}.txt"));
+        let end = text
+            .windows(b"end of trees".len())
+            .position(|w| w == b"end of trees")
+            .unwrap()
+            + b"end of trees".len();
+        let at = |cut| {
+            Forest::from_bytes(
+                &text[..cut],
+                ModelFormat::LightGbmText,
+                config(128),
+                &defaults,
+            )
+        };
+        assert!(at(end).is_ok(), "{name}");
+        for cut in 0..end {
+            assert!(at(cut).is_err(), "{name}: accepted truncation at {cut}");
+        }
     }
     let n = original.len() as u64;
     assert!(

@@ -205,7 +205,8 @@ fn lightgbm_text_is_held_one_tree_at_a_time() {
 /// to back its count, even when the caller raises the decoded-array cap.
 #[test]
 fn lightgbm_leaf_counts_need_backing_text_before_reserving_nodes() {
-    let text = b"tree\nnum_class=1\nmax_feature_idx=0\nTree=0\nnum_leaves=134217727\nnum_cat=0\nleaf_value=0\n";
+    let text = b"tree\nnum_class=1\nmax_feature_idx=0\nTree=0\nnum_leaves=134217727\n\
+                 num_cat=0\nleaf_value=0\nend of trees\n";
     let config = WalkerConfig::builder(1)
         .max_group_width(1)
         .varying([])

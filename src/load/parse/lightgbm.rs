@@ -96,6 +96,9 @@ struct Sections<R> {
     line: Vec<u8>,
     /// The `Tree=` line that ended the last section.
     tree: String,
+    /// Whether `end of trees` was read, which ends the trees of every model LightGBM
+    /// saves: text that ends without it was cut short.
+    complete: bool,
 }
 
 impl<R: BufRead> Sections<R> {
@@ -106,6 +109,7 @@ impl<R: BufRead> Sections<R> {
             read: 0,
             line: Vec::new(),
             tree: String::new(),
+            complete: false,
         }
     }
 
@@ -135,6 +139,7 @@ impl<R: BufRead> Sections<R> {
             let line = utf8(&self.line, self.read)?;
             let trimmed = line.trim_end();
             if trimmed == "end of trees" {
+                self.complete = true;
                 return Ok(false);
             }
             if trimmed.starts_with("Tree=") {
@@ -148,8 +153,13 @@ impl<R: BufRead> Sections<R> {
     }
 
     /// Read the rest of the input, which no tree is decoded from, under the cap and
-    /// as UTF-8, as every line before it.
+    /// as UTF-8, as every line before it. Text that ended before `end of trees` is
+    /// malformed: it would otherwise load as the trees that were read, with the last
+    /// one's lines as far as they went.
     fn finish(mut self) -> Result<(), LoadError> {
+        if !self.complete {
+            return Err(malformed("LightGBM text ends before `end of trees`"));
+        }
         while self.read()? {
             utf8(&self.line, self.read)?;
         }
@@ -701,10 +711,13 @@ mod tests {
             let invalid = [text.as_slice(), b"\xff\n"].concat();
             assert_eq!(count_nodes(invalid.as_slice(), &options), None);
         }
-        let unbacked = b"tree\nTree=0\nnum_leaves=2\nleaf_value=0\n";
+        let unbacked = b"tree\nTree=0\nnum_leaves=2\nleaf_value=0\nend of trees\n";
         assert_eq!(count_nodes(&unbacked[..], &options), None);
-        let backed = b"tree\nTree=0\nnum_leaves=2\nleaf_value=0 0\n";
+        let backed = b"tree\nTree=0\nnum_leaves=2\nleaf_value=0 0\nend of trees\n";
         assert_eq!(count_nodes(&backed[..], &options), Some(3));
+        // Nor for text that ends before `end of trees`.
+        let cut = &backed[..backed.len() - b"end of trees\n".len()];
+        assert_eq!(count_nodes(cut, &options), None);
     }
 
     /// A read that fails after the trees fails the load as an I/O error, as one before

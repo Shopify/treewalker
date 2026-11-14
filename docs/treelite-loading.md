@@ -94,7 +94,8 @@ TreeWalker predictions are bitwise identical through either route.
 - Linear trees (`is_linear=1`) and `num_tree_per_iteration` other than one are
   rejected even where Treelite would silently ignore their semantics. Single-leaf
   trees are supported. Each tree needs `num_cat`, `decision_type`, `leaf_count`
-  and `internal_count`, as LightGBM writes them.
+  and `internal_count`, as LightGBM writes them, and `end of trees` must follow
+  the last tree.
 
 The text is read and decoded one tree at a time, and array entries are separated
 by ASCII whitespace, as LightGBM writes them. `max_json_bytes` (64 MiB by
