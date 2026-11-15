@@ -117,7 +117,11 @@ can rebuild from the source, while `LoadError::Layout` is a corrupt file and
 should fail the load. `Forest::map_layout` loads little faster, since both
 validate the whole file, and a process's resident memory is about the same either
 way; mapping pays when several processes map one file, whose pages they share.
-`load_peak` in `experiments/layout-file` measures each load.
+Processes forked after `Forest::load_layout` share its arrays too, copy-on-write.
+A server that forks its workers should create a predictor before it forks: the
+first one measures latencies (`docs/treelite-loading.md`), which each worker would
+otherwise measure again. `load_peak` in `experiments/layout-file` measures each
+load.
 
 ## Format
 
@@ -145,10 +149,11 @@ extension at bit 63. Readers validate the node and packed encoding before conver
 a fixed value.
 
 An eight-byte little-endian checksum ends the file. Its streaming algorithm
-consumes little-endian u64 words, starting at zero, with
+consumes the bytes before it as little-endian u64 words, starting at zero, with
 `state = (rotate_left(state, 5) XOR word) * 0x517cc1b727220a95` modulo 2^64.
-It then consumes the zero-padded final partial word and its byte count. This
-detects accidental corruption, not malicious replacement; it is not authentication.
+It ends with two more words, whatever the length: the bytes left over, fewer than
+eight, padded with zeros, and then their count. This detects accidental corruption,
+not malicious replacement; it is not authentication.
 The configuration fingerprint uses the same algorithm on its encoded fields.
 
 A file loads in every build of its schema version and target, whatever the crate

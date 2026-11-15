@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 3.4.0
+
+3.4.0 loads LightGBM text in less memory and time, loads a layout file in every
+build of its schema version and target, and rejects LightGBM text that was cut
+short, which 3.3.0 loaded as the trees before the cut. Outputs are unchanged.
 
 LightGBM text from a file or from memory now loads with its Treelite binary's heap
 peak or less: it is decoded a tree at a time, its nodes counted first, rather than
@@ -9,7 +13,7 @@ loaded model's. On a public numeric model of 800 trees, the peak falls from 39.7
 7.0 MiB, against 7.8 MiB for its binary; on a public model with high-cardinality
 categorical features, whose layout build sets its peak, from 74.2 to 68.7 MiB, its
 binary's. Both load in 76% to 77% of 3.3.0's time. `experiments/layout-file`
-generates these models and measures their loads. Outputs are unchanged.
+generates these models and measures their loads.
 
 A layout file now loads in every build of its schema version and target, and no
 longer stores the mask plan that its loader rebuilds. A file of another schema
@@ -29,12 +33,13 @@ only addition.
   source model from a corrupt one. Its message gives the file's header fields and
   the reader's. A file that does not start as a layout file stays
   `LoadError::Layout`.
-- The format is at schema version 2, and 3.3.0's files are a mismatch. A file no
-  longer stores the mask plan of its varying predicates: the loader built one to
-  check the stored one, and now keeps it. On the public categorical model, the file
-  goes from 37.7 to 13.2 MiB; `load_layout`'s heap peak from 72.9 to 48.3 MiB and
-  its peak resident memory from 67.9 to 44.1 MiB; `map_layout`'s from 60.8 to
-  36.2 MiB and from 93.3 to 45.1 MiB; and both load in 7% less time.
+- The format is at schema version 2, and 3.3.0's files are a mismatch. Its trailing
+  checksum is version 1's, unchanged. A file no longer stores the mask plan of its
+  varying predicates: the loader built one to check the stored one, and now keeps
+  it. On the public categorical model, the file goes from 37.7 to 13.2 MiB;
+  `load_layout`'s heap peak from 72.9 to 48.3 MiB and its peak resident memory from
+  67.9 to 44.1 MiB; `map_layout`'s from 60.8 to 36.2 MiB and from 93.3 to 45.1 MiB;
+  and both load in 7% less time.
 - `experiments/layout-file` gains a `convert` example, which saves a model's layout
   file, checks its predictions against the model's and then puts it in place, as
   `docs/layout-file.md` describes for serving. `load_peak` also measures a layout
@@ -50,6 +55,10 @@ only addition.
   16 KiB and that share, and which the rule left unpacked, now packs: on an Apple
   M4, generated models of that kind predicted groups of 64 rows up to 10% faster
   and single rows up to 9% slower.
+- The guides say what a model's first predictor costs when its nodes exceed the
+  caches, where the loading guide said a few milliseconds: for 6 million nodes,
+  about 20 ms on an Apple M4 Pro and 50 to 75 ms on a Zen 5 EPYC with a 32 MiB L3.
+  A server that forks its workers should create a predictor before it forks.
 
 ### Memory
 
@@ -74,6 +83,10 @@ only addition.
 
 ### Formats
 
+- LightGBM text that ends before `end of trees`, which LightGBM writes after the
+  last tree, is `LoadError::MalformedModel`. 3.3.0 loaded text cut short after a
+  tree's required fields, or inside the last number of the last of them, as the
+  trees before the cut.
 - LightGBM text arrays are split on ASCII whitespace, as LightGBM writes them; other
   Unicode whitespace no longer separates their entries.
 - A UTF-8 error in LightGBM text gives the invalid byte's offset in the input, and
