@@ -1,0 +1,126 @@
+[
+  {
+    "version": 1,
+    "slug": "treewalker-unchecked-kernel",
+    "description": "The library's unsafe code: `unsafe` blocks and functions, `get_unchecked` indexing, raw pointer reads and raw slices in the prediction kernel (`predict/`), the exact sums (`exact/`) and the layout file's storage. Each one trusts an invariant that the loader or the calling contract must establish. A model or layout file that passes validation but breaks one is memory unsafety inside services that embed the library.",
+    "noiseTier": "normal",
+    "filePatterns": ["src/**/*.rs"],
+    "patterns": [
+      { "source": "unsafe \\{", "flags": "m", "label": "unsafe block" },
+      { "source": "unsafe fn ", "flags": "m", "label": "unsafe function" },
+      { "source": "get_unchecked", "flags": "m", "label": "unchecked index" },
+      { "source": "from_raw_parts", "flags": "m", "label": "raw slice" }
+    ],
+    "examples": [
+      "                unsafe { *masks.add(field) }",
+      "    unsafe fn add(&mut self, at: usize, v: S::Value) {",
+      "            let below = unsafe { *book.get_unchecked(lo + half) } < c;",
+      "    unsafe { std::slice::from_raw_parts(values.as_ptr().cast(), size_of_val(values)) }"
+    ],
+    "closesSurfaceIds": ["unchecked-kernel-trusts-loader-invariants"]
+  },
+  {
+    "version": 1,
+    "slug": "treewalker-model-decode",
+    "description": "Decoding of model input: Treelite binary and JSON, LightGBM text, the grouping configuration and layout files. Counts and lengths come from the file and size reservations and tables; `LoadOptions` caps and `layout_file/validate.rs` must check them first. An error path that is missing, or a check that comes after the allocation or the use, lets a file reach the unchecked kernel.",
+    "noiseTier": "normal",
+    "filePatterns": [
+      "src/load/**/*.rs",
+      "src/layout_file/**/*.rs",
+      "src/config.rs",
+      "src/config/**/*.rs"
+    ],
+    "patterns": [
+      {
+        "source": "LoadError::(MalformedModel|MalformedConfig|Limit|Layout|LayoutMismatch)",
+        "flags": "m",
+        "label": "load error path"
+      },
+      {
+        "source": "try_reserve_exact\\(",
+        "flags": "m",
+        "label": "reservation sized from the file"
+      },
+      {
+        "source": "from_le_bytes",
+        "flags": "m",
+        "label": "bytes decoded from the file"
+      },
+      {
+        "source": "\\binvalid\\(",
+        "flags": "m",
+        "label": "layout validation failure"
+      }
+    ],
+    "examples": [
+      "            return Err(LoadError::MalformedModel(format!(",
+      "            .try_reserve_exact(len)",
+      "            self.word(u64::from_le_bytes(self.tail));",
+      "    if ok { Ok(()) } else { Err(invalid(message)) }"
+    ],
+    "closesSurfaceIds": ["model-and-layout-decoding"]
+  },
+  {
+    "version": 1,
+    "slug": "treewalker-public-entry",
+    "description": "The public entry points that embedding services use: `Forest::load`, `from_bytes`, `from_reader`, the `unsafe` `map_layout`, `load_layout`, `save_layout`, and the `Predictor` calls, which check lengths and grouping before they write output. A change here moves the boundary between a returned `LoadError`, a documented panic and undefined behaviour.",
+    "noiseTier": "precise",
+    "filePatterns": [
+      "src/forest.rs",
+      "src/predictor.rs",
+      "src/layout_file/mod.rs"
+    ],
+    "patterns": [
+      {
+        "source": "pub (unsafe )?fn (load|from_bytes|from_reader|map_layout|load_layout|save_layout)\\b",
+        "flags": "m",
+        "label": "model or layout entry point"
+      },
+      {
+        "source": "pub fn predict_(groups|group|fixed)\\b",
+        "flags": "m",
+        "label": "prediction entry point"
+      }
+    ],
+    "examples": [
+      "    pub fn from_bytes(",
+      "    pub unsafe fn map_layout(path: impl AsRef<Path>) -> Result<Self, LoadError> {",
+      "    pub fn predict_groups(&mut self, data: &[f64], offsets: &[usize], out: &mut [f64]) {"
+    ],
+    "closesSurfaceIds": ["public-load-and-predict-api"]
+  },
+  {
+    "version": 1,
+    "slug": "treewalker-isa-dispatch",
+    "description": "Instruction-set selection: `TREEWALKER_ISA` may only lower the level that `is_x86_feature_detected!` reports, and `#[target_feature]` kernels must run only on a CPU that has their features. A path that raises the level, or calls such a kernel without the check, runs an instruction that the CPU lacks.",
+    "noiseTier": "precise",
+    "filePatterns": [
+      "src/predict/isa.rs",
+      "src/predict/kernel.rs",
+      "src/predict/mask/*.rs"
+    ],
+    "patterns": [
+      {
+        "source": "std::env::var\\(",
+        "flags": "m",
+        "label": "environment read"
+      },
+      {
+        "source": "is_x86_feature_detected!",
+        "flags": "m",
+        "label": "CPU feature detection"
+      },
+      {
+        "source": "#\\[target_feature\\(enable",
+        "flags": "m",
+        "label": "target-feature function"
+      }
+    ],
+    "examples": [
+      "        Level::capped(detected(), std::env::var(\"TREEWALKER_ISA\").ok().as_deref())",
+      "        \"avx2\" => std::arch::is_x86_feature_detected!(\"avx2\"),",
+      "            arities!(direct!(#[target_feature(enable = $features)] [pub(super)]));"
+    ],
+    "closesSurfaceIds": ["isa-dispatch"]
+  }
+]

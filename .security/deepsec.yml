@@ -1,0 +1,8 @@
+projects:
+  treewalker:
+    priority:
+      - "src/"
+      - ".github/"
+    ignore:
+      # The paper's recorded measurements and the run commands that produced them.
+      - "experiments/data/**"
