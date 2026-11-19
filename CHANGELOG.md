@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+`leaf_rows` and `leaf_rows_from_bytes` build rows that together reach every leaf of
+a model that any input reaches, to compare its predictions with another
+implementation's at each leaf. Outputs and the layout file format are unchanged.
+
+- A row keeps, for each feature, the values it may still take: an interval, or the
+  classes of value its categorical splits tell apart, and NaN. A walk down a tree
+  narrows them to the side each split takes and backs out of a side that leaves a
+  feature no value, so a row fits a leaf exactly when some input reaches it. One row
+  walks every tree, reaching a leaf no earlier row reached in each tree it still
+  fits. A feature split both numerically and by category is `LoadError::Unsupported`.
+- The `convert` example of `experiments/layout-file` also compares a layout file's
+  predictions with its source model's on them, at every leaf. A LightGBM model
+  of 438 trees and 1.75 million leaves takes about 33,000 rows, built in 13 s on an
+  Apple M5 Pro.
+
 ## 3.4.0
 
 3.4.0 loads LightGBM text in less memory and time, loads a layout file in every

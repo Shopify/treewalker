@@ -95,6 +95,10 @@ required-features = ["research"]
 name = "limits"
 required-features = ["research"]
 
+[[test]]
+name = "leaf_rows"
+required-features = ["research"]
+
 # Developer benchmarks over the committed fixtures: cargo bench.
 [[bench]]
 name = "predict"

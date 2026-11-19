@@ -105,7 +105,8 @@ cargo run --release --manifest-path experiments/layout-file/Cargo.toml \
 
 It loads the model with its grouping configuration, saves the forest's layout to a
 new file, loads that file with `Forest::load_layout`, compares its predictions with
-the forest's on generated rows, and only then renames the file into place:
+the forest's on `leaf_rows`, which reach every leaf, and on generated rows, and only
+then renames the file into place:
 validation checks that a layout is safe to run, not that it predicts as its source
 model does. It raises `max_json_bytes`, which bounds the length of LightGBM text
 rather than its memory, since text is read a tree at a time. Build a converter with

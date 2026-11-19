@@ -163,12 +163,12 @@ impl Model {
         }
     }
 
-    /// The leaf value `row` reaches in `tree`.
-    pub fn leaf_value(&self, tree: &Tree, row: &[f64]) -> f64 {
+    /// The index of the leaf `row` reaches in `tree`.
+    pub fn leaf_index(&self, tree: &Tree, row: &[f64]) -> usize {
         let mut i = 0;
         loop {
             match tree.nodes[i] {
-                Node::Leaf { value, .. } => return self.leaf(value),
+                Node::Leaf { .. } => return i,
                 Node::Numeric { left, right, .. } | Node::Categorical { left, right, .. } => {
                     i = if self.goes_left(&tree.nodes[i], row) {
                         left
@@ -177,6 +177,14 @@ impl Model {
                     };
                 }
             }
+        }
+    }
+
+    /// The leaf value `row` reaches in `tree`.
+    pub fn leaf_value(&self, tree: &Tree, row: &[f64]) -> f64 {
+        match tree.nodes[self.leaf_index(tree, row)] {
+            Node::Leaf { value, .. } => self.leaf(value),
+            _ => unreachable!("a walk ends at a leaf"),
         }
     }
 

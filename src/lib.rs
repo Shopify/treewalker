@@ -98,6 +98,7 @@
 // - `predict`: the kernel, stage by stage (precompute, walk, resolve, leaf pass,
 //   finish), over the row masks of `predict::mask`;
 // - `exact`: exact sums of leaf values, in `i128` or a wide accumulator;
+// - `leaf_rows`: rows that reach every leaf, built along the decoded trees' paths;
 // - `rules`: the kernel's constants, derived from the forest and from the machine
 //   (`rules::machine`);
 // - `research`: the research API, behind the `research` feature.
@@ -108,7 +109,7 @@ mod exact;
 mod forest;
 #[cfg(feature = "layout-file")]
 mod layout_file;
-
+mod leaf_rows;
 mod load;
 mod model;
 mod predict;
@@ -131,6 +132,7 @@ mod flood;
 pub use config::{LoadOptions, WalkerConfig, WalkerConfigBuilder};
 pub use error::LoadError;
 pub use forest::Forest;
+pub use leaf_rows::{leaf_rows, leaf_rows_from_bytes};
 pub use load::parse::ModelFormat;
 pub use predictor::Predictor;
 

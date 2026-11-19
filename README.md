@@ -26,7 +26,7 @@ found [under the neurips2026-submission tag](https://github.com/Shopify/treewalk
 
 | Path | Contents |
 |---|---|
-| `src/` | inference library: the public API (`forest.rs`, `predictor.rs`, `config.rs`, `error.rs`); loading (`load/`: the Treelite decoders in `parse/`, tree order, varying predicates, the prediction layout in `layout/`); prediction (`predict/`: precompute, walk, resolve, leaf pass, finish, row masks in `mask/`); exact sums (`exact/`); the kernel's rules and the machine model (`rules/`); and the `research` API (`research/`) |
+| `src/` | inference library: the public API (`forest.rs`, `predictor.rs`, `config.rs`, `error.rs`, and `leaf_rows.rs`, rows that reach every leaf); loading (`load/`: the Treelite decoders in `parse/`, tree order, varying predicates, the prediction layout in `layout/`); prediction (`predict/`: precompute, walk, resolve, leaf pass, finish, row masks in `mask/`); exact sums (`exact/`); the kernel's rules and the machine model (`rules/`); and the `research` API (`research/`) |
 | `tests/` | the library's integration tests: import fixtures and their GTIL references, recorded output vectors (`fixtures/vectors.bin`), property tests on generated models, and small cases for Miri |
 | `experiments/benchmarks/` | separate unpublished crate: benchmark harness, `sweep_bench`, artifact correctness tests |
 | `experiments/treewalker_exp/` | `treewalker-exp`: dataset preparation, workloads, training, compiled baselines |
@@ -273,6 +273,12 @@ and a `WalkerConfig`; build one in code with
 `WalkerConfig::builder(n_features).max_group_width(w).varying([..]).build()?`.
 The builder requires the varying features, so a forgotten list is an error
 rather than every feature silently treated as constant.
+
+`leaf_rows` and `leaf_rows_from_bytes` build rows that together reach every leaf
+of a model that any input reaches, one leaf in each of several trees a row, to
+compare a model's predictions with another implementation's at every leaf: a
+layout file's with its source model's, or the forest's with the framework's that
+trained it. Random rows reach few of the leaves whose paths test several features.
 
 The supported subset includes scalar regression, ranking and binary
 classification, `identity`/`sigmoid`, sum/average aggregation, and scalar base

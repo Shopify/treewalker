@@ -9,13 +9,14 @@
 //! loads `MODEL`, its format by its extension, with the grouping configuration
 //! `CONFIG`; saves the forest's layout to `LAYOUT.twl.new`; loads that file with
 //! `Forest::load_layout`; compares its predictions with the forest's, bit for bit,
-//! on generated rows, single and in groups; and only then renames it to
-//! `LAYOUT.twl`. Loading validates that a layout is safe to run, not that it predicts
-//! as its source model does, which is what the comparison is for. The text and array
-//! caps are raised to 1 GiB, as a large model needs.
+//! on [`leaf_rows`], which reach every leaf, and on generated rows, single and in
+//! groups; and only then renames it to `LAYOUT.twl`. Loading validates that a layout
+//! is safe to run, not that it predicts as its source model does, which is what the
+//! comparison is for. The text and array caps are raised to 1 GiB, as a large model
+//! needs.
 
 use std::error::Error;
-use treewalker_gbdt::{Forest, LoadOptions};
+use treewalker_gbdt::{Forest, LoadOptions, leaf_rows};
 
 /// Rows to compare on, in each grouping.
 const ROWS: usize = 4096;
@@ -39,8 +40,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let widest = forest.config().max_group_width().min(ROWS);
     let mut widths = vec![1, widest];
     widths.dedup();
-    for width in widths {
-        let rows = rows(&forest, width);
+    // The leaf rows alone: a constant feature may differ between them.
+    let checks = std::iter::once((leaf_rows(model, config, &options)?, 1))
+        .chain(widths.into_iter().map(|width| (rows(&forest, width), width)));
+    for (rows, width) in checks {
         let predict = |forest: &Forest| {
             let mut out = vec![0.0; rows.len() / forest.config().n_features()];
             forest.predictor().predict_fixed(&rows, width, &mut out);
@@ -60,7 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     std::fs::rename(&new, layout)?;
     println!(
-        "{layout}: {} bytes; predicts as {model} on generated rows, alone and in groups of {widest}",
+        "{layout}: {} bytes; predicts as {model} at every leaf, and on generated rows alone and in groups of {widest}",
         std::fs::metadata(layout)?.len()
     );
     Ok(())
