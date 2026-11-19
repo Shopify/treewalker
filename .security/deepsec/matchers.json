@@ -2,7 +2,7 @@
   {
     "version": 1,
     "slug": "treewalker-unchecked-kernel",
-    "description": "The library's unsafe code: `unsafe` blocks and functions, `get_unchecked` indexing, raw pointer reads and raw slices in the prediction kernel (`predict/`), the exact sums (`exact/`) and the layout file's storage. Each one trusts an invariant that the loader or the calling contract must establish. A model or layout file that passes validation but breaks one is memory unsafety inside services that embed the library.",
+    "description": "The library's unsafe code: `unsafe` blocks and functions, `get_unchecked` indexing, raw pointer reads and raw slices in the prediction kernel (`predict/`), the exact sums (`exact/`) and the layout file's storage. Each one trusts an invariant that the loader or the calling contract must establish. A model or layout file that passes validation but breaks one is memory unsafety in the calling process.",
     "noiseTier": "normal",
     "filePatterns": ["src/**/*.rs"],
     "patterns": [
@@ -63,7 +63,7 @@
   {
     "version": 1,
     "slug": "treewalker-public-entry",
-    "description": "The public entry points that embedding services use: `Forest::load`, `from_bytes`, `from_reader`, the `unsafe` `map_layout`, `load_layout`, `save_layout`, and the `Predictor` calls, which check lengths and grouping before they write output. A change here moves the boundary between a returned `LoadError`, a documented panic and undefined behaviour.",
+    "description": "The public library entry points: `Forest::load`, `from_bytes`, `from_reader`, the `unsafe` `map_layout`, `load_layout`, `save_layout`, and the `Predictor` calls, which check lengths and grouping before they write output. A change here moves the boundary between a returned `LoadError`, a documented panic and undefined behaviour.",
     "noiseTier": "precise",
     "filePatterns": [
       "src/forest.rs",
